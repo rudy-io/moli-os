@@ -42,6 +42,8 @@
   "assistant.house.offline_builder": "(unreachable for now)",
   "assistant.house.camera": "(camera)",
   "assistant.house.plant": "(plant sensor: how wet its soil is, not the room's reading)",
+  "assistant.house.button": "(button: each value is a press, not a state)",
+  "assistant.house.press": "(press)",
   "assistant.tools.automation.description": "Creates an automation, as a draft, from a request: “when… then…”, “every evening at…”, “let me know if…”. An adult approves it (button on the card) before it runs. Pass the full request, in English.",
   "assistant.tools.show.description": "Chooses what the screen displays below your answer, in order. device: one device (light, plug, AC, camera, TV, speaker, sensor… the screen picks the right control). room: a whole room. energy: electricity consumption. weather: the weather. remote: a TV's remote control (the TV's id). cameras: all the cameras. history: the curve of a value (point = id/key, hours).",
   "assistant.tools.show.id": "Device id (device, remote).",
@@ -115,6 +117,8 @@
   "assistant.auto.role_circuit": "a circuit",
   "assistant.auto.role_appliance": "an appliance (metered plug)",
   "assistant.auto.role_solar": "what the solar panels produce (lifetime index)",
+  "assistant.auto.role_charge": "what goes into the home battery (index)",
+  "assistant.auto.role_discharge": "what comes out of the home battery (index)",
   "assistant.auto.role_export": "what the home sends to the grid (index)",
   "assistant.auto.meter_power": "- {name} ({role}): power in W = {power}",
   "assistant.auto.meter_energy": "- {name} ({role}): energy = {point}",
@@ -269,5 +273,6 @@
   "assistant.correct.room_lights_off": "All the lights of the room: turn off",
   "assistant.correct.room_colour": "The whole room in {colour}",
   "assistant.correct.room_covers_open": "All the shutters of the room: open",
-  "assistant.correct.room_covers_close": "All the shutters of the room: close"
+  "assistant.correct.room_covers_close": "All the shutters of the room: close",
+  "assistant.auto.role_gas": "natural gas (index, not electricity)"
 }

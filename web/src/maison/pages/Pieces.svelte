@@ -9,13 +9,15 @@
   import Icon from '../ui/Icon.svelte';
   import RoomCard from '../ui/RoomCard.svelte';
   import CoverTile from '../ui/CoverTile.svelte';
+  import ImpulseTile from '../ui/ImpulseTile.svelte';
   import FilterChips from '../ui/FilterChips.svelte';
   import { categoryOf, loadFilter } from '../lib/filters.js';
   import { floorsOf } from '../lib/floors.js';
   import { t } from '../../lib/i18n.svelte.js';
 
   let { route = 'pieces' } = $props();
-  const coversOnly = $derived(route === 'pieces/volets');
+  /** `#/pieces/volets`: the shutters' page of its own (a bookmark, a shortcut). */
+  const coversRoute = $derived(route === 'pieces/volets');
   let plan = $state(cachedPlan);
   onMount(async () => {
     try {
@@ -28,6 +30,9 @@
 
   /** Which kinds of devices show (none chosen: all). */
   let filter = $state(loadFilter('pieces-filter'));
+  /** The shutters' view (#126): its page, or the « Volets » chip alone (#171).
+   *  With other chips, the rooms show as usual. */
+  const coversOnly = $derived(coversRoute || (filter.length === 1 && filter[0] === 'volets'));
   /** Pads with their names or icons only: this device's choice. */
   let look = $state((() => {
     try {
@@ -42,15 +47,15 @@
   }
 
   const all = $derived(roomList());
-  const coverCount = $derived(all.reduce((count, room) => count + room.covers.length, 0));
+  const coverCount = $derived(all.reduce((count, room) => count + room.covers.length + room.impulses.length, 0));
   const devices = $derived(
     all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.impulses, ...r.climates, ...r.media, ...r.sensors].filter(Boolean)),
   );
 
   /** A room with only what the filter keeps; null when nothing is left. */
   function only(r) {
-    // The direct link is a temporary view, independent of saved category choices.
-    if (coversOnly) return r.covers.length ? { ...r, group: null, lights: [], plugs: [], impulses: [], climates: [], media: [], sensors: [], lit: 0 } : null;
+    // Shutters and openers only (the page keeps no saved choice of its own).
+    if (coversOnly) return r.covers.length || r.impulses.length ? { ...r, group: null, lights: [], plugs: [], climates: [], media: [], sensors: [], lit: 0 } : null;
     if (!filter.length) return r;
     const on = (id) => filter.includes(id);
     const f = {
@@ -58,8 +63,8 @@
       group: on('lumieres') ? r.group : null,
       lights: on('lumieres') ? r.lights : [],
       plugs: on('prises') ? r.plugs : [],
-      covers: on('climat') ? r.covers : [],
-      impulses: on('climat') ? r.impulses : [],
+      covers: on('volets') ? r.covers : [],
+      impulses: on('volets') ? r.impulses : [],
       climates: on('climat') ? r.climates : [],
       media: on('medias') ? r.media : [],
       sensors: r.sensors.filter((d) => on(categoryOf(d))),
@@ -82,16 +87,14 @@
 
 <div class="pieces">
   <header>
-    <h1 class="page-title">{t(coversOnly ? 'maison.pieces.volets' : 'maison.pieces.titre')}</h1>
-    <p class="page-sub">{coversOnly ? t('maison.pieces.volets_compte', { count: coverCount }) : t('maison.pieces.sous_titre')}</p>
-    {#if coversOnly}
+    <h1 class="page-title">{t(coversRoute ? 'maison.pieces.volets' : 'maison.pieces.titre')}</h1>
+    <p class="page-sub">{coversRoute ? t('maison.pieces.volets_compte', { count: coverCount }) : t('maison.pieces.sous_titre')}</p>
+    {#if coversRoute}
       <a class="section-link" href="#/pieces">{t('maison.pieces.toutes')}</a>
-    {:else if coverCount}
-      <a class="section-link" href="#/pieces/volets"><Icon name="shutter" size={18} />{t('maison.pieces.voir_volets')}</a>
     {/if}
   </header>
 
-  {#if !coversOnly}
+  {#if !coversRoute}
   <div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
     <div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
@@ -122,11 +125,14 @@
                   <span>{room.name}</span>
                   {#if protectedRoom(room.name)}<span title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}
                 </svelte:element>
-                <span class="muted">{t('maison.pieces.volets_piece', { count: room.covers.length })}</span>
+                <span class="muted">{t('maison.pieces.volets_piece', { count: room.covers.length + room.impulses.length })}</span>
               </header>
               <ul class="cover-grid" aria-label={room.name}>
                 {#each room.covers as cover (cover.id)}
                   <li><CoverTile id={cover.id} standalone /></li>
+                {/each}
+                {#each room.impulses as opener (opener.id)}
+                  <li><ImpulseTile id={opener.id} /></li>
                 {/each}
               </ul>
             </div>

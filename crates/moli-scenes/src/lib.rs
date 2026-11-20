@@ -99,7 +99,9 @@ pub enum Plain {
 }
 
 impl Plain {
-    fn value(&self) -> Value {
+    /// The value the order sends.
+    #[must_use]
+    pub fn value(&self) -> Value {
         match self {
             Self::Bool(b) => Value::Bool(*b),
             Self::Int(i) => Value::Int(*i),

@@ -12,7 +12,7 @@ host = "api.open-meteo.com"
 
 [[request]]
 id = "w"
-path = "/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=1"
+path = "/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=1"
 format = "json"
 every = "15m"
 
@@ -61,6 +61,16 @@ from = "w.current.wind_speed_10m"
 kind = "numeric"
 unit = "km/h"
 round = 0
+semantic = "wind_speed"
+
+[[point]]
+key = "wind_direction"
+label = "Direction du vent"
+from = "w.current.wind_direction_10m"
+kind = "numeric"
+unit = "°"
+round = 0
+semantic = "wind_direction"
 
 [[point]]
 key = "wind_gusts"
@@ -69,6 +79,7 @@ from = "w.current.wind_gusts_10m"
 kind = "numeric"
 unit = "km/h"
 round = 0
+semantic = "wind_gust"
 
 [[point]]
 key = "weather_code"
@@ -106,6 +117,7 @@ from = "w.daily.precipitation_sum.0"
 kind = "numeric"
 unit = "mm"
 round = 1
+semantic = "rain_today"
 
 [[point]]
 key = "today_rain_chance"

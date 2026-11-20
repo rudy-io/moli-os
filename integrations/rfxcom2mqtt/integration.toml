@@ -1,0 +1,35 @@
+[integration]
+id = "rfxcom2mqtt"
+name = "RFXcom 433 MHz (via rfxcom2mqtt)"
+# Any device rfxcom2mqtt announces through its discovery: no list per brand.
+brands = []
+models = []
+transport = "mqtt"
+driver = "rfxcom2mqtt"
+crate = "moli-rfxcom2mqtt"
+
+[discovery]
+# Devices come from the bridge's retained discovery configs, not from the network.
+mdns = []
+ssdp = []
+# The MQTT broker.
+ports = [1883]
+
+[needs]
+# A broker password, if any, comes from the environment variable named by
+# `password_env`: never from the store, never in moli.toml.
+secrets = []
+vars = []
+# Every option has a default.
+options = []
+
+[origin]
+reused = "protocole MQTT de rfxcom2mqtt (devices/…, cmd/…, bridge/status) et sa découverte Home Assistant"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-rfxcom2mqtt/src/catalog.rs).
+[[fixture]]
+file = "fixtures/discovery.json"
+
+[[fixture]]
+file = "fixtures/states.json"

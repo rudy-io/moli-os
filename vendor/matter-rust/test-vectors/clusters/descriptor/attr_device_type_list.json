@@ -1,0 +1,10 @@
+{
+  "cluster": "Descriptor",
+  "cluster_id": 29,
+  "attribute": "DeviceTypeList",
+  "attribute_id": 0,
+  "type": "list[DeviceTypeStruct]",
+  "writable": false,
+  "note": "list of structs: [{ DeviceType(0)=256, Revision(1)=1 }]",
+  "value_tlv_b64": "FhUlAAABJAEBGBg="
+}

@@ -1,0 +1,6 @@
+{
+  "_source": "Matter Core Specification §4.3.2.2 (Compressed Fabric Identifier) worked example, as encoded in connectedhomeip src/crypto/tests/TestChipCryptoPAL.cpp::TestCompressedFabricIdentifier (kRootPublicKey / kFabricId / kExpectedCompressedFabricIdentifier).",
+  "root_public_key_hex": "044a9f42b1ca4840d37292bbc7f6a7e11e22200c976fc900dbc98a7a383a641cb8254a2e56d4e295a847943b4e3897c4a773e930277b4d9fbede8a052686bfacfa",
+  "fabric_id": "0x2906C908D115D362",
+  "expected_compressed_fabric_id_hex": "87e1b004e235a130"
+}

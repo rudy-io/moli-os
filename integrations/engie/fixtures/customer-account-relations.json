@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "id": "rel-1",
+      "admin": true,
+      "customerAccount": {
+        "customerAccountNumber": "000000000001",
+        "name": "Exemple",
+        "segment": "B2C",
+        "language": "FR",
+        "businessAgreements": [
+          {
+            "businessAgreementNumber": "000000000002",
+            "active": true,
+            "consumptionAddress": {"street": "Rue Exemple", "houseNumber": "1", "postalCode": "1000", "city": "Exempleville"},
+            "electricityContract": {"hasSmartMeter": true, "active": true, "hasSolar": true},
+            "gasContract": {"hasSmartMeter": true, "active": true}
+          },
+          {
+            "businessAgreementNumber": "000000000003",
+            "active": false,
+            "consumptionAddress": {"street": "Ancienne rue", "houseNumber": "2", "city": "Exempleville"}
+          }
+        ]
+      }
+    }
+  ]
+}

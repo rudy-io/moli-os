@@ -48,7 +48,7 @@ qu'un intermédiaire lui passe en clair.
 | I1 | **Refus par défaut** : un chemin d'accès ou une route non déclarés sont refusés. | Prouvé pour les routes : `crates/moli-api/tests/routes.txt` et `routes.rs`. Entrées : étape 2. |
 | I2 | **La position réseau ne prouve l'identité** que sur le réseau de la maison et les VPN déclarés. | Tests de `caller.rs` ; entrées déclarées : étape 2. |
 | I3 | **L'identité est une preuve cryptographique** vérifiée par Moli (mot de passe, assertion signée, plus tard passkey), jamais un en-tête en clair. | Assertion Cloudflare Access : tests de `access.rs`. Générique : étape 4. |
-| I4 | **Moindre privilège** : les droits à distance sont un sous-ensemble des droits à la maison ; MCP reste à la maison sauf choix contraire. | Colonne `distant` de `routes.txt` (MCP `non` vérifié) ; appliquée aux entrées distantes : étape 2. |
+| I4 | **Moindre privilège** : les droits à distance sont un sous-ensemble des droits à la maison ; MCP reste à la maison sauf choix contraire ; un agent qui n'a qu'à lire se branche sur `/mcp/readonly` (les 3 outils d'écriture n'y existent pas), et la maison coupe un outil pour tous (`[mcp] disabled_tools`). | Colonne `distant` de `routes.txt` (`/mcp` et `/mcp/readonly` `non`, vérifié) ; outils absents et refusés vérifiés par `tests/http.rs` (`mcp_readonly_route_refuses_every_write`, `mcp_tool_switched_off_by_the_house_is_gone`) ; appliquée aux entrées distantes : étape 2. |
 | I5 | **Échec fermé** : config invalide, fournisseur d'identité injoignable, fichier illisible = refus, jamais ouverture ; un fichier illisible n'est jamais écrasé. | `a_file_that_is_not_valid_is_never_overwritten` (règles de l'assistant), tests de `people.rs`, `a_trim_keeps_the_lines_it_could_not_read_aside` (historique des automatismes) ; entrées : étape 2. |
 | I6 | **Sûr par défaut** : l'accès distant est coupé tant qu'aucune entrée n'est déclarée ; les combinaisons dangereuses sont refusées au démarrage. | `check-config` : étape 2. |
 | I7 | **Indépendance locale** : rien de la maison ne dépend de l'accès distant ni d'un compteur ; un bouton coupe tout le distant. | Étape 3. |
@@ -95,6 +95,43 @@ Preuves : les tests `airzone_control_requires_a_fresh_code_in_the_request_not_on
 tests de modes dans `crates/moli-os/src/managed_airzone/tests/modes.rs` ;
 `legacy_restore_clears_newer_airzone_registry_but_preserves_unrelated_omissions` dans
 `crates/moli-os/src/backup.rs`.
+
+### Garde : le code à chaque fois, ce que les agents peuvent
+
+Deux règles de `[guard]`, écrites par une personne dans le fichier, jamais par un agent :
+
+- `[[guard.code_each_time]]` (point + valeurs, toutes si aucune) : cet ordre attend le code
+  tapé pour lui, même d'une personne dont la session est ouverte (désarmer l'alarme). Il reste
+  en attente ; valider sans code est refusé (`CodeNeeded`) et il attend toujours. Le code
+  arrive dans la demande de validation (`pin`), vérifié comme à la connexion et avec le même
+  compteur d'essais, et seulement pour une personne en session (sans session, aucun code n'est
+  essayé). Seul un automatisme validé passe sans : **le valider ou l'allumer demande donc le code**
+  dès qu'il porte un tel ordre (un `toggle` sur le point compte), une session seule ne suffit
+  pas. Les ordres que la maison envoie en son nom (`system` : scènes, luminaires, charges
+  pilotées) sont retenus comme les autres, et une scène ou une charge qui en viserait un est
+  refusée au démarrage. La valeur se compare par son sens, une fois validée pour le point.
+- `[[guard.agents_may]]` (point + valeurs) : un agent (l'assistant, une voix, MCP, un script)
+  peut donner cet ordre lui-même sur une commande ou un appareil protégé, sans qu'une personne
+  le valide (armer l'alarme à la voix). Les pièces protégées et les heures calmes s'appliquent
+  toujours, et une valeur non listée attend une personne comme avant. Donc sans effet avec
+  `dashboard = "pin"` (tout ordre y attend le code), ni avec `protect_unassigned` pour un
+  appareil sans pièce.
+
+Sans ces sections, rien ne change. Preuves : `some_orders_want_the_code_each_time_even_from_a_session`,
+`the_house_s_own_orders_and_toggles_want_the_code_each_time_too` et
+`agents_may_what_a_person_allowed_them_in_the_file` dans `crates/moli-runtime/tests/hub.rs` ;
+`a_rule_reads_the_value_by_meaning_not_by_spelling` dans `crates/moli-runtime/src/guard.rs` ;
+`the_code_on_a_decision_is_tried_only_in_a_session` (code faux, compteur partagé avec la
+connexion, code juste sans session) et `an_automation_that_disarms_is_approved_with_the_code`
+dans `crates/moli-api/tests/household.rs` ;
+`a_scene_never_carries_an_order_that_wants_the_code_each_time` dans `crates/moli-os/src/config.rs`.
+
+Limite connue : un automatisme validé **avant** qu'une règle `code_each_time` soit écrite
+continue de tourner ; après avoir ajouté la règle, le revalider (avec le code). Moli les nomme
+au démarrage (avertissement au journal) : la validation retient si le code a été tapé
+(`approved_with_code`, hors de l'empreinte, jamais repris de ce qui est enregistré). Un
+automatisme validé avant cette version est nommé aussi tant qu'il n'est pas revalidé. Preuve :
+`an_automation_approved_before_the_rule_is_named_at_start` dans `crates/moli-automation/tests/engine.rs`.
 
 ## 5. Règles de conception
 

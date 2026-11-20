@@ -1,6 +1,7 @@
 <script>
   import { home, value, num } from '../lib/home.svelte.js';
   import { weatherOf } from '../lib/icons.js';
+  import { readOutside } from '../lib/outside.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
 
@@ -13,13 +14,13 @@
 <a class="card weather" href="#/dehors" class:night={!day}>
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d={sky.icon} /></svg>
   <div class="main">
-    <strong class="num">{num(value(w, 'temperature'))}°</strong>
+    <strong class="num">{num(readOutside(value, 'temperature', w))}°</strong>
     <span>{sky.label}</span>
     <small class="muted">{t('moli.meteo.extremes', { max: num(value(w, 'today_max')), min: num(value(w, 'today_min')) })}</small>
   </div>
   <ul>
     <li><Icon name="water" size={16} />{t('moli.meteo.pluie', { chance: num(value(w, 'today_rain_chance')) })}</li>
-    <li><Icon name="wind" size={16} />{num(value(w, 'wind_speed'))} km/h</li>
+    <li><Icon name="wind" size={16} />{num(readOutside(value, 'wind_speed', w))} km/h</li>
     <li><Icon name={day ? 'sunset' : 'sunrise'} size={16} />{day ? hhmm(value(w, 'sunset')) : hhmm(value(w, 'sunrise'))}</li>
   </ul>
 </a>

@@ -134,6 +134,19 @@ fn device(id: &DeviceId, instance: &InstanceId, config: &crate::Config) -> Devic
             money(),
         ),
     ];
+    if config
+        .meters
+        .iter()
+        .any(|m| matches!(m.role, crate::Role::Charge | crate::Role::Discharge))
+    {
+        for key in ["today_battery_charge_kwh", "today_battery_discharge_kwh"] {
+            points.push(number(
+                key,
+                &moli_i18n::tr!(&format!("serveur.energie.point.{key}")),
+                Unit::KiloWattHour,
+            ));
+        }
+    }
     if config.meters.iter().any(|m| m.role == crate::Role::Solar) {
         for (key, unit) in [
             ("today_production_kwh", Unit::KiloWattHour),
@@ -238,6 +251,12 @@ fn readings(
         summary.month.total.cost,
     );
     solar(&mut out, &summary.today, "today");
+    if let Some(c) = &summary.today.battery_charge {
+        out.push(("today_battery_charge_kwh", Value::Float(round2(c.kwh))));
+    }
+    if let Some(d) = &summary.today.battery_discharge {
+        out.push(("today_battery_discharge_kwh", Value::Float(round2(d.kwh))));
+    }
     solar(&mut out, &summary.month, "month");
     let bill = summary.month_projection.as_ref().and_then(|p| {
         out.push(("projection_kwh", Value::Float(round2(p.kwh))));
@@ -312,6 +331,9 @@ mod tests {
             unmeasured: None,
             production: None,
             export: None,
+            gas: None,
+            battery_charge: None,
+            battery_discharge: None,
             solar: None,
         }
     }
@@ -327,6 +349,7 @@ mod tests {
             meters: Vec::new(),
             live: None,
             flows: None,
+            battery: None,
             today: period(month_from, 9.876, Some(1.5)),
             yesterday: period(month_from, 12.0, None),
             month: period(month_from, 120.0, Some(20.0)),

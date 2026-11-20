@@ -97,7 +97,7 @@
 
   .rhythm.on {
     background: var(--warm);
-    color: #3a2a10;
+    color: var(--warm-deep);
   }
 
   /* It scrolls within its parent, never widens it. */

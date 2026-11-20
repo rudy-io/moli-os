@@ -1,0 +1,15 @@
+{
+  "intent": "11-digit form, another value",
+  "input": {
+    "version": 0,
+    "vendor_id": null,
+    "product_id": null,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [],
+    "discriminator": 2560,
+    "passcode": 12345679
+  },
+  "expected": {
+    "manual": "24129507533"
+  }
+}

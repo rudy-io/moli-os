@@ -4,7 +4,10 @@
 //! version, uptime, inference speed, detection rate, GPU and CPU load). No
 //! HTTP, no credentials: the same broker Zigbee2MQTT uses.
 
-use std::collections::BTreeSet;
+mod go2rtc;
+mod review;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use moli_core::{Access, Device, Kind, PointSpec, Semantic, Value};
@@ -44,6 +47,238 @@ pub struct Config {
     /// port).
     #[serde(default = "default_api")]
     pub api: String,
+    /// A go2rtc serving these cameras (`http://host:1984`): their live video
+    /// (WebRTC, played by the browser) and their images, instead of the API.
+    #[serde(default)]
+    pub go2rtc: Option<String>,
+    /// Frigate camera → its stream on that go2rtc, when the names differ.
+    #[serde(default)]
+    pub streams: BTreeMap<String, String>,
+    /// Frigate's authenticated API, for the cameras' past (events,
+    /// recordings, zones): a « viewer » account, its password in the vault
+    /// (`password`), Frigate's certificate pinned on first contact.
+    #[serde(default)]
+    pub review: Option<ReviewConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewConfig {
+    pub host: String,
+    #[serde(default = "default_review_port")]
+    pub port: u16,
+    #[serde(default = "default_review_user")]
+    pub user: String,
+    /// Frigate's certificate fingerprint (SHA-256, hex), written by a
+    /// person: it wins over the one pinned on first contact, for whoever
+    /// wants no trust on first use.
+    #[serde(default)]
+    pub cert_sha256: Option<String>,
+}
+
+fn default_review_port() -> u16 {
+    8971
+}
+
+fn default_review_user() -> String {
+    "moli".into()
+}
+
+/// The vault's names for the review API.
+const PASSWORD: &str = "password";
+const CERTIFICATE: &str = "certificate";
+
+/// Frigate's API for the past, as the start found it.
+enum Review {
+    Ready(std::sync::Arc<review::Api>),
+    /// Frigate shows another certificate than the pinned one: the driver
+    /// stops and says why (never pinned again on its own).
+    Changed(String),
+    /// Not usable yet (no password, Frigate unreachable on first contact):
+    /// why, while the driver tries again.
+    NotYet(String),
+}
+
+/// First wait before trying `review` again, and the longest.
+const RETRY_FIRST: Duration = Duration::from_secs(5);
+const RETRY_MAX: Duration = Duration::from_secs(300);
+
+/// Lowercase hex without separators, as `moli-net` compares fingerprints.
+fn normalize(fingerprint: &str) -> String {
+    fingerprint
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// What to do when Frigate shows another certificate. The full
+/// fingerprints, not secret, go to the log; the message tells how to accept
+/// it, once a person checked it is Frigate (only from the machine Moli runs
+/// on, or the configuration).
+fn certificate_changed(
+    r: &ReviewConfig,
+    instance: &moli_core::InstanceId,
+    pinned: &str,
+    seen: Option<&str>,
+) -> String {
+    tracing::warn!(
+        instance = %instance,
+        pinned = %normalize(pinned),
+        seen = %seen.map(normalize).unwrap_or_default(),
+        "frigate certificate changed: driver stopped, password not sent"
+    );
+    let short = |f: &str| normalize(f).chars().take(16).collect::<String>() + "…";
+    let pinned = short(pinned);
+    let seen = seen.map_or_else(
+        || moli_i18n::tr!("pilotes.frigate.empreinte_inconnue"),
+        short,
+    );
+    if r.cert_sha256.is_some() {
+        moli_i18n::tr!(
+            "pilotes.frigate.certificat_change_config",
+            host = r.host,
+            pinned = pinned,
+            seen = seen
+        )
+    } else {
+        moli_i18n::tr!(
+            "pilotes.frigate.certificat_change",
+            host = r.host,
+            pinned = pinned,
+            seen = seen,
+            instance = instance,
+            key = CERTIFICATE
+        )
+    }
+}
+
+/// With `review` set, Frigate's API for the past, tried again with a
+/// growing pause until it is usable: the driver never goes on without it
+/// (never back to go2rtc, which has no password, for the whole run).
+/// `Ok(None)`: no `review`; `Err(Some(why))`: the certificate changed, the
+/// driver stops on it; `Err(None)`: Moli stops.
+async fn review_when_ready(
+    config: &Config,
+    ctx: &DriverCtx,
+) -> Result<Option<std::sync::Arc<review::Api>>, Option<String>> {
+    let Some(r) = config.review.as_ref() else {
+        return Ok(None);
+    };
+    let mut pause = RETRY_FIRST;
+    loop {
+        match review_api(r, ctx).await {
+            Review::Ready(api) => return Ok(Some(api)),
+            Review::Changed(why) => return Err(Some(why)),
+            Review::NotYet(why) => {
+                ctx.wait_for(why);
+                tokio::select! {
+                    () = ctx.cancelled() => return Err(None),
+                    () = tokio::time::sleep(pause) => {}
+                }
+                pause = (pause * 2).min(RETRY_MAX);
+            }
+        }
+    }
+}
+
+/// Frigate's API for the past, as this attempt found it.
+async fn review_api(r: &ReviewConfig, ctx: &DriverCtx) -> Review {
+    let not_yet = || {
+        Review::NotYet(moli_i18n::tr!(
+            "pilotes.frigate.passe_injoignable",
+            host = r.host
+        ))
+    };
+    let Some(password) = ctx.secret(PASSWORD) else {
+        tracing::warn!(instance = %ctx.instance(), "frigate review: no password in the vault (moli-os secrets set <instance> password)");
+        return Review::NotYet(moli_i18n::tr!(
+            "pilotes.frigate.passe_sans_mot_de_passe",
+            instance = ctx.instance(),
+            key = PASSWORD
+        ));
+    };
+    let written = r.cert_sha256.as_deref().map(normalize);
+    let pin = if let Some(pin) = written.or_else(|| ctx.secret(CERTIFICATE)) {
+        // Checked now, before anything is sent: a changed certificate stops
+        // the driver at start, not at the first image asked.
+        let Ok(probe) = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin.clone())) else {
+            return not_yet();
+        };
+        match probe.handshake().await {
+            Err(e) if format!("{e:#}").contains(moli_net::PIN_MISMATCH) => {
+                let seen = probe.seen_fingerprint();
+                return Review::Changed(certificate_changed(
+                    r,
+                    ctx.instance(),
+                    &pin,
+                    seen.as_deref(),
+                ));
+            }
+            // Unreachable for now: the requests will say so, and a changed
+            // certificate is still noticed on them.
+            _ => pin,
+        }
+    } else {
+        // First contact: pin the certificate before any password is sent.
+        let Ok(probe) = moli_net::PinnedHttps::new(&r.host, r.port, None) else {
+            return not_yet();
+        };
+        if let Err(e) = probe.handshake().await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: Frigate unreachable");
+            return not_yet();
+        }
+        let Some(seen) = probe.seen_fingerprint() else {
+            return not_yet();
+        };
+        if let Err(e) = ctx.store_secret(CERTIFICATE, &seen).await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: cannot pin the certificate");
+            return not_yet();
+        }
+        seen
+    };
+    let Ok(https) = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin)) else {
+        return not_yet();
+    };
+    let api = std::sync::Arc::new(review::Api::new(https, r.user.clone(), password));
+    // In the background: the session and the live streams, before anyone
+    // opens a camera.
+    let warming = std::sync::Arc::clone(&api);
+    tokio::spawn(async move { warming.warm().await });
+    Review::Ready(api)
+}
+
+/// Waits until Frigate shows another certificate (never, without `review`).
+async fn certificate_lost(
+    rx: Option<&mut tokio::sync::watch::Receiver<Option<review::Changed>>>,
+) -> review::Changed {
+    if let Some(rx) = rx
+        && let Ok(changed) = rx.wait_for(Option::is_some).await
+        && let Some(changed) = changed.clone()
+    {
+        return changed;
+    }
+    std::future::pending().await
+}
+
+/// While running, Frigate showed another certificate: why the driver stops.
+fn stopped_on(config: &Config, ctx: &DriverCtx, changed: &review::Changed) -> String {
+    let Some(r) = config.review.as_ref() else {
+        return String::new();
+    };
+    let pinned = r
+        .cert_sha256
+        .clone()
+        .or_else(|| ctx.secret(CERTIFICATE))
+        .unwrap_or_default();
+    certificate_changed(r, ctx.instance(), &pinned, changed.seen.as_deref())
+}
+
+/// Stopped, saying why, until Moli stops or restarts.
+async fn park(ctx: &DriverCtx, reason: String) -> anyhow::Result<()> {
+    ctx.wait_for(reason);
+    ctx.cancelled().await;
+    Ok(())
 }
 
 fn default_api() -> String {
@@ -98,9 +333,51 @@ pub struct Frigate {
 }
 
 impl Frigate {
-    #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    /// Checks the configuration.
+    ///
+    /// # Errors
+    /// See [`Config::check`].
+    pub fn new(config: Config) -> anyhow::Result<Self> {
+        config.check()?;
+        Ok(Self { config })
+    }
+}
+
+impl Config {
+    /// A go2rtc address is `http://host[:port]`, without credentials: Moli
+    /// speaks to go2rtc without any (its API has none by default), and an
+    /// address carrying some would end up in error messages. A stream name
+    /// is a plain name. The messages never repeat the address.
+    ///
+    /// # Errors
+    /// A go2rtc address Moli cannot use, or a stream name that is not one.
+    pub fn check(&self) -> anyhow::Result<()> {
+        if let Some(url) = &self.go2rtc {
+            let at = moli_net::upnp::Location::parse(url)
+                .filter(|at| !at.host.is_empty() && at.path.trim_end_matches('/').is_empty());
+            let Some(at) = at else {
+                anyhow::bail!("frigate: go2rtc is an address like http://host:1984");
+            };
+            anyhow::ensure!(
+                !at.host.contains('@'),
+                "frigate: no credentials in the go2rtc address (keep go2rtc on the home network)"
+            );
+        }
+        if let Some(fingerprint) = self.review.as_ref().and_then(|r| r.cert_sha256.as_deref()) {
+            anyhow::ensure!(
+                normalize(fingerprint).len() == 64,
+                "frigate: review.cert_sha256 is a SHA-256 fingerprint (64 hex digits)"
+            );
+        }
+        for (camera, stream) in &self.streams {
+            anyhow::ensure!(
+                !stream.trim().is_empty()
+                    && stream.len() <= 100
+                    && !stream.chars().any(char::is_control),
+                "frigate: streams.{camera}: a go2rtc stream name"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -171,6 +448,83 @@ fn camera_device(ctx: &DriverCtx, camera: &str) -> Device {
         native_room: None,
         members: Vec::new(),
         points,
+    }
+}
+
+/// A zone's native id: `zone.<name>`. Frigate never puts a dot in a
+/// camera's name (`review::is_camera`), so a zone and a camera never share
+/// an id.
+fn zone_id(zone: &str) -> String {
+    format!("zone.{zone}")
+}
+
+/// Whether one of this instance's devices is a zone (`<instance>:zone.…`).
+fn is_zone_device(instance: &str, id: &str) -> bool {
+    id.strip_prefix(instance)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|native| native.starts_with("zone."))
+}
+
+/// A zone drawn on a camera, as a device: how many people, cars… stand in
+/// it now (Frigate's counts for the zone). A sensor for the alarm (a count
+/// above 0 is active).
+fn zone_device(ctx: &DriverCtx, zone: &str, of: &review::ZoneOf) -> Device {
+    let points = OBJECTS
+        .iter()
+        .map(|(key, label)| {
+            let mut p = spec(
+                key,
+                &moli_i18n::tr(label),
+                Kind::Numeric {
+                    min: Some(0.0),
+                    max: None,
+                    step: Some(1.0),
+                },
+                false,
+            );
+            p.semantic = Semantic::Occupancy;
+            p
+        })
+        .collect();
+    Device {
+        id: ctx.device_id(&zone_id(zone)),
+        instance: ctx.instance().clone(),
+        native_name: moli_i18n::tr!(
+            "pilotes.frigate.zone_nom",
+            zone = of.name,
+            camera = of.camera.replace('_', " ")
+        )
+        .into(),
+        manufacturer: Some("Frigate".into()),
+        model: Some(moli_i18n::tr!("pilotes.frigate.zone").into()),
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points,
+    }
+}
+
+/// Frigate's zones, read once from its configuration in the background,
+/// tried again with a growing pause while Frigate does not answer. Stops
+/// as soon as nobody waits for them (the driver stopped).
+async fn read_zones(
+    api: std::sync::Arc<review::Api>,
+    mut tx: tokio::sync::oneshot::Sender<BTreeMap<String, review::ZoneOf>>,
+) {
+    let mut pause = RETRY_FIRST;
+    loop {
+        match api.zones().await {
+            Ok(zones) => {
+                let _ = tx.send(zones);
+                return;
+            }
+            Err(e) => tracing::debug!(error = %e, "frigate: zones not read yet"),
+        }
+        tokio::select! {
+            () = tx.closed() => return,
+            () = tokio::time::sleep(pause) => {}
+        }
+        pause = (pause * 2).min(RETRY_MAX);
     }
 }
 
@@ -298,6 +652,11 @@ enum Update<'a> {
 
 fn parse<'a>(rest: &'a str, payload: &str) -> Option<Update<'a>> {
     let parts: Vec<&str> = rest.split('/').collect();
+    // A name Frigate would refuse comes from something else on the
+    // network: never a camera, never in a path or a query to Frigate.
+    if !review::is_camera(parts.first()?) {
+        return None;
+    }
     let on = |p: &str| match p {
         "ON" => Some(true),
         "OFF" => Some(false),
@@ -357,9 +716,23 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let (client, mut events) = AsyncClient::new(options, 32);
     let base = config.base_topic.trim_end_matches('/').to_owned();
     let api = moli_net::upnp::Location::parse(&config.api);
-    let mut cameras: BTreeSet<String> = BTreeSet::new();
-    let mut available = true;
-    let mut server = false;
+    let review = match review_when_ready(config, ctx).await {
+        Ok(api) => api,
+        Err(Some(reason)) => return park(ctx, reason).await,
+        Err(None) => return Ok(()),
+    };
+    let mut certificate = review.as_ref().map(|api| api.certificate_changed());
+    // With `review`, the zones become devices once Frigate's configuration
+    // is read: zone → its camera and name.
+    let mut zones_coming = review.as_ref().map(|api| {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(read_zones(std::sync::Arc::clone(api), tx));
+        rx
+    });
+    let mut seen = Seen {
+        available: true,
+        ..Seen::default()
+    };
     let mut connected = false;
     let mut paused_until: Option<tokio::time::Instant> = None;
     ctx.ready();
@@ -368,11 +741,31 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
                 if connected {
-                    reply(&client, &base, ctx, &cameras, command);
+                    reply(&client, &base, ctx, &seen.cameras, command);
                 } else {
                     // Queued now, sent hours later: refuse instead.
                     command.reply(Err(moli_i18n::tr!("pilotes.frigate.broker_injoignable")));
                 }
+            }
+            found = async { zones_coming.as_mut().expect("guarded").await }, if zones_coming.is_some() => {
+                zones_coming = None;
+                let Ok(found) = found else { continue };
+                // A zone gone from Frigate's configuration leaves Moli too
+                // (`zone.` is never a camera's id, nor the server's).
+                let keep: Vec<_> = found.keys().map(|z| ctx.device_id(&zone_id(z))).collect();
+                for id in ctx.known_devices() {
+                    if is_zone_device(ctx.instance().as_str(), id.as_str()) && !keep.contains(&id) {
+                        ctx.remove_device(&id);
+                    }
+                }
+                for (zone, of) in &found {
+                    ctx.upsert_device(zone_device(ctx, zone, of));
+                    ctx.set_availability(&ctx.device_id(&zone_id(zone)), seen.available && connected);
+                }
+                seen.zones = found;
+            }
+            changed = certificate_lost(certificate.as_mut()) => {
+                return park(ctx, stopped_on(config, ctx, &changed)).await;
             }
             () = async { tokio::time::sleep_until(paused_until.unwrap_or_else(tokio::time::Instant::now)).await }, if paused_until.is_some() => {
                 paused_until = None;
@@ -389,60 +782,157 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 Ok(Event::Incoming(Packet::Publish(publish))) => {
                     let Some(rest) = publish.topic.strip_prefix(&format!("{base}/")) else { continue };
                     let payload = String::from_utf8_lossy(&publish.payload);
-                    if rest == "available" {
-                        available = payload == "online";
-                        for camera in &cameras {
-                            ctx.set_availability(&ctx.device_id(camera), available);
-                        }
-                        if server {
-                            ctx.set_state(&ctx.device_id(SERVER), "running", Value::Bool(available));
-                        }
-                        continue;
-                    }
-                    if rest == "stats" {
-                        let id = ctx.device_id(SERVER);
-                        if !server {
-                            server = true;
-                            ctx.upsert_device(server_device(ctx));
-                            ctx.set_state(&id, "running", Value::Bool(available));
-                        }
-                        for (key, value) in parse_stats(&payload) {
-                            ctx.set_state(&id, key, value);
-                        }
-                        continue;
-                    }
-                    let Some(Update::Value(camera, key, value)) = parse(rest, &payload) else { continue };
-                    if !cameras.contains(camera) {
-                        if !names_a_camera(key) {
-                            continue; // a zone, or not a camera yet
-                        }
-                        cameras.insert(camera.to_owned());
-                        ctx.upsert_device(camera_device(ctx, camera));
-                        if let Some(api) = &api {
-                            ctx.provide_snapshots(
-                                &ctx.device_id(camera),
-                                std::sync::Arc::new(CameraImages {
-                                    host: api.host.clone(),
-                                    port: api.port,
-                                    camera: camera.to_owned(),
-                                }),
-                            );
-                        }
-                        ctx.set_availability(&ctx.device_id(camera), available);
-                    }
-                    ctx.set_state(&ctx.device_id(camera), key, value);
+                    seen.publish(ctx, config, rest, &payload, api.as_ref(), review.as_ref());
                 }
                 Ok(_) => {}
                 Err(e) => {
                     connected = false;
                     tracing::debug!(instance = %ctx.instance(), error = %e, "frigate broker unreachable");
-                    for camera in &cameras {
-                        ctx.set_availability(&ctx.device_id(camera), false);
+                    for id in device_ids(&seen.cameras, &seen.zones) {
+                        ctx.set_availability(&ctx.device_id(&id), false);
                     }
                     paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                 }
             },
         }
+    }
+}
+
+/// What the driver has learnt from Frigate so far.
+#[derive(Default)]
+struct Seen {
+    cameras: BTreeSet<String>,
+    /// With `review`: zone → its camera and name.
+    zones: BTreeMap<String, review::ZoneOf>,
+    /// `frigate/available`.
+    available: bool,
+    /// The server's device, declared at the first `stats`.
+    server: bool,
+}
+
+impl Seen {
+    /// One message of Frigate's, `rest` below the base topic.
+    fn publish(
+        &mut self,
+        ctx: &DriverCtx,
+        config: &Config,
+        rest: &str,
+        payload: &str,
+        api: Option<&moli_net::upnp::Location>,
+        review: Option<&std::sync::Arc<review::Api>>,
+    ) {
+        if rest == "available" {
+            self.available = payload == "online";
+            for id in device_ids(&self.cameras, &self.zones) {
+                ctx.set_availability(&ctx.device_id(&id), self.available);
+            }
+            if self.server {
+                ctx.set_state(
+                    &ctx.device_id(SERVER),
+                    "running",
+                    Value::Bool(self.available),
+                );
+            }
+            return;
+        }
+        if rest == "stats" {
+            let id = ctx.device_id(SERVER);
+            if !self.server {
+                self.server = true;
+                ctx.upsert_device(server_device(ctx));
+                ctx.set_state(&id, "running", Value::Bool(self.available));
+            }
+            for (key, value) in parse_stats(payload) {
+                ctx.set_state(&id, key, value);
+            }
+            return;
+        }
+        let Some(Update::Value(camera, key, value)) = parse(rest, payload) else {
+            return;
+        };
+        // Frigate never names a zone as a camera: its counts are the zone's.
+        if self.zones.contains_key(camera) {
+            ctx.set_state(&ctx.device_id(&zone_id(camera)), key, value);
+            return;
+        }
+        if !self.cameras.contains(camera) {
+            if !names_a_camera(key) {
+                return; // a zone (without `review`), or not a camera yet
+            }
+            self.cameras.insert(camera.to_owned());
+            ctx.upsert_device(camera_device(ctx, camera));
+            provide_media(ctx, config, camera, api, review);
+            ctx.set_availability(&ctx.device_id(camera), self.available);
+        }
+        ctx.set_state(&ctx.device_id(camera), key, value);
+    }
+}
+
+/// The native ids of the cameras and zones seen so far.
+fn device_ids(cameras: &BTreeSet<String>, zones: &BTreeMap<String, review::ZoneOf>) -> Vec<String> {
+    cameras
+        .iter()
+        .cloned()
+        .chain(zones.keys().map(|z| zone_id(z)))
+        .collect()
+}
+
+/// Where a camera's images, live video and past come from. With `review`,
+/// all three through Frigate's authenticated port: no go2rtc is spoken to.
+/// Without it, the go2rtc when one is set (the house's explicit choice),
+/// else Frigate's internal API for the images.
+fn provide_media(
+    ctx: &DriverCtx,
+    config: &Config,
+    camera: &str,
+    api: Option<&moli_net::upnp::Location>,
+    review: Option<&std::sync::Arc<review::Api>>,
+) {
+    let go2rtc = config
+        .go2rtc
+        .as_deref()
+        .and_then(moli_net::upnp::Location::parse);
+    let stream_name = || {
+        config
+            .streams
+            .get(camera)
+            .cloned()
+            .unwrap_or_else(|| camera.to_owned())
+    };
+    if let Some(api) = review {
+        let id = ctx.device_id(camera);
+        ctx.provide_review(
+            &id,
+            std::sync::Arc::new(review::Camera {
+                api: std::sync::Arc::clone(api),
+                name: camera.to_owned(),
+            }),
+        );
+        let seen = std::sync::Arc::new(review::Seen {
+            api: std::sync::Arc::clone(api),
+            camera: camera.to_owned(),
+        });
+        ctx.provide_snapshots(&id, seen.clone());
+        ctx.provide_live(&id, seen);
+        return;
+    }
+    if let Some(g) = go2rtc {
+        let stream = std::sync::Arc::new(go2rtc::Stream {
+            host: g.host.clone(),
+            port: g.port,
+            name: stream_name(),
+        });
+        ctx.provide_snapshots(&ctx.device_id(camera), stream.clone());
+        ctx.provide_live(&ctx.device_id(camera), stream);
+    } else if let Some(api) = api {
+        ctx.provide_snapshots(
+            &ctx.device_id(camera),
+            std::sync::Arc::new(CameraImages {
+                host: api.host.clone(),
+                port: api.port,
+                camera: camera.to_owned(),
+            }),
+        );
     }
 }
 
@@ -502,7 +992,36 @@ mod tests {
         );
         assert_eq!(parse("jardin/motion_threshold/state", "30"), None);
         assert_eq!(parse("jardin/unicorn", "1"), None);
+        // A name Frigate would refuse is never a camera.
+        assert_eq!(parse("x&cameras=chambre/motion", "ON"), None);
+        assert_eq!(parse("../motion", "ON"), None);
         assert_eq!(parse("stats", "{}"), None);
+    }
+
+    #[test]
+    fn a_zone_never_shares_a_cameras_id() {
+        // Camera names may hold a dash: `zone-x` could be one; never `zone.x`.
+        assert!(review::is_camera("zone-allee"));
+        assert!(!review::is_camera(&zone_id("allee")));
+        let cameras = BTreeSet::from(["portail".to_owned()]);
+        let zones = BTreeMap::from([(
+            "allee".to_owned(),
+            review::ZoneOf {
+                camera: "portail".into(),
+                name: "Allée".into(),
+            },
+        )]);
+        assert_eq!(device_ids(&cameras, &zones), ["portail", "zone.allee"]);
+        // Only zones are ever removed when gone from Frigate.
+        assert!(is_zone_device("frigate", "frigate:zone.allee"));
+        assert!(!is_zone_device("frigate", "frigate:zone-allee"));
+        assert!(!is_zone_device("frigate", "frigate:frigate-server"));
+        assert!(!is_zone_device("frigate", "frigate2:zone.allee"));
+        // A zone's counts read as a camera's: the loop gives them to the zone.
+        assert_eq!(
+            parse("allee/person", "1"),
+            Some(Update::Value("allee", "person", Value::Int(1)))
+        );
     }
 
     #[test]
@@ -523,5 +1042,69 @@ mod tests {
         assert_eq!(v["gpu_load"], Value::Float(7.5));
         assert_eq!(v["cpu_load"], Value::Float(14.0));
         assert!(parse_stats("not json").is_empty());
+    }
+
+    #[test]
+    fn a_go2rtc_address_carries_no_credentials() {
+        let config = |go2rtc: &str| -> Config {
+            serde_json::from_value(serde_json::json!({ "go2rtc": go2rtc })).unwrap()
+        };
+        assert!(config("http://nvr.example:1984").check().is_ok());
+        assert!(config("http://nvr.example:1984/").check().is_ok());
+        let error = config("http://admin:secret@example.com:1984")
+            .check()
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"), "{error}");
+        for bad in [
+            "nvr.example:1984",
+            "https://nvr.example",
+            "http://nvr.example:1984/api",
+        ] {
+            let error = config(bad).check().unwrap_err().to_string();
+            assert!(!error.contains("nvr.example"), "{error}");
+        }
+        let named: Config =
+            serde_json::from_value(serde_json::json!({ "streams": { "jardin": "" } })).unwrap();
+        assert!(named.check().is_err());
+    }
+
+    fn review(cert: Option<&str>) -> ReviewConfig {
+        ReviewConfig {
+            host: "nvr.example".into(),
+            port: 8971,
+            user: "moli".into(),
+            cert_sha256: cert.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_changed_certificate_says_how_to_accept_it_never_by_itself() {
+        let instance = moli_core::InstanceId::from("frigate");
+        let pinned = "AB:CD:".repeat(16);
+        // Pinned on first contact: forgotten from the machine Moli runs on.
+        let said = certificate_changed(&review(None), &instance, &pinned, Some("ff00"));
+        assert!(
+            said.contains("secrets forget frigate certificate"),
+            "{said}"
+        );
+        assert!(said.contains("abcdabcdabcdabcd"), "{said}");
+        // Written in the file: the file changes, nothing is forgotten.
+        let written = "ab".repeat(32);
+        let said = certificate_changed(&review(Some(&written)), &instance, &written, None);
+        assert!(
+            said.contains("cert_sha256") && !said.contains("secrets forget"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_written_fingerprint_is_a_sha256() {
+        let config = |cert: &str| Config {
+            review: Some(review(Some(cert))),
+            ..serde_json::from_value(serde_json::json!({})).unwrap()
+        };
+        assert!(config(&"AB:".repeat(32)).check().is_ok());
+        assert!(config("abcd").check().is_err());
     }
 }

@@ -4291,6 +4291,9 @@ mod tests {
             unmeasured: None,
             production: None,
             export: None,
+            gas: None,
+            battery_charge: None,
+            battery_discharge: None,
             solar: None,
         };
         let mut summary = moli_energy::Summary {
@@ -4303,6 +4306,7 @@ mod tests {
             meters: vec![meter("g", "Linky", Role::Grid, "linky/index", None, None)],
             live: None,
             flows: None,
+            battery: None,
             today: period(0.0, None),
             yesterday: period(0.0, None),
             month: period(0.0, None),

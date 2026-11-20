@@ -90,11 +90,25 @@ impl Driver for Fake {
                 Some(Unit::Celsius),
                 Semantic::Other,
             );
+            // Presses (#211): a button, and a remote with two buttons.
+            let gestures = || Kind::Enum {
+                values: ["single", "double", "short_release", "long_release"]
+                    .map(Into::into)
+                    .to_vec(),
+            };
+            let press = |key: &str, label: &str| {
+                point(key, label, gestures(), false, None, Semantic::Press)
+            };
             for (name, points) in [
                 ("lamp", vec![lamp]),
                 ("door", vec![contact]),
                 ("dial", vec![dial]),
                 ("room", vec![room]),
+                ("button", vec![press("action", "Action")]),
+                (
+                    "remote",
+                    vec![press("button1", "Bouton 1"), press("button2", "Bouton 2")],
+                ),
             ] {
                 let d = device(ctx, name, points);
                 ctx.upsert_device(d);
@@ -219,6 +233,44 @@ async fn the_engine_speaks_the_language_of_the_house() {
          turn on lamp, then wait 1 h 30 min; otherwise: notify the house: “No”."
     );
 
+    // A press reads as a press (#211), the button named on a remote.
+    let pressed = |point: &str, to: Option<&str>, for_s: u64| {
+        let mut t = json!({ "type": "when_state", "point": point, "for_s": for_s });
+        if let Some(to) = to {
+            t["to"] = json!(to);
+        }
+        simple(t, lamp_on())
+    };
+    assert_eq!(
+        say(pressed("fake:button/action", Some("double"), 0)),
+        "When button gets a double press, turn on lamp."
+    );
+    assert_eq!(
+        say(pressed("fake:remote/button2", Some("short_release"), 0)),
+        "When remote · Bouton 2 gets a single press, turn on lamp."
+    );
+    assert_eq!(
+        say(pressed("fake:button/action", None, 0)),
+        "When button is pressed, turn on lamp."
+    );
+    // A press does not last: a duration is said, as a warning.
+    let lasting = autos.check_with(
+        &graph(pressed("fake:button/action", Some("single"), 300)),
+        can,
+    );
+    assert!(
+        lasting.problems.iter().any(|p| p.level == Level::Warning
+            && p.message
+                == "A press does not last: with a duration, this trigger fires after the last press, not during it."),
+        "{:?}",
+        lasting.problems
+    );
+    let instant = autos.check_with(
+        &graph(pressed("fake:button/action", Some("single"), 0)),
+        can,
+    );
+    assert!(instant.problems.is_empty(), "{:?}", instant.problems);
+
     // Problems, in words; and the one the assistant looks for by kind.
     let broken = graph(json!({
         "nodes": [
@@ -269,6 +321,7 @@ async fn the_engine_speaks_the_language_of_the_house() {
                 author: Author::Human,
                 approved: None,
                 approved_version: None,
+                approved_with_code: false,
                 note: None,
                 created: 0,
                 updated: 0,
@@ -314,6 +367,14 @@ async fn the_engine_speaks_the_language_of_the_house() {
         say(evening),
         "Quand door s'ouvre, si lamp est éteint et on est entre 22:00 et 06:00 : \
          allumer lamp, puis attendre 1 h 30 ; sinon : prévenir la maison : « No »."
+    );
+    assert_eq!(
+        say(pressed("fake:remote/button2", Some("long_release"), 0)),
+        "Quand remote · Bouton 2 reçoit un appui maintenu, allumer lamp."
+    );
+    assert_eq!(
+        say(pressed("fake:button/action", None, 0)),
+        "Quand button reçoit un appui, allumer lamp."
     );
     assert_eq!(who(true, Author::Human), "une personne (code)");
     cancel.cancel();

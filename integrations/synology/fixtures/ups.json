@@ -1,0 +1,11 @@
+{
+ "success": true,
+ "data": {
+  "enable": false,
+  "status": "usb_ups_status_unknown",
+  "charge": 0,
+  "runtime": 0,
+  "mode": "SLAVE",
+  "usb_ups_connect": false
+ }
+}

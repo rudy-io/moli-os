@@ -1,0 +1,99 @@
+# Meross MSS310 smart plug with energy metering: local signed API (no cloud at run time).
+# The device key comes from the Meross account the plug was set up with;
+# store it once:
+#   moli-os secrets set <instance> key        (value on standard input)
+# Protocol knowledge from the community (meross_lan, merossiot); no code
+# copied. Units on the wire: mA, dV, mW, Wh.
+# Never tried on a real device: written from those descriptions.
+
+[profile]
+id = "meross-mss310"
+name = "Prise connectée Meross avec mesure (MSS310)"
+manufacturer = "Meross"
+model = "MSS310"
+secret = "key"
+identity = "all.payload.all.system.hardware.uuid"
+mac = "all.payload.all.system.hardware.macAddress"
+name_from = "all.payload.all.system.hardware.type"
+
+# Identity and the relay state (digest), in one message.
+[[request]]
+id = "all"
+path = "/config"
+format = "json"
+every = "15s"
+transport = "meross"
+namespace = "Appliance.System.All"
+payload = "{}"
+
+# Instant readings. On the wire: mA, dV (tenths of a volt), mW.
+[[request]]
+id = "e"
+path = "/config"
+format = "json"
+every = "15s"
+transport = "meross"
+namespace = "Appliance.Control.Electricity"
+payload = "{}"
+
+# One entry per day (about a month of them), in Wh, in no particular order.
+[[request]]
+id = "c"
+path = "/config"
+format = "json"
+every = "5m"
+transport = "meross"
+namespace = "Appliance.Control.ConsumptionX"
+payload = "{}"
+
+[[point]]
+key = "on"
+label = "Prise"
+from = "all.payload.all.digest.togglex.[channel=0].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "power"
+label = "Puissance"
+from = "e.payload.electricity.power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "voltage"
+label = "Tension"
+from = "e.payload.electricity.voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.1
+round = 1
+
+[[point]]
+key = "current"
+label = "Courant"
+from = "e.payload.electricity.current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+# The latest day the plug counted: today's, once it has counted something
+# since midnight (until then, still the day before's total).
+[[point]]
+key = "energy_today"
+label = "Énergie du jour"
+from = "c.payload.consumptionx.[>time].value"
+kind = "numeric"
+unit = "Wh"
+
+[[write]]
+point = "on"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 0, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"

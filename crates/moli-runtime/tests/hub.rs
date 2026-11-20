@@ -150,6 +150,161 @@ async fn command_round_trip_updates_state_and_journal() {
     assert!(matches!(journal[0].action, Action::Command { .. }));
 }
 
+/// The same plug, kept by Moli itself (like the alarm's state).
+struct InsidePlug(Arc<FakePlug>);
+
+impl Driver for InsidePlug {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        self.0.run(ctx)
+    }
+
+    fn stays_inside(&self) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn a_mirror_house_lets_through_what_stays_inside_moli() {
+    let hub = Hub::new(HubOptions {
+        mirror: true,
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(InsidePlug(FakePlug::new(false))),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    hub.command(&point("state"), Value::Bool(true), Origin::Automation, None)
+        .await
+        .unwrap();
+    assert_eq!(hub.state(&point("state")).unwrap().value, Value::Bool(true));
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn some_orders_want_the_code_each_time_even_from_a_session() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            code_each_time: vec![moli_runtime::guard::CodeEachTime {
+                point: "fake:plug1/state".into(),
+                values: vec!["false".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    // Switching on is not concerned.
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    // Off wants the code: a person with a session is held too.
+    let Err(CommandError::NeedsApproval { id, .. }) = hub
+        .command(&point("state"), Value::Bool(false), Origin::Ui, None)
+        .await
+    else {
+        panic!("held");
+    };
+    assert!(hub.approvals().iter().any(|a| a.id == id && a.code));
+    assert_eq!(
+        hub.resolve_approval(id, &point("state"), true, Origin::Ui, None)
+            .await,
+        Err(moli_runtime::ApprovalError::CodeNeeded)
+    );
+    // Still waiting: typed now, it goes.
+    hub.resolve_approval_with_code(id, &point("state"), true, Origin::Ui, None, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        hub.state(&point("state")).unwrap().value,
+        Value::Bool(false)
+    );
+    // An automation a person approved carries their intent.
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    hub.command(
+        &point("state"),
+        Value::Bool(false),
+        Origin::Automation,
+        None,
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_house_s_own_orders_and_toggles_want_the_code_each_time_too() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            code_each_time: vec![moli_runtime::guard::CodeEachTime {
+                point: "fake:plug1/state".into(),
+                values: vec!["false".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    // A scene, a fixture, a driven load: sent in the house's name, on a
+    // gesture that typed no code. Held, the code wanted.
+    let Err(CommandError::NeedsApproval { id, .. }) = hub
+        .command(&point("state"), Value::Bool(false), Origin::System, None)
+        .await
+    else {
+        panic!("held");
+    };
+    assert!(hub.approvals().iter().any(|a| a.id == id && a.code));
+    assert_eq!(hub.state(&point("state")).unwrap().value, Value::Bool(true));
+    // A toggle may become the order that wants it: held, whichever way.
+    for origin in [Origin::Household, Origin::Ui, Origin::System] {
+        assert!(hub.would_hold(&point("state"), None, origin).is_some());
+    }
+    assert!(hub.wants_code(&point("state"), None));
+    // Only an automation a person approved (with the code) goes without.
+    assert!(
+        hub.would_hold(&point("state"), None, Origin::Automation)
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn agents_may_what_a_person_allowed_them_in_the_file() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_devices: vec!["fake:plug1".into()],
+            agents_may: vec![moli_runtime::guard::PointValues {
+                point: "fake:plug1/state".into(),
+                values: vec!["true".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    // The assistant switches on: allowed in the file.
+    hub.command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await
+        .unwrap();
+    // Off is not: the protected device still wants a person.
+    assert!(matches!(
+        hub.command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+            .await,
+        Err(CommandError::NeedsApproval { .. })
+    ));
+}
+
 #[tokio::test]
 async fn a_mirror_house_journals_every_order_and_sends_none() {
     let (hub, _cancel) = start_with(HubOptions {
@@ -353,6 +508,8 @@ fn guarded_hub() -> HubOptions {
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     }
@@ -693,6 +850,8 @@ async fn groups_are_guarded_by_their_members_rooms_and_lost_rooms_are_reported()
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     })
@@ -1114,6 +1273,8 @@ fn quiet_all_day() -> HubOptions {
             ),
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     }
@@ -1888,4 +2049,89 @@ async fn a_gate_is_never_sent_again() {
     tokio::time::sleep(Duration::from_secs(600)).await;
     assert_eq!(orders.load(Ordering::SeqCst), 1, "a gate's order goes once");
     assert_eq!(hub.journal(10).len(), 1);
+}
+
+/// A device that copies another's readings (the « Dehors » weather): its
+/// values keep the time they were read at.
+struct Copier;
+
+impl Driver for Copier {
+    fn kind(&self) -> &'static str {
+        "copier"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("copy");
+            let numeric = Kind::Numeric {
+                min: None,
+                max: None,
+                step: None,
+            };
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "copy".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    spec("copied", numeric.clone(), false, Semantic::Temperature),
+                    spec("own", numeric, false, Semantic::Temperature),
+                ],
+            });
+            // The same reading, then read again later, then the same again.
+            ctx.set_state_at(&id, "copied", Value::Int(12), 1_000);
+            ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
+            ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
+            // set_state as before: now, and no event when nothing changed.
+            ctx.set_state(&id, "own", Value::Int(7));
+            ctx.set_state(&id, "own", Value::Int(7));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_copied_value_keeps_the_time_it_was_read_at() {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let mut events = hub.subscribe();
+    let cancel = CancellationToken::new();
+    let before = moli_core::now_ms();
+    spawn_driver(
+        &hub,
+        InstanceId::from("copier"),
+        Arc::new(Copier),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    let copied = hub.state(&PointId::from("copier:copy/copied")).unwrap();
+    assert_eq!(copied.value, Value::Int(12));
+    assert_eq!(copied.ts, 2_000, "the time given is kept, not now");
+    let own = hub.state(&PointId::from("copier:copy/own")).unwrap();
+    assert!(own.ts >= before, "set_state still records now");
+
+    // A newer reading of the same value is told (its age changed); the same
+    // reading twice, or set_state with the same value, is not.
+    let mut copied_events = 0;
+    let mut own_events = 0;
+    while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
+        if let Event::State { point, .. } = event {
+            match point.as_str() {
+                "copier:copy/copied" => copied_events += 1,
+                "copier:copy/own" => own_events += 1,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(copied_events, 2);
+    assert_eq!(own_events, 1);
+    cancel.cancel();
 }

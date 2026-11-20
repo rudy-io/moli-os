@@ -1,0 +1,321 @@
+[
+  {
+    "topic": "homeassistant/sensor/0x5A01/temperature/config",
+    "payload": {
+      "name": "Sonde salon Temperature",
+      "object_id": "0x5A01_temperature",
+      "unique_id": "0x5A01_temperature_rfxcom2mqtt",
+      "value_template": "{{ value_json.temperature }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x5A01",
+          "rfxcom2mqtt__5A01",
+          "rfxcom2mqtt_Sonde salon"
+        ],
+        "name": "Sonde salon"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x5A01",
+      "state_topic": "rfxcom2mqtt/devices/0x5A01",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "icon": "mdi:temperature-celsius",
+      "unit_of_measurement": "°C"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x5A01/humidity/config",
+    "payload": {
+      "name": "Sonde salon Humidity",
+      "object_id": "0x5A01_humidity",
+      "unique_id": "0x5A01_humidity_rfxcom2mqtt",
+      "value_template": "{{ value_json.humidity }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x5A01",
+          "rfxcom2mqtt__5A01",
+          "rfxcom2mqtt_Sonde salon"
+        ],
+        "name": "Sonde salon"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x5A01",
+      "state_topic": "rfxcom2mqtt/devices/0x5A01",
+      "device_class": "humidity",
+      "state_class": "measurement",
+      "icon": "mdi:water-percent",
+      "unit_of_measurement": "%"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x5A01/battery/config",
+    "payload": {
+      "name": "Sonde salon Battery",
+      "object_id": "0x5A01_battery",
+      "unique_id": "0x5A01_battery_rfxcom2mqtt",
+      "value_template": "{{ value_json.batteryLevel }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x5A01",
+          "rfxcom2mqtt__5A01",
+          "rfxcom2mqtt_Sonde salon"
+        ],
+        "name": "Sonde salon"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x5A01",
+      "state_topic": "rfxcom2mqtt/devices/0x5A01",
+      "device_class": "battery",
+      "state_class": "measurement",
+      "icon": "mdi:battery",
+      "unit_of_measurement": "%"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x5A01/linkquality/config",
+    "payload": {
+      "name": "Sonde salon Linkquality",
+      "object_id": "0x5A01_linkquality",
+      "unique_id": "0x5A01_linkquality_rfxcom2mqtt",
+      "value_template": "{{ value_json.rssi }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x5A01",
+          "rfxcom2mqtt__5A01",
+          "rfxcom2mqtt_Sonde salon"
+        ],
+        "name": "Sonde salon"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x5A01",
+      "state_topic": "rfxcom2mqtt/devices/0x5A01",
+      "icon": "mdi:signal",
+      "state_class": "measurement",
+      "unit_of_measurement": "dBm",
+      "entity_category": "diagnostic"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x6B02/temperature/config",
+    "payload": {
+      "name": "Sonde exterieure Temperature",
+      "object_id": "0x6B02_temperature",
+      "unique_id": "0x6B02_temperature_rfxcom2mqtt",
+      "value_template": "{{ value_json.temperature }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x6B02",
+          "rfxcom2mqtt__6B02",
+          "rfxcom2mqtt_Sonde exterieure"
+        ],
+        "name": "Sonde exterieure"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x6B02",
+      "state_topic": "rfxcom2mqtt/devices/0x6B02",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "icon": "mdi:temperature-celsius",
+      "unit_of_measurement": "°C"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x6B02/battery/config",
+    "payload": {
+      "name": "Sonde exterieure Battery",
+      "object_id": "0x6B02_battery",
+      "unique_id": "0x6B02_battery_rfxcom2mqtt",
+      "value_template": "{{ value_json.batteryLevel }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x6B02",
+          "rfxcom2mqtt__6B02",
+          "rfxcom2mqtt_Sonde exterieure"
+        ],
+        "name": "Sonde exterieure"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x6B02",
+      "state_topic": "rfxcom2mqtt/devices/0x6B02",
+      "device_class": "battery",
+      "state_class": "measurement",
+      "icon": "mdi:battery",
+      "unit_of_measurement": "%"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x00ABCDE1/linkquality/config",
+    "payload": {
+      "name": "AC_00ABCDE1 Linkquality",
+      "default_entity_id": "sensor.0x00ABCDE1_linkquality",
+      "unique_id": "0x00ABCDE1_linkquality_rfxcom2mqtt",
+      "value_template": "{{ value_json.rssi }}",
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x00ABCDE1",
+          "rfxcom2mqtt_AC_00ABCDE1"
+        ],
+        "name": "AC_00ABCDE1"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x00ABCDE1",
+      "state_topic": "rfxcom2mqtt/devices/0x00ABCDE1",
+      "icon": "mdi:signal",
+      "state_class": "measurement",
+      "unit_of_measurement": "dBm",
+      "entity_category": "diagnostic"
+    }
+  },
+  {
+    "topic": "homeassistant/switch/0x00ABCDE1/12/config",
+    "payload": {
+      "availability": [
+        {
+          "topic": "rfxcom2mqtt/bridge/status"
+        }
+      ],
+      "device": {
+        "manufacturer": "Rfxcom",
+        "via_device": "rfxcom2mqtt_bridge",
+        "identifiers": [
+          "rfxcom2mqtt_0x00ABCDE1",
+          "rfxcom2mqtt_AC_00ABCDE1"
+        ],
+        "name": "AC_00ABCDE1"
+      },
+      "enabled_by_default": true,
+      "payload_off": "Off",
+      "payload_on": "On",
+      "json_attributes_topic": "rfxcom2mqtt/devices/0x00ABCDE1/12",
+      "command_topic": "rfxcom2mqtt/cmd/lighting2/0/0x00ABCDE1/12",
+      "name": "0x00ABCDE1 12",
+      "default_entity_id": "switch.AC_00ABCDE1_12",
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      },
+      "state_off": "Off",
+      "state_on": "On",
+      "state_topic": "rfxcom2mqtt/devices/0x00ABCDE1/12",
+      "unique_id": "AC_00ABCDE1_12_rfxcom2mqtt",
+      "value_template": "{{ value_json.command }}"
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/bridge_rfxcom2mqtt_version/version/config",
+    "payload": {
+      "name": "Version",
+      "unique_id": "bridge_rfxcom2mqtt_version_rfxcom2mqtt",
+      "state_topic": "rfxcom2mqtt/bridge/info",
+      "value_template": "{{ value_json.version }}",
+      "entity_category": "diagnostic",
+      "device": {
+        "identifiers": [
+          "rfxcom2mqtt_bridge"
+        ],
+        "name": "Rfxcom2Mqtt Bridge",
+        "manufacturer": "Rfxcom2Mqtt"
+      },
+      "origin": {
+        "name": "Rfxcom2MQTT",
+        "sw": "1.2.1",
+        "url": "https://rfxcom2mqtt.github.io/rfxcom2mqtt/"
+      }
+    }
+  },
+  {
+    "topic": "homeassistant/sensor/0x00124b0000000001/temperature/config",
+    "payload": {
+      "name": "Temperature",
+      "unique_id": "0x00124b0000000001_temperature_zigbee2mqtt",
+      "state_topic": "zigbee2mqtt/Sonde bureau",
+      "value_template": "{{ value_json.temperature }}",
+      "unit_of_measurement": "°C",
+      "device": {
+        "identifiers": [
+          "zigbee2mqtt_0x00124b0000000001"
+        ],
+        "name": "Sonde bureau",
+        "manufacturer": "Tuya"
+      }
+    }
+  }
+]

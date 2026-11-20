@@ -1,15 +1,19 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home } from '../lib/home.svelte.js';
+  import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import { impulseIcon } from '../lib/icons.js';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
   import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
+  import { watts } from '../lib/energy-live.svelte.js';
   import { phase, PHASES } from '../lib/printers.js';
-  import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
+  import { canWrite, pointOf, isValve, climateKeys, impulsePoints } from '../lib/capabilities.js';
+  import { coverCommands } from '../lib/cover-controls.js';
   import { climateMode } from '../lib/climate.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
@@ -71,6 +75,9 @@
     return { tone, icon: kind, text, title: word ? `${label} : ${text} · ${t(word)}` : `${label} : ${text}` };
   };
 
+  /** How long a press stays on show outside the « Capteurs » view. */
+  const PRESS_FRESH_MS = 10 * 60_000;
+
   function chips(d) {
     // An appliance that is no button: what it draws, nothing when unplugged.
     if (quiet(d.id)) {
@@ -114,6 +121,19 @@
     const lx = v('illuminance') ?? v('illuminance_lux');
     if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: t('commun.piece.eclairement') });
     if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: t('commun.piece.presence') });
+    // A button says its last press: shown while fresh, always among the sensors.
+    const press = lastPress(d);
+    if (press?.action) {
+      const fresh = press.ts != null && home.now - press.ts < PRESS_FRESH_MS;
+      if (fresh || every) {
+        const word = pressWord(press.action);
+        const when = relative(press.ts, home.now);
+        // A remote with several buttons says which one (« Bouton 2 · simple »).
+        const what = press.button ? `${press.button} · ${word}` : word;
+        const name = press.button ? `${nameOf(d.id)} · ${press.button}` : nameOf(d.id);
+        out.push({ tone: fresh ? 'warm' : '', icon: 'hand', text: when ? `${what} · ${when}` : what, title: t('commun.piece.dernier_appui', { name, action: word, when }) });
+      }
+    }
     if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
     if (deviceKind(d) === 'camera') out.push({ tone: 'cool', icon: 'cctv', text: nameOf(d.id), href: '#/cameras' });
     if (deviceKind(d) === 'printer') {
@@ -174,6 +194,7 @@
   function padIcon(d) {
     const kind = deviceKind(d);
     const name = (d.label?.name || d.native_name || '').toLowerCase();
+    if (kind === 'cover') return (coverPosition(d.id) ?? 0) > 0 ? 'shutter-open' : 'shutter';
     if (kind === 'tv') return 'tv';
     if (kind === 'speaker') return 'speaker';
     if (kind === 'plug') return /vmc|ventil|\bfan\b|exhaust/.test(name) ? 'fan' : 'socket';
@@ -200,26 +221,94 @@
     ? outlets.some((o) => canWrite(d, o.key))
     : canWrite(d, point ?? powerKey(d));
 
-  /** The pads: lights, then TV and speakers, then plugs. */
+  /** A cover pad follows its tile's access rule: live, and the command it would
+   *  send is writable (any command when the position is unknown). */
+  const coverPadEnabled = (d) => {
+    if (!reachable(d.id) || hub.connected !== true) return false;
+    const pct = coverPosition(d.id);
+    return coverCommands(d).some(({ command, key, value }) => value && canWrite(d, key)
+      && (pct == null || command === (pct > 0 ? 'close' : 'open')));
+  };
+
+  /** A trigger device with one relay is a pad like the others (a tap sends the
+   *  pulse); with several relays it keeps its tile, one button per relay. */
+  const lonePulse = (d) => impulsePoints(d).length === 1;
+  const pulseTiles = $derived(room.impulses.filter((d) => !lonePulse(d)));
+
+  /** The pads: lights, then TV and speakers, then plugs, then covers, then
+   *  single-relay triggers. */
   const pads = $derived([
     ...room.lights.map((d) => ({ d, point: null })),
     ...room.media.map((d) => ({ d, point: deviceKind(d) === 'tv' ? 'power' : null, link: deviceKind(d) === 'speaker' ? '#/salon' : null })),
     ...room.plugs.flatMap(plugPads),
+    ...room.covers.map((d) => ({ d, point: null, isCover: true })),
+    ...room.impulses.filter(lonePulse).map((d) => ({ d, point: impulsePoints(d)[0].key, isPulse: true })),
   ]);
+
+  // ---- single-relay triggers: no state to show, only an order and its outcome ----------
+
+  /** Per device: 'sending', then 'sent', 'held' or 'error' for a few seconds. */
+  let pulses = $state({});
+  const pulseTimers = new Map();
+  onDestroy(() => pulseTimers.forEach(clearTimeout));
+  const pulseEnabled = (d, key) => reachable(d.id) && hub.connected === true && canWrite(d, key) && pulses[d.id] !== 'sending';
+  async function pulse(d, key) {
+    if (!pulseEnabled(d, key)) return;
+    clearTimeout(pulseTimers.get(d.id));
+    pulses[d.id] = 'sending';
+    const result = await act(`${d.id}/${key}`, 'cycle', t('commun.action', { label: nameOf(d.id), action: t('commun.volet.impulsion').toLowerCase() }));
+    pulses[d.id] = result === 'ok' ? 'sent' : result;
+    pulseTimers.set(d.id, setTimeout(() => {
+      delete pulses[d.id];
+      pulseTimers.delete(d.id);
+    }, 4000));
+  }
 
   let open = $state(null);
 
-  function stateOf(d, point, outlets) {
+  /** What a device measuring its own draw (a plug with a meter) pulls now, in W;
+   *  null when it measures nothing or has no reading. */
+  function drawOf(d) {
+    const p = d.points?.find((q) => q.semantic === 'power' && q.kind?.type === 'numeric' && (q.unit === 'W' || q.unit === 'kW'));
+    const v = p ? value(d.id, p.key) : null;
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    return p.unit === 'kW' ? v * 1000 : v;
+  }
+
+  function stateOf(d, point, outlets, isCover) {
+    if (isCover) {
+      if (!reachable(d.id)) return t('commun.piece.injoignable');
+      const pct = coverPosition(d.id);
+      if (pct == null) return '';
+      const shown = Math.max(0, Math.min(100, Math.round(Number(pct))));
+      return shown === 0 ? t('commun.volet.ferme') : shown === 100 ? t('commun.volet.ouvert') : t('commun.volet.ouvert_a', { pct: num(shown) });
+    }
     if (unpowered(d.id) && !isFixture(d)) return t('commun.piece.coupee');
     if (!reachable(d.id)) return t('commun.piece.injoignable');
     if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
     if (deviceKind(d) === 'speaker') return value(d.id, 'playing') === true ? t('commun.piece.lecture_en_cours') : t('commun.piece.a_l_arret');
     if (!isOn(d.id, point)) return t('commun.piece.eteinte');
+    const draw = point ? null : drawOf(d);
+    if (draw != null) return t('commun.piece.allumee_conso', { watts: watts(draw) });
     const b = value(d.id, 'brightness');
     return typeof b === 'number' && fine(d) ? t('commun.pourcent', { n: Math.round(b) }) : t('commun.piece.allumee');
   }
 
-  function tap(d, point, outlets, name) {
+  function tap(d, point, outlets, name, isCover) {
+    if (isCover) {
+      const pct = coverPosition(d.id);
+      // Without a measured position, the pad opens the tile: open, stop, close.
+      if (pct == null) {
+        open = d.id;
+        return;
+      }
+      const isOpen = pct > 0;
+      const action = coverCommands(d).find((c) => c.command === (isOpen ? 'close' : 'open'));
+      if (!action?.value || !canWrite(d, action.key)) return;
+      const actionLabel = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
+      act(`${d.id}/${action.key}`, action.value, t('commun.action', { label: nameOf(d.id), action: actionLabel }));
+      return;
+    }
     if (!canTap(d, point, outlets)) return;
     if (unpowered(d.id) && !isFixture(d)) {
       note(t('commun.lampe.coupee_note', { label: nameOf(d.id) }));
@@ -244,10 +333,19 @@
 
 <section class="card room">
   <div class="head">
-    <span class="room-icon" class:lit={room.lit}><Icon name={room.icon} size={22} /></span>
+    <span class="room-icon" class:lit={room.lit || room.opened}><Icon name={room.icon} size={22} /></span>
     <div class="title">
       <h2>{room.name}{#if locked}<span class="lock" title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}</h2>
-      <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
+      <span class="muted">
+        {room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}
+        {#if room.opened}
+          · {t('commun.piece.ouverts', { count: room.opened })}
+        {:else if room.covers.length && !room.coversUnknown}
+          · {t('commun.piece.tout_ferme')}
+        {:else if room.covers.length}
+          · {t('commun.volet.position_inconnue')}
+        {/if}
+      </span>
     </div>
     {#if temp != null}
       <span class="temp {roomTemperature.unit === '°C' ? tone(temp) : ''}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}{roomTemperature.unit}</b>{#if roomTemperature.unit === '°C'}<i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i>{/if}</span>
@@ -268,21 +366,29 @@
 
   {#if pads.length}
     <div class="pads" class:icons>
-      {#each pads as { d, point, link, outlets, name } (`${d.id}/${point}`)}
-        {@const lit = link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
-        {@const cut = unpowered(d.id) && !isFixture(d)}
-        {@const more = !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
+      {#each pads as { d, point, link, outlets, name, isCover, isPulse } (`${d.id}/${point}`)}
+        {@const coverPct = isCover ? coverPosition(d.id) : null}
+        {@const lit = isPulse ? pulses[d.id] === 'sending' || pulses[d.id] === 'sent' : isCover ? (coverPct ?? 0) > 0 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
+        {@const cut = !isPulse && unpowered(d.id) && !isFixture(d)}
+        {@const more = isPulse ? false : isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
         {@const label = name ?? nameOf(d.id)}
+        {@const coverCommand = coverPct != null ? coverCommands(d).find((c) => c.command === (lit ? 'close' : 'open'))?.command : undefined}
         <div class="pad-wrap">
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
               <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
+          {:else if isPulse}
+            {@const said = t(`commun.impulsion.etat.${pulses[d.id] ?? 'repos'}`)}
+            <button class="pad" class:on={lit} class:off-grid={!reachable(d.id)} disabled={!pulseEnabled(d, point)} onclick={() => pulse(d, point)} title={[label, said].join(' · ')} data-pulse={pulses[d.id] ?? 'idle'} aria-label={t('commun.action', { label, action: t('commun.volet.impulsion').toLowerCase() })}>
+              <span class="ico"><Icon name={reachable(d.id) ? impulseIcon(label) : 'offline'} size={icons ? 22 : 18} /></span>
+              {#if !icons}<b>{label}</b><small>{said}</small>{/if}
+            </button>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets) })}>
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover || (lit && !outlets && !point && drawOf(d) != null) ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
-              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets)}</small>{/if}
+              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
             </button>
           {/if}
           {#if more}
@@ -294,15 +400,16 @@
       {/each}
     </div>
     {#if open && pads.some((p) => p.d.id === open)}
-      <LightTile id={open} dimmer />
+      {@const pad = pads.find((p) => p.d.id === open)}
+      {#if pad?.isCover}
+        <CoverTile id={open} />
+      {:else}
+        <LightTile id={open} dimmer />
+      {/if}
     {/if}
   {/if}
 
-  {#each room.covers as d (d.id)}
-    <CoverTile id={d.id} {icons} />
-  {/each}
-
-  {#each room.impulses as d (d.id)}
+  {#each pulseTiles as d (d.id)}
     <ImpulseTile id={d.id} {icons} />
   {/each}
 
@@ -578,7 +685,7 @@
 
   .pad.on .ico {
     background: var(--warm);
-    color: #fff;
+    color: var(--warm-deep);
   }
 
   .pad b {
@@ -619,7 +726,7 @@
 
   .more.open {
     background: var(--warm);
-    color: #fff;
+    color: var(--warm-deep);
   }
 
   /* A clim, on one line. */

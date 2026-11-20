@@ -393,6 +393,13 @@ impl TuyaDevice {
                 self.dps
                     .iter()
                     .filter_map(|d| d.point(self.is_lamp()))
+                    .map(|mut p| {
+                        // A scene switch's press, sent with `pulse_state` (#211).
+                        if self.is_press(&p.key) && !p.access.write {
+                            p.semantic = Semantic::Press;
+                        }
+                        p
+                    })
                     .collect()
             },
         }
@@ -790,6 +797,36 @@ mod tests {
         );
         assert_eq!(d.point("cur_current").unwrap().unit, Some(Unit::Ampere));
         assert_eq!(&*d.point("cycle_time").unwrap().label, "Cycle time");
+    }
+
+    #[test]
+    fn a_scene_switch_says_its_presses() {
+        let dps = serde_json::json!([
+            { "id": 1, "code": "switch_mode1", "type": "Enum",
+              "range": ["click", "double_click", "press"] },
+            { "id": 10, "code": "battery_percentage", "type": "Integer", "unit": "%" },
+        ]);
+        let of = |category: &str| {
+            let d: TuyaDevice = serde_json::from_value(serde_json::json!({
+                "id": "sw", "name": "Bouton", "category": category, "dps": dps,
+            }))
+            .unwrap();
+            d.device(&InstanceId::from("tuya"))
+        };
+        let switch = of("wxkg");
+        assert_eq!(
+            switch.point("switch_mode1").unwrap().semantic,
+            Semantic::Press
+        );
+        assert_eq!(
+            switch.point("battery_percentage").unwrap().semantic,
+            Semantic::Battery
+        );
+        // Elsewhere a `switch_mode1` is no press: its driver does not pulse it.
+        assert_ne!(
+            of("kg").point("switch_mode1").unwrap().semantic,
+            Semantic::Press
+        );
     }
 
     #[test]

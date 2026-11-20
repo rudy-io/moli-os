@@ -66,6 +66,12 @@ const SCHEMA: &str = "
         since INTEGER PRIMARY KEY,
         price REAL NOT NULL
     ) STRICT;
+    -- The point each meter read last time: a counter swapped for another
+    -- one starts from its own first reading (see `follow_sources`).
+    CREATE TABLE IF NOT EXISTS meter_source (
+        meter TEXT PRIMARY KEY,
+        point TEXT NOT NULL
+    ) STRICT;
     -- Databases from before meter_first: the older of the last reading
     -- and the first recorded hour.
     INSERT OR IGNORE INTO meter_first (meter, ts)
@@ -123,6 +129,36 @@ impl Store {
             ))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Notes the point each meter reads. A meter whose point changed since
+    /// the last run forgets its last reading: the new device's lifetime
+    /// total is not the old one's, and the difference was never used by the
+    /// home. Its history stays. Returns those meters.
+    pub fn follow_sources(&self, meters: &[(String, String)]) -> Result<Vec<String>, EnergyError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut changed = Vec::new();
+        for (meter, point) in meters {
+            let before: Option<String> = tx
+                .query_row(
+                    "SELECT point FROM meter_source WHERE meter = ?1",
+                    params![meter],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if before.as_ref().is_some_and(|b| b != point) {
+                tx.execute("DELETE FROM meter_last WHERE meter = ?1", params![meter])?;
+                changed.push(meter.clone());
+            }
+            tx.execute(
+                "INSERT INTO meter_source (meter, point) VALUES (?1, ?2)
+                 ON CONFLICT (meter) DO UPDATE SET point = excluded.point",
+                params![meter, point],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Adds `slices` and sets the meter's last reading, atomically.
@@ -293,6 +329,47 @@ mod tests {
         );
         assert_eq!(store.first_hour().unwrap(), Some(0));
         assert_eq!(Store::memory().first_hour().unwrap(), None);
+    }
+
+    #[test]
+    fn a_meter_moved_to_another_point_starts_from_its_first_reading() {
+        let store = Store::memory();
+        let sources = |point: &str| vec![("grid".to_owned(), point.to_owned())];
+        // First run, then the same point again: nothing forgotten.
+        assert!(
+            store
+                .follow_sources(&sources("a:m/energy"))
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .record(
+                "grid",
+                Reading { kwh: 3.0, ts: 5 },
+                &[row("grid", 0, 1.0, None)],
+            )
+            .unwrap();
+        assert!(
+            store
+                .follow_sources(&sources("a:m/energy"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.last_readings().unwrap().len(), 1);
+        // Another device behind the same meter: its total is not compared
+        // with the old one, the hours already filed stay.
+        assert_eq!(
+            store.follow_sources(&sources("b:m/energy")).unwrap(),
+            vec!["grid".to_owned()]
+        );
+        assert!(store.last_readings().unwrap().is_empty());
+        assert_eq!(store.hours(0, 10).unwrap().len(), 1);
+        assert!(
+            store
+                .follow_sources(&sources("b:m/energy"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

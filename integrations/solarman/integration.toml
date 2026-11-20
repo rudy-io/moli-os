@@ -1,10 +1,22 @@
 [integration]
 id = "solarman"
-name = "Solarman (enregistreurs Wi-Fi) et micro-onduleurs Deye"
-brands = ["Deye", "Solarman"]
+name = "Solarman (enregistreurs Wi-Fi) : micro-onduleurs Deye et TSUN, onduleurs Solis et ZCS Azzurro"
+brands = ["Deye", "Solarman", "Solis", "TSUN", "ZCS Azzurro"]
 # Seen so far (in the reference installation): Deye micro-inverters with
 # 2 and 4 inputs and their built-in logger.
-models = ["micro-onduleur 2 entrées (1 kW)", "micro-onduleur 4 entrées (2 kW)"]
+# And a Solis S6-GR1P string inverter behind a stick speaking Modbus TCP.
+# Written from public register maps and NEVER seen on a real inverter by
+# this driver: the TSUN and ZCS Azzurro models.
+models = [
+    "micro-onduleur 2 entrées (1 kW)",
+    "micro-onduleur 4 entrées (2 kW)",
+    "Solis S6-GR1P",
+    "TSUN TITAN TSOL-MP3000",
+    "TSUN TITAN TSOL-MP2250",
+    "TSUN GEN4 TSOL-MX3000D",
+    "ZCS Azzurro 1PH TL-V3",
+    "ZCS Azzurro HYD-ZSS-HP",
+]
 transport = "tcp"
 driver = "solarman"
 crate = "moli-solarman"
@@ -18,10 +30,10 @@ ports = [8899]
 [needs]
 secrets = []
 vars = []
-options = ["host"]
+options = ["host", "serial", "model", "transport", "timezone"]
 
 [origin]
-reused = "carte de registres de ha-solarman (deye_micro.yaml, licence MIT, voir NOTICE) ; protocole V5 écrit d'après sa description publique (pysolarmanv5, MIT) ; valeurs vérifiées une à une contre Home Assistant au même instant"
+reused = "cartes de registres de ha-solarman (deye_micro.yaml, solis_s6-gr1p.yaml, et pour ZCS Azzurro sofar_string.yaml et sofar_g3.yaml, licence MIT, voir NOTICE) ; cartes TSUN TITAN et GEN4 et trames natives TSUN de tsun-gen3-proxy (BSD-3-Clause, voir NOTICE) ; protocole V5 écrit d'après sa description publique (pysolarmanv5, MIT) ; Deye et Solis : valeurs vérifiées une à une contre Home Assistant au même instant ; TSUN et ZCS : jamais essayés sur du vrai matériel"
 author = "agent"
 
 # Replayed by the crate's tests (crates/moli-solarman/src/v5.rs, deye.rs).
@@ -30,3 +42,17 @@ file = "fixtures/micro-2-inputs.json"
 
 [[fixture]]
 file = "fixtures/micro-4-inputs.json"
+
+# Built by hand from the register maps, not captured: never seen on a real
+# inverter (replayed by tsun.rs and zcs.rs).
+[[fixture]]
+file = "fixtures/tsun-titan.json"
+
+[[fixture]]
+file = "fixtures/tsun-gen4.json"
+
+[[fixture]]
+file = "fixtures/zcs-tl.json"
+
+[[fixture]]
+file = "fixtures/zcs-hyd.json"

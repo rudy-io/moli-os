@@ -32,6 +32,10 @@ pub struct Config {
     /// What the supplier's meter draws right now, for the live gauge.
     #[serde(default)]
     pub live: Option<Live>,
+    /// A home battery right now: its charge and power, for the live views
+    /// (what went in and out is counted by `charge` / `discharge` meters).
+    #[serde(default)]
+    pub battery: Option<Battery>,
     #[serde(default, rename = "meter")]
     pub meters: Vec<MeterConfig>,
     /// Loads Moli switches on the panels' surplus and in off-peak hours.
@@ -80,6 +84,57 @@ impl Live {
     pub fn warn(&self) -> f64 {
         self.warn.unwrap_or(self.max / 4.0)
     }
+
+    fn check(&self) -> Result<(), String> {
+        check_point(&self.power).map_err(|e| format!("[energy.live] {e}"))?;
+        if !(self.max.is_finite() && self.max > 0.0) {
+            return Err(format!("[energy.live] max {} must be above 0", self.max));
+        }
+        if let Some(warn) = self.warn
+            && !(warn.is_finite() && warn > 0.0 && warn <= self.max)
+        {
+            return Err(format!(
+                "[energy.live] warn {warn} must be above 0 and at most max"
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A home battery's state right now.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Battery {
+    /// State of charge point, in %.
+    #[serde(default)]
+    pub soc: Option<String>,
+    /// Power point (W), positive while it charges, negative while it
+    /// discharges.
+    #[serde(default)]
+    pub power: Option<String>,
+    /// `power` is positive while the battery discharges instead (an
+    /// inverter that counts what it gives the home).
+    #[serde(default)]
+    pub discharge_positive: bool,
+    /// Usable capacity (kWh), to say how much the charge holds.
+    #[serde(default)]
+    pub capacity_kwh: Option<f64>,
+}
+
+impl Battery {
+    fn check(&self) -> Result<(), String> {
+        for point in self.soc.iter().chain(&self.power) {
+            check_point(point).map_err(|e| format!("[energy.battery] {e}"))?;
+        }
+        if let Some(kwh) = self.capacity_kwh
+            && !(kwh.is_finite() && kwh > 0.0 && kwh < 1000.0)
+        {
+            return Err(format!(
+                "[energy.battery] capacity_kwh {kwh} must be above 0 and below 1000"
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -93,9 +148,23 @@ pub struct MeterConfig {
     /// kW) whose energy Moli adds up itself.
     pub point: String,
     pub role: Role,
-    /// Fixed price per kWh (a Linky « heures creuses » index).
+    /// Fixed price per kWh (a Linky « heures creuses » index). With
+    /// `price_point`: the price when that point has no value (and the one
+    /// imported history is priced with).
     #[serde(default)]
     pub price: Option<f64>,
+    /// Point holding the supplier's price per kWh now (a supplier's driver:
+    /// `engie:contract-…/electricity_offtake_peak`), followed as it changes.
+    #[serde(default)]
+    pub price_point: Option<String>,
+    /// Added to `price_point`'s value per kWh: what the supplier's price
+    /// leaves out (network costs, taxes, certificates), VAT included.
+    #[serde(default)]
+    pub price_extra: Option<f64>,
+    /// kWh per unit of `point` when it is not in Wh or kWh: a gas index in
+    /// m³ (the supplier's conversion factor, about 11.4 kWh/m³).
+    #[serde(default)]
+    pub kwh_per_unit: Option<f64>,
     /// Instantaneous power point (W), for the live view.
     #[serde(default)]
     pub power: Option<String>,
@@ -160,14 +229,34 @@ pub enum Role {
     /// What the home sends to the grid (the returned energy of a clamp on
     /// the main feed, a Linky injection index): `price` is what it earns.
     Export,
+    /// Natural gas (a P1 meter's gas index, in m³ with `kwh_per_unit`):
+    /// shown and priced on its own, never mixed with the electricity, and
+    /// priced only by its own `price` / `price_point`.
+    Gas,
+    /// What went into a home battery (its charged-energy index): never
+    /// billed; what is stored now is not used now.
+    Charge,
+    /// What came out of a home battery (its discharged-energy index): never
+    /// billed; used at home without being bought.
+    Discharge,
 }
 
 impl Role {
     /// Meters that count energy the home takes (grid, whole home, circuits,
-    /// appliances), as opposed to what it makes or sends out.
+    /// appliances), as opposed to what it makes, stores or sends out.
     #[must_use]
     pub fn consumes(self) -> bool {
-        !matches!(self, Self::Solar | Self::Export)
+        !matches!(
+            self,
+            Self::Solar | Self::Export | Self::Gas | Self::Charge | Self::Discharge
+        )
+    }
+
+    /// Meters whose energy has no price: production and a battery's
+    /// in and out (an `export` meter's price is what selling earns).
+    #[must_use]
+    pub fn unpriced(self) -> bool {
+        matches!(self, Self::Solar | Self::Charge | Self::Discharge)
     }
 }
 
@@ -229,9 +318,9 @@ impl Config {
                     m.id
                 ));
             }
-            if m.role == Role::Solar && m.price.is_some() {
+            if m.role.unpriced() && m.price.is_some() {
                 return Err(format!(
-                    "meter {:?}: solar production has no price (an `export` meter's price is what selling earns)",
+                    "meter {:?}: solar production and a battery's in and out have no price (an `export` meter's price is what selling earns)",
                     m.id
                 ));
             }
@@ -248,9 +337,7 @@ impl Config {
                     m.id
                 ));
             }
-            if let Some(price) = m.price {
-                check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
-            }
+            check_meter_price(m)?;
         }
         let mut load_ids = HashSet::new();
         for load in &self.loads {
@@ -260,17 +347,11 @@ impl Config {
             }
         }
         if let Some(live) = &self.live {
-            check_point(&live.power).map_err(|e| format!("[energy.live] {e}"))?;
-            if !(live.max.is_finite() && live.max > 0.0) {
-                return Err(format!("[energy.live] max {} must be above 0", live.max));
-            }
-            if let Some(warn) = live.warn
-                && !(warn.is_finite() && warn > 0.0 && warn <= live.max)
-            {
-                return Err(format!(
-                    "[energy.live] warn {warn} must be above 0 and at most max"
-                ));
-            }
+            live.check()?;
+        }
+        self.check_battery_meters()?;
+        if let Some(battery) = &self.battery {
+            battery.check()?;
         }
         if let Some(fee) = self.monthly_fee {
             check_price(fee).map_err(|e| format!("monthly_fee: {e}"))?;
@@ -283,6 +364,30 @@ impl Config {
             for (period, price) in &t.prices {
                 check_price(*price).map_err(|e| format!("[energy.tariff] {period}: {e}"))?;
             }
+        }
+        Ok(())
+    }
+
+    /// A battery is read both ways or not at all: `charge` alone would have
+    /// the house store every day and never get anything back.
+    /// Their powers say what goes in and what comes out, each positive: one
+    /// point for both is signed, and belongs in `[energy.battery] power`.
+    fn check_battery_meters(&self) -> Result<(), String> {
+        let has = |role: &Role| self.meters.iter().any(|m| &m.role == role);
+        if has(&Role::Charge) != has(&Role::Discharge) {
+            return Err("a battery needs both a `charge` and a `discharge` meter: with one alone, the house would store every day and never get anything back".into());
+        }
+        let powers = |role: Role| {
+            self.meters
+                .iter()
+                .filter(move |m| m.role == role)
+                .filter_map(MeterConfig::power_point)
+        };
+        if let Some(both) = powers(Role::Charge).find(|p| powers(Role::Discharge).any(|q| q == *p))
+        {
+            return Err(format!(
+                "power {both:?} is on both a `charge` and a `discharge` meter: a signed battery power goes in [energy.battery] power"
+            ));
         }
         Ok(())
     }
@@ -314,6 +419,45 @@ fn check_point(point: &str) -> Result<(), String> {
         Some((device, key)) if device.contains(':') && !key.is_empty() => Ok(()),
         _ => Err(format!("{point:?} is not a point id (instance:device/key)")),
     }
+}
+
+/// A meter's price: fixed, or from a point plus what it leaves out.
+fn check_meter_price(m: &MeterConfig) -> Result<(), String> {
+    if let Some(price) = m.price {
+        check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
+    }
+    if let Some(point) = &m.price_point {
+        check_point(point).map_err(|e| format!("meter {:?}: price_point: {e}", m.id))?;
+        if m.role.unpriced() {
+            return Err(format!(
+                "meter {:?}: solar production and a battery's in and out have no price",
+                m.id
+            ));
+        }
+    }
+    if let Some(f) = m.kwh_per_unit
+        && (!(f.is_finite() && f > 0.0 && f < 100.0) || m.integrate)
+    {
+        return Err(format!(
+            "meter {:?}: kwh_per_unit {f} must be above 0 and below 100, without `integrate`",
+            m.id
+        ));
+    }
+    if let Some(extra) = m.price_extra {
+        if m.price_point.is_none() {
+            return Err(format!(
+                "meter {:?}: `price_extra` is added to `price_point`",
+                m.id
+            ));
+        }
+        if !(extra.is_finite() && (0.0..5.0).contains(&extra)) {
+            return Err(format!(
+                "meter {:?}: price_extra {extra} must be from 0 to 5 per kWh",
+                m.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn check_price(price: f64) -> Result<(), String> {
@@ -378,6 +522,46 @@ mod tests {
         parse(&format!("{bill}{ok}")).unwrap();
         assert!(parse(&format!("{}{ok}", bill.replace("19.56", "-1.0"))).is_err());
         assert!(parse(&format!("{}{ok}", bill.replace("maison:", ""))).is_err());
+    }
+
+    #[test]
+    fn a_battery_has_no_price_and_points_for_its_state() {
+        let stored = "[[meter]]\nid = \"in\"\nname = \"Charge\"\npoint = \"bms:b/charged\"\nrole = \"charge\"\nreset = \"never\"\n[[meter]]\nid = \"out\"\nname = \"Décharge\"\npoint = \"bms:b/discharged\"\nrole = \"discharge\"\n";
+        parse(stored).unwrap();
+        assert!(parse(&format!("{stored}price = 0.2\n")).is_err());
+        assert!(parse(&format!("{stored}price_point = \"x:y/z\"\n")).is_err());
+        assert!(parse(&format!("{stored}period = \"HC\"\n")).is_err());
+        let state =
+            "[battery]\nsoc = \"bms:b/soc\"\npower = \"bms:b/power\"\ncapacity_kwh = 10.5\n";
+        parse(&format!("{state}{stored}")).unwrap();
+        parse("[battery]\nsoc = \"bms:b/soc\"\n").unwrap();
+        assert!(parse(&state.replace("bms:b/soc", "soc")).is_err());
+        assert!(parse(&state.replace("10.5", "0")).is_err());
+        assert!(parse(&format!("{state}volts = \"bms:b/v\"\n")).is_err());
+        assert!(!Role::Charge.consumes() && !Role::Discharge.consumes());
+        // One way only: refused (charge alone stores every day, never gives back).
+        let (charge, discharge) = stored.split_at(stored.find("[[meter]]\nid = \"out\"").unwrap());
+        assert!(parse(charge).is_err());
+        assert!(parse(discharge).is_err());
+        // Two positive powers (a Jackery, integrated): each its own point.
+        let powers = stored
+            .replace("bms:b/charged", "jk:b/charge_power")
+            .replace("bms:b/discharged", "jk:b/discharge_power")
+            .replace("reset = \"never\"\n", "")
+            .replace(
+                "role = \"charge\"\n",
+                "role = \"charge\"\nintegrate = true\n",
+            )
+            .replace(
+                "role = \"discharge\"\n",
+                "role = \"discharge\"\nintegrate = true\n",
+            );
+        parse(&powers).unwrap();
+        // One signed point for both ways: its place is [battery] power.
+        let signed =
+            format!("{charge}power = \"bms:b/power\"\n{discharge}power = \"bms:b/power\"\n");
+        assert!(parse(&signed).is_err());
+        parse(&signed.replacen("bms:b/power", "bms:b/power_in", 1)).unwrap();
     }
 
     #[test]

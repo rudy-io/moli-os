@@ -1,0 +1,40 @@
+{
+  "cluster": "ContentLauncher",
+  "cluster_id": 1290,
+  "command": "LaunchContent",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "Search",
+      "id": 0,
+      "value": {
+        "parameterList": []
+      }
+    },
+    {
+      "name": "AutoPlay",
+      "id": 1,
+      "value": false
+    },
+    {
+      "name": "Data",
+      "id": 2,
+      "value": "d"
+    },
+    {
+      "name": "PlaybackPreferences",
+      "id": 3,
+      "value": {
+        "audioTracks": [
+          {
+            "languageCode": "de",
+            "characteristics": [],
+            "audioOutputIndex": null
+          }
+        ]
+      }
+    }
+  ],
+  "note": "LaunchContent Data, empty request lists, and a null uint8 in a list entry (encoded with matter.js TlvLaunchContentRequest)",
+  "payload_tlv_b64": "FTUANgAYGCgBLAIBZDUDNgIVLAACZGU2ARg0AhgYGBg="
+}

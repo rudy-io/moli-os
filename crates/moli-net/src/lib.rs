@@ -560,6 +560,39 @@ impl PinnedHttps {
         Ok(())
     }
 
+    /// One request on a connection of its own, the whole answer: status,
+    /// headers (a session cookie) and body (at most [`MAX_BODY`]).
+    pub async fn exchange_full(
+        &self,
+        request: Request<Full<Bytes>>,
+        wait: Duration,
+    ) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
+        let mut sender = self.connect().await?;
+        let response = tokio::time::timeout(wait, sender.send_request(request))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))??;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = tokio::time::timeout(wait, read_body(response.into_body(), MAX_BODY))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))??;
+        Ok((status, headers, body))
+    }
+
+    /// A long answer (a video) on a connection of its own, whatever its
+    /// status: its head within `wait`, its body streamed as it comes.
+    pub async fn stream_response(
+        &self,
+        request: Request<Full<Bytes>>,
+        wait: Duration,
+    ) -> anyhow::Result<http::Response<Incoming>> {
+        let mut sender = self.connect().await?;
+        tokio::time::timeout(wait, sender.send_request(request))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))?
+            .map_err(Into::into)
+    }
+
     /// A long-lived response (event stream) on a dedicated connection. Its
     /// length has no end by design: the caller bounds what it buffers.
     pub async fn stream(&self, request: Request<Full<Bytes>>) -> anyhow::Result<Incoming> {
@@ -630,6 +663,28 @@ pub async fn plain_with_headers(
     port: u16,
     request: Request<Full<Bytes>>,
 ) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
+    plain_waiting(host, port, request, TIMEOUT).await
+}
+
+/// One plain-HTTP request that may take longer than [`TIMEOUT`] to answer
+/// (a WebRTC peer gathering its addresses before it answers an offer).
+pub async fn plain_within(
+    host: &str,
+    port: u16,
+    request: Request<Full<Bytes>>,
+    wait: Duration,
+) -> anyhow::Result<(StatusCode, Bytes)> {
+    plain_waiting(host, port, request, wait)
+        .await
+        .map(|(status, _, body)| (status, body))
+}
+
+async fn plain_waiting(
+    host: &str,
+    port: u16,
+    request: Request<Full<Bytes>>,
+    wait: Duration,
+) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
     let exchange = async {
         let tcp = TcpStream::connect((host, port))
             .await
@@ -650,7 +705,7 @@ pub async fn plain_with_headers(
         let body = read_body(response.into_body(), MAX_BODY).await?;
         anyhow::Ok((status, headers, body))
     };
-    tokio::time::timeout(TIMEOUT, exchange)
+    tokio::time::timeout(wait, exchange)
         .await
         .with_context(|| format!("{host} did not answer in time"))?
 }
@@ -986,7 +1041,9 @@ mod dispatch_tests {
             443,
             true,
             request(),
-            Duration::from_secs(2),
+            // Longer than a failed lookup: musl waits out its 5 s resolver
+            // timeout even when the server refuses at once.
+            Duration::from_secs(30),
             1024,
         )
         .await

@@ -1,0 +1,10 @@
+{
+  "cluster": "GeneralDiagnostics",
+  "cluster_id": 51,
+  "attribute": "NetworkInterfaces",
+  "attribute_id": 0,
+  "type": "list<NetworkInterface>",
+  "writable": false,
+  "note": "struct with a hwadr bytes field, a keyword Type field, and byte-string-element lists",
+  "value_tlv_b64": "FhUsAARldGgwKQE0AjQDMAQG3q2+7wABNgUQBMCoAQUYNgYQEP6AAAAAAAAAAAAAAAAAAAEYJAcBGBg="
+}

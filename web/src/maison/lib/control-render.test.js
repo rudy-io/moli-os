@@ -9,6 +9,7 @@ let vite;
 let hub;
 let home;
 let energy;
+let icons;
 let render;
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const components = {};
@@ -22,10 +23,13 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'WeekSchedule']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
+  components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.Salon = (await vite.ssrLoadModule('/src/maison/pages/Salon.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
@@ -304,6 +308,7 @@ test('the rooms icons preference reaches each cover without changing the dedicat
     point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
   const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
   assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  assert.match(room, /data-cover-command="close"/);
   const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
   assert.match(focused, />Fixture</);
   assert.match(focused, />Ouvrir</);
@@ -329,7 +334,8 @@ test('the shutter route bypasses a stored lights filter without replacing it or 
     const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
     assert.match(normal, /Fixture lamp/);
     assert.doesNotMatch(normal, /Twin shade/);
-    assert.match(normal, /href="#\/pieces\/volets"/);
+    // No link of its own any more: the « Volets » chip does it (#171).
+    assert.doesNotMatch(normal, /href="#\/pieces\/volets"/);
     assert.deepEqual(writes, []);
   } finally { delete globalThis.localStorage; }
 });
@@ -426,6 +432,16 @@ test('offline and unmeasured semantic covers cannot expose an active slider', ()
     assert.equal(inputs(unmeasured).length, 1);
     assert.match(inputs(unmeasured)[0], /disabled/);
   }
+  // Unmeasured but writable: the slider stays, greyed out at its lower bound, range intact.
+  const [grey] = inputs(show('CoverTile', points, {}));
+  assert.match(grey, /value="0"/);
+  assert.match(grey, /min="0"/);
+  assert.match(grey, /max="100"/);
+  assert.match(grey, /step="1"/);
+  // The mirror image: a measured reading keeps the slider live at that value.
+  const [live] = inputs(show('CoverTile', points, { opening: 42 }));
+  assert.match(live, /value="42"/);
+  assert.doesNotMatch(live, /disabled/);
 });
 
 test('case-preserving motor orders identify a cover without inventing a power switch or position', () => {
@@ -770,13 +786,84 @@ test('icons-only trigger relays keep a label on every icon button', () => {
   assert.doesNotMatch(html, />Impulsion · Relais 1</);
 });
 
-test('a room shows its trigger device and a lone control point stays a cover', () => {
+test('a room shows a one-relay trigger as a pad and a lone control point stays a cover', () => {
   const room = showRoom([
     { id: 'z2m:gate', points: [trigger('state_l1', 'State')], values: {} },
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
+  // One relay: a pad with its name and « Impulsion », no relay buttons.
+  assert.match(room, /data-pulse="idle"/);
+  assert.doesNotMatch(room, /Impulsion · Relais 1/);
+  // No measured position: the pad opens the cover tile instead of sending open.
+  assert.ok(room.includes(icons.shutter));
+  assert.doesNotMatch(room, /data-cover-command/);
+});
+
+test('a trigger device with several relays keeps one button per relay', () => {
+  const room = showRoom([
+    { id: 'z2m:gate', points: [trigger('state_l1', 'State'), trigger('state_l2', 'State')], values: {} },
+  ]);
   assert.match(room, /Impulsion · Relais 1/);
-  assert.match(room, /data-cover-command="open"/);
+  assert.match(room, /Impulsion · Relais 2/);
+  assert.doesNotMatch(room, /data-pulse=/);
+});
+
+test('a one-relay trigger pad is named, draws a garage door or a gate, and waits for the hub', () => {
+  const pad = (html) => buttons(html).find((button) => /data-pulse=/.test(button));
+  const garage = showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Porte atelier' } }]);
+  assert.match(garage, /<b[^>]*>Porte atelier<\/b><small[^>]*>Impulsion<\/small>/);
+  assert.ok(garage.includes(icons.garage));
+  assert.doesNotMatch(pad(garage), /disabled/);
+  const gate = showRoom([{ id: 'shelly:gate', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Portail' } }]);
+  assert.ok(gate.includes(icons.gate));
+  hub.connected = false;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {} }])), /disabled/);
+  hub.connected = true;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [{ ...trigger('relay', 'Ouvrir / fermer'), access: { read: false, write: false } }], values: {} }])), /disabled/);
+});
+
+test('a cover pad draws the open shutter when open and says closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 42 } }]);
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.ok(!opened.includes(icons['shutter-alert']));
+  assert.match(opened, /<small[^>]*>Ouvert à 42 %<\/small>/);
+  const closed = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 0 } }]);
+  assert.ok(closed.includes(icons.shutter));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+  assert.doesNotMatch(closed, /Ouvert à 0/);
+  const full = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 100 } }]);
+  assert.match(full, /<small[^>]*>Ouvert<\/small>/);
+});
+
+test('an open cover tile draws the open shutter and says open, closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = show('CoverTile', position, { opening: 100 });
+  assert.match(opened, /class="device-icon[^"]*open/);
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.match(opened, /<small[^>]*>Ouvert<\/small>/);
+  const closed = show('CoverTile', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+});
+
+test('a trigger tile named as a garage door draws a garage, a gate stays a gate', () => {
+  const points = [trigger('state_l1', 'State'), trigger('state_l2', 'State')];
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Porte voiture' }).includes(icons.garage));
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Portail' }).includes(icons.gate));
+});
+
+test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
+  const cover = (extra = {}) => ({
+    id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {}, ...extra,
+  });
+  const pad = (html) => buttons(html).find((button) => /class="pad/.test(button));
+  assert.doesNotMatch(pad(showRoom([cover()])), /disabled/);
+  assert.match(pad(showRoom([cover({ online: false })])), /disabled/);
+  assert.match(pad(showRoom([cover({ points: [point('control', enumeration('open', 'close', 'stop'), false)] })])), /disabled/);
+  hub.connected = false;
+  assert.match(pad(showRoom([cover()])), /disabled/);
+  hub.connected = true;
 });
 
 test('a presence radar shows someone there, whatever the key of its presence point', () => {
@@ -836,4 +923,258 @@ test('a plant sensor shows its soil, and its pot stays out of the room readings 
     assert.match(thirsty, /class="chip warm[^"]*" title="z2m:plant : terre à \d+ %, à arroser"/);
     assert.doesNotMatch(thirsty, /fuite/i);
   }
+});
+
+test('the « Volets » chip alone shows the shutters view; with others, the rooms (#171)', () => {
+  let saved = '["volets"]';
+  globalThis.localStorage = { getItem: () => saved, setItem: () => {} };
+  try {
+    const entries = [
+      { id: 'fixture:shade', model: 'Home Assistant cover', label: { name: 'Shade', room: 'Studio' }, online: true,
+        points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {} },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Lamp', room: 'Studio' }, online: true,
+        points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } },
+    ];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = {};
+    const alone = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    // The shutters' grid, under the page's own title and its filters.
+    assert.match(alone, /class="cover-grid/);
+    assert.match(alone, />Ouvrir</);
+    assert.doesNotMatch(alone, />Lamp</);
+    assert.match(alone, /<h1 class="page-title[^"]*">Pièces</);
+    assert.match(alone, /class="bar/);
+
+    saved = '{"v":2,"ids":["volets","lumieres"]}';
+    const mixed = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.doesNotMatch(mixed, /class="cover-grid/);
+    assert.match(mixed, />Lamp</);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('« Climat » and « Volets » are two chips; openers go with the shutters (#171)', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const ids = filters.CATEGORIES.map((c) => c.id);
+  assert.ok(ids.includes('climat') && ids.includes('volets'));
+  const kinds = (id) => filters.CATEGORIES.find((c) => c.id === id).kinds;
+  assert.deepEqual(kinds('climat'), ['climate']);
+  assert.ok(kinds('volets').includes('cover') && kinds('volets').includes('impulse'));
+});
+
+test('a filter saved as « climat » before #171 keeps its shutters, a new one does not', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const store = {};
+  globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+  try {
+    store.old = '["climat"]';
+    assert.deepEqual(filters.loadFilter('old'), ['climat', 'volets']);
+    filters.saveFilter('new', ['climat']);
+    assert.deepEqual(JSON.parse(store.new), { v: 2, ids: ['climat'] });
+    assert.deepEqual(filters.loadFilter('new'), ['climat']);
+    store.junk = '{"v":2}';
+    assert.deepEqual(filters.loadFilter('junk'), []);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('dual setpoints classify without a brand and render independent numeric contracts', () => {
+  const points = [
+    { ...point('heat_setpoint', number(5, 25, 0.5)), unit: '°C' },
+    { ...point('cool_setpoint', number(60, 90, 1), false), unit: '°F' },
+  ];
+  const html = show('ClimateCard', points, { heat_setpoint: 25, cool_setpoint: null });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'climate');
+  const [heat, cool] = inputs(html);
+  assert.match(heat, /min="5".*max="25".*step="0.5"/);
+  assert.match(heat, /value="25"/);
+  assert.doesNotMatch(heat, /disabled/);
+  assert.match(cool, /disabled/);
+  assert.doesNotMatch(cool, /value="0"/);
+  assert.equal(buttons(html).filter(tag => /disabled/.test(tag)).length, 3);
+  const offline = show('ClimateCard', points, { heat_setpoint: 20 }, { online: false });
+  assert.ok(inputs(offline).every(tag => /disabled/.test(tag)));
+});
+
+test('a button shows its last press while fresh, and always among the sensors (#198)', () => {
+  const action = point('action', enumeration('single', 'double', 'hold'), false, 'press');
+  const button = (state) => [{ id: 'z2m:button', native_name: 'Bouton', model: 'ZG-101ZL', label: { room: 'Workshop' }, online: true,
+    points: [action, { ...point('battery', number(0, 100), false, 'battery'), unit: '%' }], members: [], state }];
+  const card = (state, every = false) => {
+    hub.devices = Object.fromEntries(button(state).map((d) => [d.id, d]));
+    return render(components.RoomCard, { props: { room: home.roomList()[0], every } }).body;
+  };
+  const now = Date.now();
+  home.home.now = now;
+  const pressed = (value, minutes) => ({ action: { value, ts: now - minutes * 60_000 }, battery: { value: 100, ts: now } });
+
+  // Fresh: shown, warm, in words.
+  const fresh = card(pressed('double', 3));
+  assert.match(fresh, /class="chip warm[^"]*" title="Bouton : dernier appui double, il y a 3 min"/);
+  assert.match(fresh, />double · il y a 3 min</);
+  assert.match(card(pressed('hold', 1)), />maintenu · il y a 1 min</);
+
+  // Old: gone from the room's line, still there among the sensors (not warm).
+  const old = pressed('single', 45);
+  assert.doesNotMatch(card(old), /dernier appui/);
+  assert.match(card(old, true), /class="chip [^w"][^"]*" title="Bouton : dernier appui simple, il y a 45 min"/);
+
+  // No press seen yet (a retained one is never shown): nothing to say.
+  assert.doesNotMatch(card({ battery: { value: 100, ts: now } }, true), /dernier appui/);
+  // A settable `action` is no press.
+  hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, access: { read: true, write: true } }] } };
+  assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
+  // Nor an `action` its driver did not call a press (#211): the key says nothing.
+  hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, semantic: 'other' }] } };
+  assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
+});
+
+test('a press shows whatever the brand, one chip for a remote, named by the gesture (#211)', () => {
+  const now = Date.now();
+  home.home.now = now;
+  const at = (value, seconds) => ({ value, ts: now - seconds * 1000 });
+  const card = (d) => {
+    hub.devices = { [d.id]: { native_name: 'Télécommande', model: null, label: { room: 'Workshop' }, online: true, members: [], ...d } };
+    return render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body;
+  };
+  const hueButton = (n) => ({
+    ...point(`button${n}`, enumeration('initial_press', 'repeat', 'short_release', 'long_release', 'long_press', 'double_short_release'), false, 'press'),
+    label: `Bouton ${n}`,
+  });
+  const dimmer = { id: 'hue:dimmer', points: [1, 2, 3, 4].map(hueButton) };
+
+  // A Hue dimmer: one chip, the last button pressed, by its name.
+  const two = card({ ...dimmer, state: { button1: at('short_release', 600), button2: at('short_release', 120) } });
+  assert.equal(two.match(/dernier appui/g)?.length, 1);
+  assert.match(two, />Bouton 2 · simple · il y a 2 min</);
+  assert.match(two, /title="Télécommande · Bouton 2 : dernier appui simple, il y a 2 min"/);
+  // A hold ends on `long_release`: « maintenu », never « relâché ».
+  assert.match(card({ ...dimmer, state: { button3: at('long_release', 60) } }), />Bouton 3 · maintenu · il y a 1 min</);
+  assert.match(card({ ...dimmer, state: { button1: at('double_short_release', 60) } }), />Bouton 1 · double · il y a 1 min</);
+
+  // Dirigera (`button`, text) and Tuya (`switch_mode1`): their own keys, their own words.
+  const dirigera = { id: 'dirigera:remote', points: [point('button', { type: 'text' }, false, 'press')] };
+  assert.match(card({ ...dirigera, state: { button: at('long', 60) } }), />maintenu · il y a 1 min</);
+  const tuya = { id: 'tuya:switch', points: [point('switch_mode1', enumeration('click', 'double_click', 'press'), false, 'press')] };
+  assert.match(card({ ...tuya, state: { switch_mode1: at('double_click', 60) } }), />double · il y a 1 min</);
+  // An unknown word shows as told.
+  assert.match(card({ ...tuya, state: { switch_mode1: at('rotate_left', 60) } }), />rotate_left · il y a 1 min</);
+});
+
+test('a heat pump and its circuit are heating and stay off the room cards; a thermostat stays climate', () => {
+  const pump = { id: 'vicare:pac', native_name: 'PAC', model: null, label: { room: 'Workshop' }, online: true, members: [], points: [point('compressor_active', { type: 'binary' }, false)], state: {} };
+  const circuit = { ...pump, id: 'vicare:circuit0', native_name: 'Circuit', points: [point('mode', enumeration('heating', 'standby')), point('comfort_temperature', number(4, 37, 1)), point('reduced_temperature', number(4, 37, 1))] };
+  const thermostat = { ...pump, id: 'other:thermostat', native_name: 'Thermostat', points: [point('mode', enumeration('heat', 'off')), point('comfort_temperature', number(5, 30, 0.5)), point('target_temperature', number(5, 30, 0.5))] };
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit, [thermostat.id]: thermostat };
+  assert.equal(home.deviceKind(pump), 'heating');
+  assert.equal(home.deviceKind(circuit), 'heating');
+  assert.equal(home.deviceKind(thermostat), 'climate');
+  const [room] = home.roomList();
+  assert.deepEqual(room.climates.map((d) => d.id), [thermostat.id]);
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit };
+  assert.deepEqual(home.roomList(), []);
+});
+
+test('a room /api/home added (outside, unlisted) takes no place in the order', () => {
+  const lamp = (id, room) => ({
+    id, model: 'Home Assistant light', label: { name: id, room }, online: true,
+    points: [point('on', { type: 'binary' }, false, 'on_off')], state: {},
+  });
+  hub.devices = Object.fromEntries([lamp('l:salon', 'Salon'), lamp('l:ext', 'Extérieur'), lamp('l:bureau', 'Bureau')].map((d) => [d.id, d]));
+  home.home.config = { rooms: [{ name: 'Bureau' }, { name: 'Extérieur', outside: true, added: true }] };
+  assert.deepEqual(home.roomList().map((r) => r.name), ['Bureau', 'Salon', 'Extérieur']);
+  home.home.config = {};
+});
+
+function nasDevice(native, name, values) {
+  return { id: `nas:${native}`, instance: 'nas', native_name: name, model: null, manufacturer: 'Synology', label: {}, online: true, points: [], members: [], state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }])) };
+}
+
+test('the NAS card shows a NAS that answers, its volume, drive, UPS and backup, with no order button', () => {
+  const nas = nasDevice('nas', 'DiskStation', { up: true, cpu: 12, memory: 40, temperature: 41, uptime: 50 });
+  const group = { instance: 'nas', nas, volumes: [nasDevice('volume_1', 'Volume 1', { used: 63, free: 900, problem: false })], disks: [nasDevice('disk_sda', 'Drive 1', { temperature: 37, problem: false })], ups: nasDevice('ups', 'UPS', { battery: 100, problem: false }), backups: [nasDevice('backup_8', 'Night backup', { last_run: '2026/11/14 03:46:02', problem: false })] };
+  hub.devices = Object.fromEntries([nas, ...group.volumes, ...group.disks, group.ups, ...group.backups].map((d) => [d.id, d]));
+  const html = render(components.NasCard, { props: { group } }).body;
+  for (const word of ['DiskStation', 'Volume 1', 'Drive 1', 'Night backup', '14/11 03:46']) assert.ok(html.includes(word), word);
+  assert.equal(buttons(html).length, 0);
+});
+
+test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', () => {
+  const nas = nasDevice('nas', 'DiskStation', { up: false });
+  const group = { instance: 'nas', nas, volumes: [nasDevice('volume_1', 'Volume 1', {})], disks: [], ups: null, backups: [] };
+  hub.devices = Object.fromEntries([nas, ...group.volumes].map((d) => [d.id, d]));
+  const html = render(components.NasCard, { props: { group } }).body;
+  assert.ok(html.includes('DiskStation'));
+  assert.ok(!html.includes('Volume 1'));
+  assert.ok(!html.includes('class="gauges"'));
+});
+
+test('the living room drives an Apple TV: its own apps, and no key it does not have', () => {
+  const id = 'appletv:ATV-TEST';
+  const keys = ['CursorUp', 'CursorDown', 'CursorLeft', 'CursorRight', 'Confirm', 'Back', 'Home', 'PlayPause', 'Next', 'Previous', 'VolumeUp', 'VolumeDown', 'Options'];
+  hub.devices = { [id]: {
+    id, native_name: 'Apple TV', model: 'Apple TV', label: { room: 'Salon' }, online: true, members: [],
+    points: [
+      point('power', { type: 'binary' }, true, 'on_off'),
+      { ...point('key', enumeration(...keys)), access: { read: false, write: true } },
+      { ...point('app', { type: 'text' }), access: { read: false, write: true } },
+      point('apps', { type: 'text' }, false),
+    ],
+    state: {
+      power: { value: true },
+      apps: { value: 'App\u00a0Store=com.apple.TVAppStore\nDisney+=com.disney.disneyplus\nNetflix=com.netflix.Netflix\nPhotos=com.apple.TVPhotos' },
+    },
+  } };
+  home.home.config = { salon: { tv: id } };
+  const html = render(components.Salon, { props: {} }).body;
+  // Its favourites it has, in the usual order; none it lacks, nor Android's.
+  assert.ok(html.indexOf('>Netflix<') > 0 && html.indexOf('>Netflix<') < html.indexOf('>Disney+<'), 'Netflix then Disney+');
+  assert.doesNotMatch(html, />YouTube</);
+  assert.doesNotMatch(html, />Photos</, 'not a favourite');
+  // No mute on an Apple TV; the keys it has stay.
+  assert.doesNotMatch(html, /Couper le son/);
+  assert.match(html, /aria-label="Options"/);
+  // A device that announces no keys keeps every one (an older driver).
+  hub.devices[id].points = hub.devices[id].points.filter((p) => p.key !== 'key');
+  assert.match(render(components.Salon, { props: {} }).body, /Couper le son/);
+  // An app listed twice (no favourite among them): shown once, the page stands.
+  hub.devices[id].state.apps = { value: 'Arte=tv.arte\nArte=tv.arte\nPhotos=com.apple.TVPhotos' };
+  const twice = render(components.Salon, { props: {} }).body;
+  assert.equal(twice.split('>Arte<').length, 2, 'Arte once');
+  assert.match(twice, />Photos</);
+});
+
+test('a plug that measures its draw says it on its pad, only while on', () => {
+  const plug = (on, power, unit = 'W') => ({
+    id: 'fixture:plug', model: 'Smart plug', label: { room: 'Workshop', name: 'Floor lamp' },
+    points: [point('on', { type: 'binary' }, true, 'on_off'), { ...point('power', { type: 'numeric' }, false, 'power'), unit }],
+    values: { on, power },
+  });
+  const lit = showRoom([plug(true, 42.4)]);
+  assert.match(lit, /42 W/);
+  assert.match(lit, /title="Floor lamp · [^"]*42 W"/);
+  assert.match(showRoom([plug(true, 1.5, 'kW')]), /1[,.]5 kW/);
+  const off = showRoom([plug(false, 0)]);
+  assert.doesNotMatch(off, /0 W/);
+  assert.match(off, /title="Floor lamp"/);
+  // No reading yet: the plain state, never an invented figure.
+  assert.doesNotMatch(showRoom([plug(true, null)]), / W</);
+});
+
+test('the week shows every day as bands, a boundary to drag between two steps', () => {
+  const html = show('WeekSchedule', schedulePoints(), { ...valveValues, weekly_schedule_monday: '00:00/17 06:00/20 22:00/16' });
+  // Seven days to choose, one row each.
+  assert.equal(buttons(html).filter((tag) => tag.includes('aria-pressed')).length, 7);
+  // Monday's two changes can be dragged; the other days hold one step and none.
+  const edges = buttons(html).filter((tag) => tag.includes('class="edge'));
+  assert.equal(edges.length, 2);
+  assert.match(edges[0], /06:00 vers 20°/);
+  assert.match(html, /00:00 → 06:00 : 17°/);
+  assert.match(html, /22:00 → 00:00 : 16°/);
+  // The colour of a step is its warmth on the shared scale.
+  assert.match(html, /var\(--warm\) 63%/);
+});
+
+test('beside the week, the card leaves the schedule out and the editor opens the chosen day', () => {
+  assert.doesNotMatch(show('ValveCard', schedulePoints(), valveValues, {}, { schedule: false }), /Table horaire/);
+  const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_wednesday: '00:00/17 07:00/20' }, {}, { day: 'wednesday' });
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 2);
 });

@@ -32,9 +32,11 @@ mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
+mod outside;
 mod phones;
 mod plan;
 mod rest;
+mod review;
 mod session;
 pub mod settings;
 mod sse;
@@ -60,6 +62,7 @@ pub use plan::image_name_ok as plan_image_name_ok;
 const BODY: usize = 256 * 1024;
 /// Recorded speech, a Home Assistant export.
 const BIG_BODY: usize = 4 * 1024 * 1024;
+pub use mcp::tool_names as mcp_tool_names;
 pub use session::UiPin;
 
 /// The household's people (`data/people.json`, their sessions), shared by
@@ -129,6 +132,9 @@ pub struct Options {
     /// A demo house (no real devices): anyone is let in, as a visitor
     /// (`[server] demo = true`).
     pub demo: bool,
+    /// MCP tools the house switched off (`[mcp] disabled_tools`): neither
+    /// listed nor callable, on `/mcp` as on `/mcp/readonly`.
+    pub mcp_disabled_tools: Vec<String>,
     /// The household's people; none: opened from `home_path`'s folder.
     pub household: Option<Household>,
     /// The household's phones (the Moli app), when a `phones` driver runs.
@@ -174,6 +180,13 @@ fn device_routes() -> Router<Hub> {
         )
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
         .route("/api/devices/{id}/live", post(rest::live))
+        .route("/api/devices/{id}/review", get(review::timeline))
+        .route("/api/devices/{id}/review/zones", get(review::zones))
+        .route(
+            "/api/devices/{id}/review/events/{event}/{what}",
+            get(review::event),
+        )
+        .route("/api/devices/{id}/review/recording", get(review::recording))
         .route(
             "/api/devices/{id}/print",
             post(rest::print).layer(DefaultBodyLimit::max(rest::MAX_PAGE)),
@@ -423,16 +436,11 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/automations/{id}/test", post(automations::test))
         .route("/api/automations/{id}/restore", post(automations::restore))
         .route("/api/events", get(sse::events))
+        .nest_service("/mcp", mcp::service(&hub, options, mcp::Route::Full))
+        // Reads only: what an agent plugged in to look cannot change.
         .nest_service(
-            "/mcp",
-            mcp::service(
-                hub.clone(),
-                options.history.clone(),
-                options.bench_path.clone(),
-                options.energy.clone(),
-                options.automations.clone(),
-                options.demo,
-            ),
+            "/mcp/readonly",
+            mcp::service(&hub, options, mcp::Route::ReadOnly),
         )
         .fallback(assets::serve)
         .layer(Extension(shutdown))

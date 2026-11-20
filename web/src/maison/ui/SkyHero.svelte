@@ -13,9 +13,14 @@
   import Icon from './Icon.svelte';
   import WeatherMap from './WeatherMap.svelte';
   import SkyDetail from './SkyDetail.svelte';
+  import SourceBadge from './SourceBadge.svelte';
+  import { readOutside } from '../lib/outside.js';
 
   const out = $derived(home.config?.outdoor ?? {});
   const w = $derived(out.weather);
+  // Measured when a station speaks (#246); the sky, the day's max/min and
+  // the sun stay the forecast's.
+  const temperature = $derived(readOutside(value, 'temperature', w));
   const day = $derived(value(w, 'daylight') !== false);
   const now = $derived(weatherOf(value(w, 'weather_code'), day));
   const hhmm = (iso) => (iso ? String(iso).slice(11, 16) : '—');
@@ -61,7 +66,7 @@
       <span class="now">
         <Icon path={now.icon} size={44} />
         <span class="words">
-          <strong class="num">{num(value(w, 'temperature'), 0)}°</strong>
+          <strong class="num">{num(temperature, 0)}°<SourceBadge key="temperature" interactive={false} /></strong>
           <span class="label">{now.label}</span>
           <span class="small num"
             >↑ {num(value(w, 'today_max'), 0)}° ↓ {num(value(w, 'today_min'), 0)}° ·
@@ -175,6 +180,29 @@
     font-weight: 300;
     letter-spacing: -0.03em;
     line-height: 1;
+  }
+
+  /* The « mesuré » / « prévu » badge by the big temperature: in the sky icon's
+     colour (the sun's, golden over the map), large enough to read at a
+     glance. A forecast is a little fainter than a measure. */
+  .words strong :global(.src) {
+    margin-left: 8px;
+    padding: 2px 9px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: normal;
+    color: var(--sun);
+    background: color-mix(in srgb, var(--sun) 16%, transparent);
+    vertical-align: 0.9em;
+  }
+
+  .live .words strong :global(.src) {
+    color: #ffd75e;
+    background: rgb(0 0 0 / 35%);
+  }
+
+  .words strong :global(.src.forecast) {
+    opacity: 0.8;
   }
 
   .label {

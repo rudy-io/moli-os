@@ -11,15 +11,28 @@ COPY locales/ /locales/
 RUN npm run build
 
 FROM rust:1-alpine AS build
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev binutils
 WORKDIR /src
 COPY . .
 COPY --from=web /web/dist web/dist
+# Opt-in: smaller runtime, at the cost of symbolized in-process backtraces.
+ARG MOLI_STRIP_SYMBOLS=false
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p moli-os && cp target/release/moli-os /moli-os
+    cargo build --release --locked -p moli-os && \
+    cp target/release/moli-os /moli-os.unstripped && \
+    cp /moli-os.unstripped /moli-os && \
+    case "$MOLI_STRIP_SYMBOLS" in \
+      false) ;; \
+      true) strip --strip-all /moli-os ;; \
+      *) echo 'MOLI_STRIP_SYMBOLS must be true or false' >&2; exit 2 ;; \
+    esac
 
-FROM scratch
+# Export a matching diagnostic binary without shipping it in the runtime image.
+FROM scratch AS diagnostics
+COPY --from=build /moli-os.unstripped /moli-os
+
+FROM scratch AS runtime
 COPY --from=build /moli-os /moli-os
 ENV MOLI_CONFIG=/data/moli.toml
 WORKDIR /data

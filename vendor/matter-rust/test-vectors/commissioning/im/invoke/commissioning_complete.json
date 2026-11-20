@@ -1,0 +1,7 @@
+{
+  "endpoint": 0,
+  "cluster": 48,
+  "command": 4,
+  "command_fields_b64": "FRg=",
+  "expected_message_b64": "FSgAKAE2AhU3ACQAACQBMCQCBBg1ARgYGCT/Cxg="
+}

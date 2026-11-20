@@ -116,7 +116,12 @@ fn demo_locked(method: &Method, path: &str) -> bool {
     };
     let plays = matches!(
         path,
-        "/api/command" | "/api/ambiance" | "/api/session" | "/api/automations/check" | "/mcp"
+        "/api/command"
+            | "/api/ambiance"
+            | "/api/session"
+            | "/api/automations/check"
+            | "/mcp"
+            | "/mcp/readonly"
     ) || one("/api/approvals/", "")
         || one("/api/automations/", "/test")
         || one("/api/automations/", "/run");

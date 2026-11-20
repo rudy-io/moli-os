@@ -1,0 +1,13 @@
+{
+  "expected": [
+    {
+      "command_ref": 0,
+      "status": 0
+    },
+    {
+      "command_ref": 1,
+      "status": 0
+    }
+  ],
+  "response_message_b64": "FSgANgEVNQE3ACQAASQBBiQCAhg1ASQAABgkAgAYGBU1ATcAJAACJAEGJAIAGDUBJAAAGCQCARgYGCT/Cxg="
+}

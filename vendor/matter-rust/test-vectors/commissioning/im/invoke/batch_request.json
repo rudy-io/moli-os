@@ -1,0 +1,17 @@
+{
+  "commands": [
+    {
+      "endpoint": 1,
+      "cluster": 6,
+      "command": 2,
+      "command_ref": 0
+    },
+    {
+      "endpoint": 2,
+      "cluster": 6,
+      "command": 0,
+      "command_ref": 1
+    }
+  ],
+  "expected_message_b64": "FSgAKAE2AhU3ACQAASQBBiQCAhg1ARgkAgAYFTcAJAACJAEGJAIAGDUBGCQCARgYJP8LGA=="
+}

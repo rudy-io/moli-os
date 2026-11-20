@@ -1,0 +1,9 @@
+{"items": [
+  {"type": "collection", "timestamp": "2026-11-13T00:00:00.000Z", "fraction": {"name": {"nl": "Restafval", "fr": "Déchets résiduels"}, "color": "#767676", "logo": {"id": "5d610b86162c063cc0400112"}}},
+  {"type": "collection", "timestamp": "2026-11-17T00:00:00.000Z", "fraction": {"name": {"nl": "PMD", "fr": "PMC"}, "color": "#66C3FA", "logo": {"id": "5d610b86162c063cc0400125"}}},
+  {"type": "collection", "timestamp": "2026-11-17T00:00:00.000Z", "fraction": {"name": {"nl": "GFT", "fr": ""}, "color": "#7EBF00", "logo": {"id": "5d610b86162c063cc0400108"}}},
+  {"type": "collection", "timestamp": "2026-11-19T00:00:00.000Z", "fraction": {"name": {"nl": "Papier-karton", "fr": "Papiers-cartons"}, "color": "#FEC91B", "logo": {"id": "5d610b86162c063cc0400123"}}, "exception": {"replacedBy": {"id": "x1"}}},
+  {"type": "collection", "timestamp": "2026-11-20T00:00:00.000Z", "fraction": {"name": {"nl": "Papier-karton", "fr": "Papiers-cartons"}, "color": "#FEC91B", "logo": {"id": "5d610b86162c063cc0400123"}}, "exception": {"replaces": {"id": "x0"}}},
+  {"type": "collection", "timestamp": "2026-11-20T00:00:00.000Z", "fraction": {"name": {"nl": "Restafval", "fr": "Déchets résiduels"}, "color": "#767676", "logo": {"id": "5d610b86162c063cc0400112"}}},
+  {"type": "collection", "timestamp": "2026-11-21T00:00:00.000Z", "fraction": {"name": {"nl": "Onbekend", "fr": "Inconnu"}, "logo": {"id": "000000000000000000000000"}}}
+], "total": 7, "pages": 1}

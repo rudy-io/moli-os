@@ -71,13 +71,14 @@ La carte vivante de ce schéma est dans le dashboard : `#/systeme` (« Comment �
 | `moli-core` | domaine pur : identifiants, points, valeurs, événements, origines, journal | [coeur](components/coeur.md) |
 | `moli-runtime` | hub, garde, superviseur, journal, étiquettes, coffre, médias | [coeur](components/coeur.md) |
 | `moli-net` | HTTPS avec certificat épinglé, TLS public, HTTP, UPnP, AirPlay 1 (RAOP), requêtes web bornées | [pilotes](components/pilotes.md) |
-| `moli-z2m`, `moli-hue`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-airplay`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-lifx`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
+| `moli-z2m`, `moli-hue`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-airplay`, `moli-appletv`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-lifx`, `moli-govee`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
 | `moli-announce` | annonces vocales communes aux enceintes qui parlent : file, `quiet`, `announce_volume`, `speaking`, synthèse Piper | [pilotes](components/pilotes.md) |
 | `moli-profile` + catalogue | moteur de profils déclaratifs (lecture **et écriture** déclarées) | [profils](components/profils.md) |
 | `moli-history` | historique SQLite, SQL en lecture seule pour agents | [historique & énergie](components/historique-energie.md) |
 | `moli-energy` | kWh et € par heure, Linky + circuits, import HA | [historique & énergie](components/historique-energie.md) |
 | `moli-automation` | automatismes en graphe, moteur déterministe, validation humaine | [automatismes](components/automatismes.md) |
 | `moli-helpers` | aides de la maison (mode, alarme, budget), comme les `input_*` de HA | [pilotes](components/pilotes.md) |
+| `moli-heating` | thermostat de pièce : sonde de la pièce, programme, consigne corrigée des vannes | [pilotes](components/pilotes.md) |
 | `moli-assistant` | Moli : conversation, création d'automatismes, import HA, textes | [moli](components/moli.md) |
 | `moli-api` | REST, SSE, MCP, sessions humaines, garde Host, bornes, dashboard embarqué | [api](components/api.md) |
 | `moli-os` | binaire : CLI, config TOML, démarrage, sauvegarde, santé | [exploitation](components/exploitation.md) |

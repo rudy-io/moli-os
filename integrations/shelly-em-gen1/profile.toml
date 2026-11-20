@@ -1,0 +1,130 @@
+# Shelly EM, première génération (« SHEM ») : deux pinces, API HTTP locale `/status`.
+# Les Shelly Gen2 et suivants ont leur pilote natif (`shelly`, websocket RPC) ; celui-ci est
+# l'ancienne API, sans websocket : Moli relit `/status`. Lecture seule : ni le relais, ni le
+# redémarrage ne sont exposés.
+# Appareil modeste (ESP8266) : un relevé toutes les 10 s, jamais plus. Ses compteurs
+# (`total`, `total_returned`, en Wh) ne tournent que si le Shelly a l'heure (SNTP) et
+# repartent de zéro après certains redémarrages : `reset = "auto"` (par défaut) dans `[energy]`.
+# Sans mot de passe sur l'appareil (authentification HTTP non prise en charge ici).
+
+[profile]
+id = "shelly-em-gen1"
+name = "Compteur Shelly EM"
+manufacturer = "Shelly"
+model = "EM (1re génération)"
+identity = "status.mac"
+mac = "status.mac"
+
+[[request]]
+id = "status"
+path = "/status"
+format = "json"
+every = "10s"
+
+# ---- pince 1 (emeters.0) ----
+
+[[point]]
+key = "power_1"
+label = "Puissance 1"
+from = "status.emeters.0.power"
+kind = "numeric"
+unit = "W"
+round = 1
+
+[[point]]
+key = "voltage_1"
+label = "Tension 1"
+from = "status.emeters.0.voltage"
+kind = "numeric"
+unit = "V"
+round = 1
+
+[[point]]
+key = "power_factor_1"
+label = "Facteur de puissance 1"
+from = "status.emeters.0.pf"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_1"
+label = "Énergie 1"
+from = "status.emeters.0.total"
+kind = "numeric"
+unit = "kWh"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "energy_returned_1"
+label = "Énergie renvoyée 1"
+from = "status.emeters.0.total_returned"
+kind = "numeric"
+unit = "kWh"
+semantic = "energy"
+scale = 0.001
+round = 3
+
+# ---- pince 2 (emeters.1) ----
+
+[[point]]
+key = "power_2"
+label = "Puissance 2"
+from = "status.emeters.1.power"
+kind = "numeric"
+unit = "W"
+round = 1
+
+[[point]]
+key = "voltage_2"
+label = "Tension 2"
+from = "status.emeters.1.voltage"
+kind = "numeric"
+unit = "V"
+round = 1
+
+[[point]]
+key = "power_factor_2"
+label = "Facteur de puissance 2"
+from = "status.emeters.1.pf"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_2"
+label = "Énergie 2"
+from = "status.emeters.1.total"
+kind = "numeric"
+unit = "kWh"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "energy_returned_2"
+label = "Énergie renvoyée 2"
+from = "status.emeters.1.total_returned"
+kind = "numeric"
+unit = "kWh"
+semantic = "energy"
+scale = 0.001
+round = 3
+
+# ---- le boîtier ----
+
+[[point]]
+key = "signal"
+label = "Signal Wi-Fi"
+from = "status.wifi_sta.rssi"
+kind = "numeric"
+unit = "dBm"
+semantic = "signal_strength"
+
+[[point]]
+key = "uptime"
+label = "En marche depuis"
+from = "status.uptime"
+kind = "numeric"
+unit = "s"
+semantic = "other"

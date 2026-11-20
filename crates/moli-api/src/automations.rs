@@ -54,6 +54,7 @@ fn failure(e: &AutomationError) -> Response {
         AutomationError::NeedsHuman | AutomationError::HumanOnly(_) => StatusCode::FORBIDDEN,
         AutomationError::Invalid(_) => StatusCode::UNPROCESSABLE_ENTITY,
         AutomationError::Conflict => StatusCode::CONFLICT,
+        AutomationError::CodeNeeded => StatusCode::UNAUTHORIZED,
         AutomationError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     error(status, &e.to_string())
@@ -174,17 +175,50 @@ pub(crate) struct Seen {
     fingerprint: String,
 }
 
+/// The version the person approves, and the house's code when they typed it
+/// for this gesture (an automation carrying an order that wants it each time).
+#[derive(Deserialize)]
+pub(crate) struct Approval {
+    fingerprint: String,
+    #[serde(default)]
+    pin: Option<String>,
+}
+
+/// The code typed for this very gesture: checked only for a person in a
+/// session (without one, nothing is approved anyway, and no code is tried),
+/// behind the same lockout as signing in.
+fn code_typed(
+    pin: Option<&str>,
+    by: Actor,
+    humans: &Sessions,
+    caller: &Caller,
+) -> Result<bool, crate::session::LoginError> {
+    match pin {
+        Some(pin) if by.human => humans.verify(pin, caller).map(|()| true),
+        _ => Ok(false),
+    }
+}
+
+fn wrong_code(e: crate::session::LoginError) -> Response {
+    crate::people_api::login_error(e, "serveur.code.incorrect")
+}
+
 pub(crate) async fn approve(
     Extension(Autos(autos)): Extension<Autos>,
     Extension(humans): Humans,
     caller: Caller,
     headers: HeaderMap,
     Path(id): Path<String>,
-    axum::Json(seen): axum::Json<Seen>,
+    axum::Json(body): axum::Json<Approval>,
 ) -> Response {
     let Some(autos) = autos else { return off() };
+    let by = actor(&headers, &humans, &caller);
+    let code = match code_typed(body.pin.as_deref(), by, &humans, &caller) {
+        Ok(code) => code,
+        Err(e) => return wrong_code(e),
+    };
     match autos
-        .approve(&id, &seen.fingerprint, actor(&headers, &humans, &caller))
+        .approve_with_code(&id, &body.fingerprint, by, code)
         .await
     {
         Ok(a) => axum::Json(view(&autos, &a)).into_response(),
@@ -197,6 +231,8 @@ pub(crate) struct Enabled {
     on: bool,
     #[serde(default)]
     fingerprint: Option<String>,
+    #[serde(default)]
+    pin: Option<String>,
 }
 
 pub(crate) async fn enabled(
@@ -208,13 +244,15 @@ pub(crate) async fn enabled(
     axum::Json(body): axum::Json<Enabled>,
 ) -> Response {
     let Some(autos) = autos else { return off() };
+    let by = actor(&headers, &humans, &caller);
+    // Switching off never wants a code: none is tried.
+    let pin = body.pin.as_deref().filter(|_| body.on);
+    let code = match code_typed(pin, by, &humans, &caller) {
+        Ok(code) => code,
+        Err(e) => return wrong_code(e),
+    };
     match autos
-        .set_enabled(
-            &id,
-            body.on,
-            body.fingerprint.as_deref(),
-            actor(&headers, &humans, &caller),
-        )
+        .set_enabled_with_code(&id, body.on, body.fingerprint.as_deref(), by, code)
         .await
     {
         Ok(a) => axum::Json(view(&autos, &a)).into_response(),

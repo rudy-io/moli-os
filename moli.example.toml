@@ -51,6 +51,12 @@ timezone = "Europe/Paris"
 # to = "07:30"
 # rooms = []            # empty = the whole home
 
+# Agents over MCP. /mcp offers every tool; /mcp/readonly the reads only (no
+# send_command, set_label, save_automation_draft). A tool switched off here is
+# gone from both: not listed, not callable. Humans only, like [guard].
+# [mcp]
+# disabled_tools = ["camera_snapshot"]   # no camera image leaves through an agent
+
 # Energy: cumulative counters (Wh or kWh) become kWh and cost per hour,
 # kept forever in data/energy.db. Roles: grid (billed: the reference),
 # total (whole home, fine), circuit (part of the total).
@@ -66,6 +72,31 @@ timezone = "Europe/Paris"
 # price = 0.14           # optional: without it, the house's price chosen on the Energy page
 # reset = "never"        # an index; default "auto" handles daily counters
 
+# A supplier's price that changes (the `engie` driver's), plus what it leaves
+# out per kWh (network costs, excise, certificates, VAT included); `price`
+# serves while the point has no value, and prices imported history:
+# [[energy.meter]]
+# id = "p1-import-day"
+# name = "Day offtake"
+# point = "esphome:aabbccddeeff/cumulative_active_import_day"
+# role = "grid"
+# reset = "never"
+# price = 0.367
+# price_point = "engie:contract-000000000002/electricity_offtake_peak"
+# price_extra = 0.11692
+
+# Natural gas, counted and priced apart from the electricity: a P1 gas index
+# in m³ and the supplier's conversion factor (on the bill):
+# [[energy.meter]]
+# id = "gas"
+# name = "Gas"
+# point = "esphome:aabbccddeeff/gas_consumption"
+# role = "gas"
+# reset = "never"
+# kwh_per_unit = 11.3868
+# price_point = "engie:contract-000000000002/gas_offtake"
+# price_extra = 0.0375
+
 # Without a local reading of the meter, the `enedis` driver reports yesterday's
 # consumption hour by hour:
 # [[energy.meter]]
@@ -76,6 +107,41 @@ timezone = "Europe/Paris"
 # history = true
 # price = 0.17
 
+# A home battery: what went in and out (lifetime indexes, no price), plus its
+# charge and power for the live views (power positive while charging; set
+# discharge_positive = true for an inverter that counts the other way):
+# [[energy.meter]]
+# id = "batterie-in"
+# name = "Battery in"
+# point = "bms:aabbccddeeff/charged_energy"
+# role = "charge"
+# reset = "never"
+# [[energy.meter]]
+# id = "batterie-out"
+# name = "Battery out"
+# point = "bms:aabbccddeeff/discharged_energy"
+# role = "discharge"
+# reset = "never"
+# [energy.battery]
+# soc = "bms:aabbccddeeff/soc"
+# power = "bms:aabbccddeeff/power"
+# capacity_kwh = 10.0
+# A battery that says only two positive powers (a Jackery): integrate them;
+# without [energy.battery] power, the live power is charge − discharge (its
+# charge still goes in [energy.battery] soc = "jackery:aabbccddeeff/battery").
+# [[energy.meter]]
+# id = "jackery-in"
+# name = "Battery in"
+# point = "jackery:aabbccddeeff/charge_power"
+# role = "charge"
+# integrate = true
+# [[energy.meter]]
+# id = "jackery-out"
+# name = "Battery out"
+# point = "jackery:aabbccddeeff/discharge_power"
+# role = "discharge"
+# integrate = true
+
 # Light fixtures: bulbs and the relay that feeds them as one light
 # (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb
 # answers, and comes back on its own when the light is switched on.
@@ -85,6 +151,30 @@ timezone = "Europe/Paris"
 # room = "Salon"
 # bulbs = ["hue:…", "hue:…"]
 # power = "tuya:…/switch_1"
+
+# The weather outside (dehors:meteo): for each meaning, the fresh measure of
+# the first station, else the fresh forecast, else the latest value known.
+# Read-only; nothing is converted. Falling back to the forecast is a choice,
+# not a safety: an automation that must act on a measure checks
+# dehors:meteo/<key>_source (see docs/components/pilotes.md, `dehors`).
+# [outdoor]
+# forecast = ["meteo:…", "air:…"]
+# forecast_stale_after = "1h"   # optional: 30 min by default
+#
+# [[outdoor.station]]           # in order of preference
+# device = "z2m:0x…"
+# stale_after = "15m"           # optional: 30 min by default
+
+# The façades the sun may be on (docs/components/pilotes.md, `dehors:soleil`):
+# dehors:soleil/<id>_incidence and <id>_sun, for the shutters.
+# [sun]
+# enter = 62                    # optional: the sun is on below this incidence
+# exit = 75                     # optional: no longer above this one (> enter)
+#
+# [[sun.facade]]
+# id = "sud"
+# name = "South"
+# azimuth = 180                 # where the façade looks, clockwise from north
 
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]
@@ -128,6 +218,20 @@ base_topic = "zigbee2mqtt"
 # mqtt_name = "zwave-js-ui"  # the gateway's MQTT client name (its MQTT "Name" field; default "zwave-js-ui")
 # username = "moli-os"
 # password_env = "MOLI_ZWAVE_PASSWORD"
+
+# 433 MHz sensors and plugs (Oregon, Chacon…), through an existing rfxcom2mqtt
+# bridge. Only the devices it announces through its discovery become devices.
+# [[driver]]
+# id = "rfxcom"
+# kind = "rfxcom2mqtt"
+#
+# [driver.options]
+# host = "127.0.0.1"
+# port = 1883
+# base_topic = "rfxcom2mqtt"         # the bridge's mqtt.base_topic
+# discovery_topic = "homeassistant"  # the bridge's homeassistant.discovery_topic
+# username = "moli-os"
+# password_env = "MOLI_RFXCOM_PASSWORD"
 
 # Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
 # keep the pairing key encrypted; press the link button when asked.
@@ -176,6 +280,27 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 
+# Viessmann heat pump or boiler, through the ViCare cloud. Needs the master key and three
+# secrets (client_id, username, password); see integrations/vicare/onboarding.md.
+# [[driver]]
+# id = "pac"
+# kind = "vicare"
+#
+# [driver.options]
+# installation = 1234567                    # only when the account has several installations
+# redirect_uri = "vicare://oauth-callback/everest"   # only if the API key declares another
+
+# Synology NAS (DSM, HTTPS). Needs the master key and two secrets (username, password: an administrator
+# account); see integrations/synology/onboarding.md. Orders (wake, shutdown, reboot) need a person's approval.
+# [[driver]]
+# id = "nas"
+# kind = "synology"
+#
+# [driver.options]
+# host = "192.168.0.x"
+# port = 5001                  # DSM's HTTPS port, if changed
+# mac = "aa:bb:cc:dd:ee:ff"    # to wake it (Wake-on-LAN); learned by itself on a local network
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
@@ -206,3 +331,13 @@ base_topic = "zigbee2mqtt"
 # chat = "local"        # la conversation (obligatoire avec des fournisseurs)
 # # voice, builder : le même fournisseur que chat pour l'instant
 # # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
+
+# Native Matter: production attestation roots, pairing code only in encrypted vault.
+# See integrations/matter/README.md (IP / multi-admin; no Bluetooth commissioning).
+# Optional driver.options.udp_port = 5541 for a fixed UDP listener and scoped host firewall rule.
+# [[driver]]
+# id = "matter"
+# kind = "matter"
+# [driver.options]
+# paa_roots = "/run/matter-trust/paa"
+# cd_roots = "/run/matter-trust/cd"

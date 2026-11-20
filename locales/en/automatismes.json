@@ -358,5 +358,8 @@
   "automatismes.routines.titre": "Routines",
   "automatismes.routines.tous": "All automations",
   "automatismes.routines.lancee": "“{nom}” started",
-  "automatismes.routines.erreur": "{nom}: {message}"
+  "automatismes.routines.erreur": "{nom}: {message}",
+  "automatismes.inspecteur.une_semaine_sur": "One week in",
+  "automatismes.inspecteur.a_partir_de": "Starting the week of",
+  "automatismes.texte.semaines": "{texte} · 1 wk in {n}"
 }

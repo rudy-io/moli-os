@@ -8,3 +8,10 @@
 - Origine : rien de repris. Pas de fixture : le handshake et les trames sont testés contre un
   répondeur écrit avec les mêmes primitives ; la vérification réelle se fait sur l'appareil (une
   mauvaise clé y donne « Handshake MAC failure »).
+
+## Migration
+
+Un appareil qui n'est pas un satellite (prise, lecteur P1…) et qui était déjà installé change de
+points à la mise à jour : `state`, `volume`, `muted`… laissent la place à un point par entité
+(capteurs, capteurs binaires, capteurs texte, interrupteurs). Un automatisme ou une carte qui
+visait les anciens points est à refaire sur les nouveaux.

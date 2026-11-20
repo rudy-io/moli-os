@@ -26,6 +26,13 @@ pub trait Driver: Send + Sync + 'static {
         Arc::from(self.kind())
     }
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>>;
+    /// Its orders change nothing outside Moli (the alarm's state, kept by
+    /// Moli itself): a mirror house lets them through, so the mirror runs
+    /// it in the shadow of the real house. What it then asks of real
+    /// devices is still stopped.
+    fn stays_inside(&self) -> bool {
+        false
+    }
 }
 
 /// A validated write addressed to a driver. The driver must answer through
@@ -49,6 +56,11 @@ impl CommandRequest {
     #[must_use]
     pub fn abandoned(&self) -> bool {
         self.reply.is_closed() || Instant::now() >= self.deadline
+    }
+
+    /// Resolves when the caller no longer waits for this command.
+    pub async fn cancelled(&mut self) {
+        self.reply.closed().await;
     }
 
     /// Reports the outcome. Dropping the request without replying is
@@ -245,6 +257,14 @@ impl DriverCtx {
         }
     }
 
+    /// Declares that `device` (one of ours) has a past to review (events,
+    /// recordings, zones), from its NVR.
+    pub fn provide_review(&self, device: &DeviceId, source: Arc<dyn crate::media::ReviewSource>) {
+        if self.owns(device) {
+            self.hub.provide_review(device, source);
+        }
+    }
+
     /// Declares that `device` (one of ours) prints documents.
     pub fn provide_printing(&self, device: &DeviceId, sink: Arc<dyn crate::media::PrintSink>) {
         if self.owns(device) {
@@ -305,10 +325,49 @@ impl DriverCtx {
             .map(|sample| sample.value)
     }
 
+    /// Every change in the house (states, devices, availability), to follow
+    /// other devices: read-only, the driver still acts on its own only.
+    /// The whole house, so for trusted drivers: compiled into Moli and
+    /// reviewed like the rest of it (the alarm), never a plug-in.
+    #[must_use]
+    pub fn watch(&self) -> tokio::sync::broadcast::Receiver<moli_core::Event> {
+        self.hub.subscribe()
+    }
+
+    /// The last value of any point of the house, with its time (trusted
+    /// drivers only, as [`DriverCtx::watch`]).
+    #[must_use]
+    pub fn read(&self, point: &PointId) -> Option<moli_core::Sample> {
+        self.hub.state(point)
+    }
+
+    /// Whether a point of the house is there to be read (its device known,
+    /// with this point, not offline).
+    #[must_use]
+    pub fn answers(&self, point: &PointId) -> bool {
+        self.hub.answers(point)
+    }
+
+    /// What people call a device (its name in Moli), if the house has it.
+    #[must_use]
+    pub fn name_of(&self, device: &DeviceId) -> Option<String> {
+        self.hub
+            .describe(device)
+            .map(|(d, label)| label.name.unwrap_or_else(|| d.native_name.to_string()))
+    }
+
     /// Records a value for a point of one of this instance's devices.
     pub fn set_state(&self, device: &DeviceId, key: &str, value: Value) {
         if self.owns(device) {
             self.hub.set_state(device, key, value);
+        }
+    }
+
+    /// Records a value read at `ts` (ms since the epoch), not now: for a
+    /// value copied from another device's reading, whose age it keeps.
+    pub fn set_state_at(&self, device: &DeviceId, key: &str, value: Value, ts: u64) {
+        if self.owns(device) {
+            self.hub.set_state_at(device, key, value, ts);
         }
     }
 
@@ -375,5 +434,67 @@ impl MediaPublisher {
             from: Some(from.to_owned()),
             ts: moli_core::now_ms(),
         });
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn caller_disappearance_drops_in_flight_operation() {
+        // A pending library operation must be dropped, not just left running.
+        struct Pending(Option<oneshot::Sender<()>>);
+        impl Drop for Pending {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+
+        let (reply, receiver) = oneshot::channel();
+        let (tx, mut rx) = mpsc::channel(1);
+        let id: DeviceId = "synthetic:device".into();
+        tx.send(CommandRequest {
+            point: PointId::new(&id, "on"),
+            device: Arc::new(Device {
+                id,
+                instance: "synthetic".into(),
+                native_name: "Synthetic".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: vec![],
+                points: vec![],
+            }),
+            key: "on".into(),
+            value: Value::Bool(true),
+            deadline: Instant::now() + std::time::Duration::from_secs(60),
+            reply,
+        })
+        .await
+        .unwrap();
+        let mut command = rx.recv().await.unwrap();
+        let (dropped, observed) = oneshot::channel();
+        let guard = Pending(Some(dropped));
+        let operation = async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        };
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), command.cancelled())
+                .await
+                .is_err()
+        );
+        drop(receiver);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            tokio::select! {
+                () = command.cancelled() => {},
+                () = operation => panic!("operation unexpectedly completed"),
+            }
+            observed.await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

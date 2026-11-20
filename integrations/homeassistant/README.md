@@ -53,7 +53,10 @@ create the token from that user's profile.
 
 Only feature-advertised operations are writable. Missing or invalid readings on declared readable points are explicit `null`,
 replacing previous samples; write-only controls never get a fabricated state. Binary HA door/window/opening `on` means open; Moli `contact`
-is **true when closed**. Unknown binary classes have `Other` meaning. Text state
+is **true when closed**. Unknown binary classes have `Other` meaning. A numeric `sensor` of
+class `moisture` (a soil's, in %) has the key `soil_moisture` and the `soil_moisture` meaning
+(#169). **Migration**: it was `value` before; its earlier history stays under `value`, and an
+automation or favourite that read `value` must be updated. Text state
 never infers OnOff. Climate temperatures need an explicit °C/°F unit from the entity
 or, when absent, HA’s global `unit_system.temperature` from `/api/config`; °F is converted
 both ways. An invalid explicit entity unit is never hidden by the global fallback.

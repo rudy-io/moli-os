@@ -46,7 +46,7 @@ Une automatisation = un **graphe** de nœuds reliés (comme n8n), stocké dans
 |---|---|---|
 | Déclencheurs | `when_state` | `point`, `to?`, `from?`, `for_s` (maintenu N s) |
 | | `when_threshold` | `point`, `above?`, `below?`, `for_s` (franchissement) |
-| | `at_time` | `at` « HH:MM », `days` (1 = lundi … 7) |
+| | `at_time` | `at` « HH:MM », `days` (1 = lundi … 7), `weeks` (1 à 8, défaut 1 : une semaine sur N) et `from` (date de la semaine de départ, obligatoire dès que `weeks` > 1 ; les semaines vont du lundi au dimanche) |
 | | `at_sun` | `event` rise/set, `offset_min`, `days` |
 | | `every` | `minutes` |
 | | `on_start`, `manual` | — |
@@ -70,6 +70,14 @@ reçu, ou si le dernier remonte à au moins `for_s` secondes. Chaque nouveau rel
 le délai à zéro, même si sa valeur reste identique. Pour vérifier régulièrement ce
 silence, relier un déclencheur `every` à un `if` contenant la règle `stale`.
 
+Un déclencheur `when_state` sur un appui (point de sens `press`, #211) se lit comme un
+appui, avec les mots de la pastille : « quand Bouton reçoit un appui double », « quand
+Bouton reçoit un appui » sans valeur (ou sur `initial_press`, le début d'un appui Hue) ; un
+appui long Hue (`long_release`) se dit « maintenu » ; une valeur inconnue, telle quelle. Sur
+une télécommande à plusieurs boutons, le bouton est nommé : « quand Variateur · Bouton 2
+reçoit un appui simple ». Un appui ne dure pas : un `for_s` sur un appui est signalé en
+avertissement (le déclencheur partirait après le dernier appui, pas pendant).
+
 ## Journal et coupure
 
 Chaque modification d'un automatisme entre au journal du hub (`Action::Automation` :
@@ -91,7 +99,8 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
   après un redémarrage dans la même minute). L'heure sautée au passage à l'heure d'été ne
   tire pas (comme HA).
 - Soleil : calcul astronomique local (NOAA, ±1 min, vérifié contre un almanach) depuis
-  `[automations] latitude/longitude` ; à défaut, le dernier point `daylight` frais
+  `[automations] latitude/longitude`, dans `moli_core::sun` : les mêmes formules donnent
+  `dehors:soleil` (élévation, azimut, #258, voir [pilotes.md](pilotes.md)) ; à défaut, le dernier point `daylight` frais
   de la météo. Sans position ni mesure fraîche, les conditions jour/nuit utilisent
   la dernière observation connue, même après redémarrage avec la météo hors ligne.
   Ce repli est une estimation qui reste figée tant que la météo ne revient pas ;

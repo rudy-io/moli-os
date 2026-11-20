@@ -1,0 +1,20 @@
+[package]
+name = "moli-kasa"
+description = "Moli OS driver for TP-Link Kasa plugs on their legacy local protocol (TCP 9999, XOR)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tracing.workspace = true
+
+[lints]
+workspace = true

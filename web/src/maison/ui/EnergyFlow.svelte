@@ -1,0 +1,271 @@
+<script>
+  import { onMount } from 'svelte';
+  import { hub } from '../lib/home.svelte.js';
+  import { energy, useEnergy, kwh, watts } from '../lib/energy-live.svelte.js';
+  import { t } from '../../lib/i18n.svelte.js';
+  import Icon from './Icon.svelte';
+  import { batteryNow, splitFlows } from '../lib/battery.js';
+
+  /** Where the energy goes right now: the grid (bought, sent back), the
+   *  panels, the house, and gas today. From the meters' live powers
+   *  (`power` of the grid, export and solar meters): the house is what was
+   *  bought plus what the panels made, less what went out. */
+  /** On the home page (`home`), only when there is more than the grid:
+   *  without panels nor export, the energy card above says it all. */
+  let { home = false } = $props();
+
+  onMount(useEnergy);
+
+  const s = $derived(energy.summary);
+  const current = (point) => {
+    if (!point) return null;
+    const i = point.indexOf('/');
+    const v = hub.devices[point.slice(0, i)]?.state?.[point.slice(i + 1)]?.value;
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  // Several meters can share one power point (a P1's day and night
+  // indexes): each point once. Signed: a single clamp on the supply reads
+  // below zero when the house sends power out.
+  const powerOf = (role) => {
+    const points = [...new Set((s?.meters ?? []).filter((m) => m.role === role && m.power).map((m) => m.power))];
+    if (!points.length) return null;
+    const values = points.map(current).filter((v) => v != null);
+    return values.length ? values.reduce((a, v) => a + v, 0) : null;
+  };
+  const positive = (v) => (v == null ? null : Math.max(0, v));
+  const kwhOf = (role, period) => {
+    const ids = (s?.meters ?? []).filter((m) => m.role === role).map((m) => m.id);
+    if (!ids.length || !period) return null;
+    return ids.reduce((a, id) => a + (period.meters[id]?.kwh ?? 0), 0);
+  };
+
+  const hasExport = $derived((s?.meters ?? []).some((m) => m.role === 'export'));
+  const gridNow = $derived(powerOf('grid') ?? powerOf('total'));
+  const bought = $derived(positive(gridNow));
+  // Without an export meter, what the grid meter reads below zero went out.
+  const sent = $derived(hasExport ? (positive(powerOf('export')) ?? 0) : gridNow == null ? 0 : Math.max(0, -gridNow));
+  const made = $derived(positive(powerOf('solar')));
+  const hasSolar = $derived((s?.meters ?? []).some((m) => m.role === 'solar'));
+  const shown = $derived(!home || hasSolar || hasExport);
+  const hasGas = $derived((s?.meters ?? []).some((m) => m.role === 'gas'));
+  // The home battery, positive while it charges: it takes from the house's
+  // share, and gives back to it while it discharges.
+  const battery = $derived(batteryNow(s, current));
+  const batteryW = $derived(battery?.power ?? null);
+  const hasBattery = $derived(batteryW != null);
+  const house = $derived(bought == null ? null : Math.max(0, bought + (made ?? 0) - sent - (batteryW ?? 0)));
+  // Who feeds whom: the battery charges from the sun first, then the grid;
+  // the sun then feeds the house, the rest goes out (`splitFlows`).
+  const split = $derived(splitFlows({ bought, made, sent, batteryW }));
+  const toGrid = $derived(split.solarToGrid);
+  const toHouse = $derived(split.solarToHouse);
+
+  const today = $derived(s?.today);
+  const boughtToday = $derived(kwhOf('grid', today) ?? kwhOf('total', today));
+  const sentToday = $derived(kwhOf('export', today));
+  const madeToday = $derived(kwhOf('solar', today));
+  const gasToday = $derived(today?.gas?.kwh ?? null);
+
+  // A dot's trip: faster with more power, none below a trickle.
+  const duration = (w) => `${Math.min(6, Math.max(0.7, 2500 / Math.max(w, 1))).toFixed(2)}s`;
+  const flowing = (w) => w != null && w >= 5;
+
+  const PATHS = {
+    solarHouse: 'M 200 92 C 200 170 290 172 302 172',
+    solarGrid: 'M 200 92 C 200 170 110 172 98 172',
+    gridHouse: 'M 98 180 L 302 180',
+    gasHouse: 'M 340 92 L 340 136',
+    solarBattery: 'M 200 92 L 200 238',
+    gridBattery: 'M 98 186 C 170 186 194 200 194 238',
+    batteryGrid: 'M 194 238 C 194 200 170 186 98 186',
+    batteryHouse: 'M 206 238 C 206 200 230 186 302 186',
+  };
+</script>
+
+{#if s && bought != null && shown}
+  <section class="card flow" class:home aria-label={t('energie.flux.titre')}>
+    <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.flux.titre')}</h2></div>
+    <svg viewBox="0 0 400 {hasBattery ? 324 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
+      {#if hasSolar}
+        <path class="line solar" d={PATHS.solarHouse} />
+        <path class="line export" d={PATHS.solarGrid} />
+      {/if}
+      <path class="line grid" d={PATHS.gridHouse} />
+      {#if hasGas}<path class="line gas" d={PATHS.gasHouse} />{/if}
+      {#if hasBattery}
+        {#if hasSolar}<path class="line solar" d={PATHS.solarBattery} />{/if}
+        <path class="line grid" d={PATHS.gridBattery} />
+        <path class="line battery" d={PATHS.batteryHouse} />
+      {/if}
+
+      {#if hasSolar && flowing(toHouse)}
+        {#key duration(toHouse)}<circle class="dot solar" r="4"><animateMotion dur={duration(toHouse)} repeatCount="indefinite" path={PATHS.solarHouse} /></circle>{/key}
+      {/if}
+      {#if hasSolar && flowing(toGrid)}
+        {#key duration(toGrid)}<circle class="dot export" r="4"><animateMotion dur={duration(toGrid)} repeatCount="indefinite" path={PATHS.solarGrid} /></circle>{/key}
+      {/if}
+      {#if hasBattery}
+        {#each [['solar', split.solarToBattery, PATHS.solarBattery], ['grid', split.gridToBattery, PATHS.gridBattery], ['battery', split.batteryToHouse, PATHS.batteryHouse], ['battery', split.batteryToGrid, PATHS.batteryGrid]] as [kind, w, path] (path)}
+          {#if flowing(w)}
+            {#key duration(w)}<circle class="dot {kind}" r="4"><animateMotion dur={duration(w)} repeatCount="indefinite" {path} /></circle>{/key}
+          {/if}
+        {/each}
+      {/if}
+      {#if flowing(split.gridToHouse)}
+        {#key duration(split.gridToHouse)}<circle class="dot grid" r="4"><animateMotion dur={duration(split.gridToHouse)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
+      {/if}
+
+      {#if hasSolar}
+        <g class="node solar" transform="translate(200 56)">
+          <circle r="36" />
+          <text class="label" y="-46">{t('energie.flux.solaire')}</text>
+          <text class="big" y="2">{watts(made ?? 0)}</text>
+          <text class="small" y="18">{kwh(madeToday)} kWh</text>
+        </g>
+      {/if}
+      {#if hasGas}
+        <g class="node gas" transform="translate(340 56)">
+          <circle r="36" />
+          <text class="label" y="-46">{t('energie.flux.gaz')}</text>
+          <text class="big" y="6">{kwh(gasToday)} kWh</text>
+        </g>
+      {/if}
+      <g class="node grid" transform="translate(60 176)">
+        <circle r="38" />
+        <text class="in" y="-4">→ {watts(bought)}</text>
+        <text class="out" y="13">← {watts(sent)}</text>
+        <text class="label" y="56">{t('energie.flux.reseau')}</text>
+      </g>
+      {#if hasBattery}
+        <g class="node battery" transform="translate(200 268)">
+          <circle r="30" />
+          <text class="label" y="46">{t('energie.flux.batterie')}</text>
+          <text class="big" y="0">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
+          <text class="small" y="15">{batteryW > 0 ? '↓' : batteryW < 0 ? '↑' : ''} {watts(Math.abs(batteryW))}</text>
+        </g>
+      {/if}
+      <g class="node house" transform="translate(340 176)">
+        <circle r="38" />
+        <text class="big" y="2">{watts(house)}</text>
+        <text class="label" y="56">{t('energie.flux.maison')}</text>
+      </g>
+    </svg>
+    <p class="muted small">{t('energie.flux.aujourdhui', { achete: kwh(boughtToday), injecte: kwh(sentToday) })}</p>
+  </section>
+{/if}
+
+<style>
+  /* On the home page, spaced like the other cards of its column. */
+  .flow.home {
+    margin-top: 20px;
+  }
+
+  .flow svg {
+    width: 100%;
+    height: auto;
+    max-width: 460px;
+    display: block;
+    margin: 0 auto;
+  }
+
+  .line {
+    fill: none;
+    stroke-width: 2;
+    opacity: 0.55;
+  }
+
+  .line.solar,
+  .dot.solar {
+    stroke: var(--warm);
+    fill: var(--warm);
+  }
+
+  .line.export,
+  .dot.export {
+    stroke: var(--good);
+    fill: var(--good);
+  }
+
+  .line.grid,
+  .dot.grid {
+    stroke: var(--cool);
+    fill: var(--cool);
+  }
+
+  .line.gas {
+    stroke: var(--alert);
+  }
+
+  .line.battery,
+  .dot.battery {
+    stroke: var(--good);
+    fill: var(--good);
+  }
+
+  .line.solar,
+  .line.export,
+  .line.grid,
+  .line.gas,
+  .line.battery {
+    fill: none;
+  }
+
+  .node circle {
+    fill: var(--surface);
+    stroke-width: 3;
+  }
+
+  .node.solar circle {
+    stroke: var(--warm);
+  }
+
+  .node.grid circle {
+    stroke: var(--cool);
+  }
+
+  .node.house circle {
+    stroke: var(--cool);
+  }
+
+  .node.gas circle {
+    stroke: var(--alert);
+  }
+
+  .node.battery circle {
+    stroke: var(--good);
+  }
+
+  text {
+    text-anchor: middle;
+    fill: var(--ink);
+    font-size: 12px;
+  }
+
+  text.big {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  text.small,
+  text.label {
+    fill: var(--ink-3);
+    font-size: 11px;
+  }
+
+  text.in {
+    fill: var(--cool);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  text.out {
+    fill: var(--good);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .small {
+    margin: 4px 0 0;
+    text-align: center;
+  }
+</style>

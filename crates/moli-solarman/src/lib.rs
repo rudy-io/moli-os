@@ -1,5 +1,6 @@
-//! Solarman Wi-Fi loggers (protocol V5, TCP 8899) and the Deye
-//! micro-inverters behind them, 100 % local and read-only.
+//! Solarman Wi-Fi loggers (protocol V5, TCP 8899) and the inverters behind
+//! them (Deye and TSUN micro-inverters, Solis and ZCS Azzurro inverters),
+//! 100 % local and read-only.
 //!
 //! One instance = one logger. A micro-inverter sleeps at night, its logger
 //! with it: the device goes offline without a word (no « waiting », no
@@ -8,7 +9,11 @@
 //! address, looked for only by day (at night its silence is normal).
 
 mod deye;
+mod regs;
+mod solis;
+mod tsun;
 mod v5;
+mod zcs;
 
 use std::net::Ipv4Addr;
 use std::sync::{Mutex, PoisonError};
@@ -26,6 +31,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpStream, UdpSocket};
 
 pub use deye::{Counters, Info};
+use regs::{Ask, How, Map, Regs};
 use v5::{Frame, NoData};
 
 /// How often the inverter is read (ha-solarman: 5 s).
@@ -62,6 +68,55 @@ pub struct Config {
     /// Where the day ends (the day's production goes back to 0).
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    /// The inverter behind the logger: `deye` (micro-inverter, the default),
+    /// `solis` (S6-GR1P string inverter), `tsun-titan` or `tsun-gen4` (TSUN
+    /// micro-inverters), `zcs-tl` or `zcs-hyd` (ZCS Azzurro 1PH TL-V3 and
+    /// HYD-ZSS-HP).
+    #[serde(default)]
+    pub model: Model,
+    /// How the logger is spoken to on its port: `v5` (Solarman's frames,
+    /// the default) or `modbus_tcp` (some sticks, a Solis one among them).
+    #[serde(default)]
+    pub transport: Transport,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    #[default]
+    V5,
+    ModbusTcp,
+}
+
+/// The inverter's register map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Model {
+    #[default]
+    Deye,
+    Solis,
+    /// TSUN TITAN micro-inverters (TSOL-MP), TSUN's own framing.
+    TsunTitan,
+    /// TSUN GEN4 micro-inverters (TSOL-MX).
+    TsunGen4,
+    /// ZCS Azzurro 1PH TL-V3 (single-phase grid inverter).
+    ZcsTl,
+    /// ZCS Azzurro HYD-ZSS-HP (single-phase hybrid).
+    ZcsHyd,
+}
+
+impl Model {
+    /// The register map of the families read block by block; `None` for
+    /// Deye and Solis, which have their own loops.
+    fn map(self) -> Option<Box<dyn Map>> {
+        Some(match self {
+            Self::Deye | Self::Solis => return None,
+            Self::TsunTitan => Box::new(tsun::Tsun::new(tsun::Family::Titan)),
+            Self::TsunGen4 => Box::new(tsun::Tsun::new(tsun::Family::Gen4)),
+            Self::ZcsTl => Box::new(zcs::Zcs::new(zcs::Family::Tl)),
+            Self::ZcsHyd => Box::new(zcs::Zcs::new(zcs::Family::Hyd)),
+        })
+    }
 }
 
 fn default_port() -> u16 {
@@ -111,14 +166,62 @@ struct Logger {
     serial: u32,
     slave: u8,
     sequence: u16,
+    transport: Transport,
 }
 
 impl Logger {
-    /// Reads `count` registers from `start`.
-    async fn read(&mut self, (start, count): (u16, u16)) -> anyhow::Result<Vec<u16>> {
+    /// Reads `count` holding registers from `start` (Deye).
+    async fn read(&mut self, block: (u16, u16)) -> anyhow::Result<Vec<u16>> {
+        self.read_with(v5::HOLDING, block).await
+    }
+
+    /// Reads `count` registers from `start` with a Modbus read `function`.
+    async fn read_with(
+        &mut self,
+        function: u8,
+        (start, count): (u16, u16),
+    ) -> anyhow::Result<Vec<u16>> {
         self.sequence = self.sequence % 255 + 1;
         let sequence = self.sequence;
-        let request = v5::read_request(self.serial, sequence, self.slave, start, count);
+        let request = match self.transport {
+            Transport::V5 => {
+                v5::read_request(self.serial, sequence, self.slave, function, start, count)
+            }
+            Transport::ModbusTcp => v5::tcp_request(sequence, self.slave, function, start, count),
+        };
+        let (transport, serial, slave) = (self.transport, self.serial, self.slave);
+        self.exchange(request, |buf| match transport {
+            Transport::V5 => v5::parse(buf, serial, sequence, function, count),
+            Transport::ModbusTcp => v5::tcp_parse(buf, sequence, slave, function, count),
+        })
+        .await
+    }
+
+    /// Reads one block of a register map, the way the map asks for it.
+    async fn ask(&mut self, ask: Ask) -> anyhow::Result<Vec<u16>> {
+        let (code, sub) = match ask.how {
+            How::Holding => return self.read((ask.start, ask.count)).await,
+            How::Native(code, sub) => (code, sub),
+        };
+        if self.transport != Transport::V5 {
+            bail!("this inverter is only read through the logger's V5 frames");
+        }
+        self.sequence = self.sequence % 255 + 1;
+        let (serial, sequence) = (self.serial, self.sequence);
+        let request = v5::native_request(serial, sequence, (code, sub), ask.start, ask.count);
+        self.exchange(request, |buf| {
+            v5::native_parse(buf, serial, sequence, code, ask.start, ask.count)
+        })
+        .await
+    }
+
+    /// Sends `request` and waits for the registers `parse` finds in what
+    /// comes back.
+    async fn exchange(
+        &self,
+        request: Vec<u8>,
+        parse: impl Fn(&[u8]) -> anyhow::Result<Frame>,
+    ) -> anyhow::Result<Vec<u16>> {
         let exchange = async {
             let mut stream = TcpStream::connect((self.host.as_str(), self.port))
                 .await
@@ -126,7 +229,7 @@ impl Logger {
             stream.write_all(&request).await?;
             let mut buf = Vec::new();
             loop {
-                match v5::parse(&buf, self.serial, sequence, count)? {
+                match parse(&buf)? {
                     Frame::Registers(registers, _) => return Ok(registers),
                     Frame::Other(n) => {
                         buf.drain(..n);
@@ -211,6 +314,7 @@ impl Solarman {
                 serial,
                 slave,
                 sequence: 0,
+                transport: self.config.transport,
             };
             match there.read(deye::INFO).await {
                 Ok(_) => true,
@@ -334,8 +438,15 @@ async fn run(solarman: &Solarman, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         serial,
         slave: config.slave,
         sequence: 0,
+        transport: config.transport,
     };
     let id = ctx.device_id(&serial.to_string());
+    if config.model == Model::Solis {
+        return run_solis(ctx, &mut logger, &id).await;
+    }
+    if let Some(map) = config.model.map() {
+        return run_map(ctx, &mut logger, &id, map, &tz).await;
+    }
     let mut inverter: Option<Inverter> = None;
     let mut online: Option<bool> = None;
     let mut failures = 0u32;
@@ -445,6 +556,144 @@ async fn run(solarman: &Solarman, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     }
 }
 
+/// A Solis inverter: no identity block to read, two blocks of input
+/// registers every turn. Silent at night like the micro-inverters: the
+/// device goes offline without a word.
+async fn run_solis(ctx: &mut DriverCtx, logger: &mut Logger, id: &DeviceId) -> anyhow::Result<()> {
+    let mut counters = solis::Counters::default();
+    let mut shown = false;
+    let mut online: Option<bool> = None;
+    if !ctx.known_devices().is_empty() {
+        ctx.ready();
+    }
+    loop {
+        let mut regs = Vec::new();
+        let mut failed = None;
+        for block in solis::BLOCKS {
+            match logger.read_with(v5::INPUT, block).await {
+                Ok(r) => regs.extend(r),
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        match failed {
+            None => {
+                if !shown {
+                    ctx.upsert_device(solis::device(ctx.instance(), id.clone()));
+                    ctx.ready();
+                    shown = true;
+                    tracing::info!(instance = %ctx.instance(), "solis inverter read");
+                }
+                for (key, value) in solis::readings(&regs, &mut counters, std::time::Instant::now())
+                {
+                    ctx.set_state(id, &key, value);
+                }
+                if online != Some(true) {
+                    online = Some(true);
+                    ctx.set_availability(id, true);
+                }
+            }
+            Some(e) => {
+                if online != Some(false) {
+                    online = Some(false);
+                    ctx.set_availability(id, false);
+                    tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "solis inverter silent");
+                }
+            }
+        }
+        if !pause(ctx, POLL).await {
+            return Ok(());
+        }
+    }
+}
+
+/// An inverter read block by block from its register map (TSUN, ZCS):
+/// silent at night like the others, the device goes offline without a word
+/// and the day's values go back to 0 when a new day begins meanwhile.
+async fn run_map(
+    ctx: &mut DriverCtx,
+    logger: &mut Logger,
+    id: &DeviceId,
+    mut map: Box<dyn Map>,
+    tz: &TimeZone,
+) -> anyhow::Result<()> {
+    let mut shown = false;
+    let mut refused = false;
+    let mut online: Option<bool> = None;
+    // The day the published « today » values belong to.
+    let mut day: Option<Date> = None;
+    if !ctx.known_devices().is_empty() {
+        ctx.ready();
+    }
+    loop {
+        let today = Zoned::now().with_time_zone(tz.clone()).date();
+        let mut regs = Regs::default();
+        let mut failed = None;
+        for ask in map.asks() {
+            match logger.ask(ask).await {
+                Ok(words) => regs.push(ask.start, words),
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        match failed {
+            None => {
+                // Which inverter it is, while it has not said: the device
+                // is shown meanwhile as the family's largest.
+                let changed = match map.identity() {
+                    Some(ask) => {
+                        let identity = logger.ask(ask).await.ok();
+                        map.learn(identity.as_deref())
+                    }
+                    None => false,
+                };
+                if !shown || changed {
+                    ctx.upsert_device(map.device(ctx.instance(), id.clone()));
+                    ctx.ready();
+                    shown = true;
+                    tracing::info!(instance = %ctx.instance(), map = map.name(), "solarman inverter read");
+                }
+                for (key, value) in map.readings(&regs, Instant::now()) {
+                    ctx.set_state(id, &key, value);
+                }
+                day = Some(today);
+                if online != Some(true) {
+                    online = Some(true);
+                    ctx.set_availability(id, true);
+                }
+            }
+            Some(e) => {
+                if online != Some(false) {
+                    online = Some(false);
+                    ctx.set_availability(id, false);
+                    // Normal every evening: not a warning.
+                    tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "solarman inverter silent");
+                }
+                // An inverter that answers « no » is not asleep: most likely
+                // not the model the instance says. Said once.
+                if !refused && matches!(e.downcast_ref::<NoData>(), Some(NoData::Refused(_))) {
+                    refused = true;
+                    tracing::warn!(instance = %ctx.instance(), map = map.name(), error = %format!("{e:#}"), "solarman inverter refuses this register map: check the `model` option");
+                }
+                // A new day while asleep: today's production is 0.
+                if shown && day.is_some_and(|d| d != today) {
+                    for key in map.daily() {
+                        ctx.set_state(id, &key, Value::Float(0.0));
+                    }
+                    day = Some(today);
+                }
+            }
+        }
+        if !pause(ctx, POLL).await {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,10 +719,59 @@ mod tests {
         assert_eq!(config.port, 8899);
         assert_eq!(config.slave, 1);
         assert!(TimeZone::get(&config.timezone).is_ok());
+        assert_eq!(config.model, Model::Deye);
+        assert!(config.model.map().is_none());
         assert!(
             serde_json::from_value::<Config>(serde_json::json!({ "host": "x", "every": 3 }))
                 .is_err(),
             "unknown options are refused"
         );
+    }
+
+    #[test]
+    fn every_model_has_its_name_and_its_map() {
+        for (name, model, map) in [
+            ("deye", Model::Deye, None),
+            ("solis", Model::Solis, None),
+            ("tsun-titan", Model::TsunTitan, Some("tsun titan")),
+            ("tsun-gen4", Model::TsunGen4, Some("tsun gen4")),
+            ("zcs-tl", Model::ZcsTl, Some("zcs azzurro 1ph tl-v3")),
+            ("zcs-hyd", Model::ZcsHyd, Some("zcs azzurro hyd-zss-hp")),
+        ] {
+            let config: Config =
+                serde_json::from_value(serde_json::json!({ "host": "10.0.0.20", "model": name }))
+                    .unwrap();
+            assert_eq!(config.model, model, "{name}");
+            assert_eq!(model.map().map(|m| m.name()), map, "{name}");
+        }
+        assert!(
+            serde_json::from_value::<Config>(
+                serde_json::json!({ "host": "10.0.0.20", "model": "tsun" })
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn only_reads_are_ever_asked() {
+        // Modbus 0x03, or TSUN's read codes 0xA1 to 0xA4: nothing that writes.
+        for model in [
+            Model::TsunTitan,
+            Model::TsunGen4,
+            Model::ZcsTl,
+            Model::ZcsHyd,
+        ] {
+            let map = model.map().unwrap();
+            for ask in map.asks().into_iter().chain(map.identity()) {
+                assert!(
+                    matches!(
+                        ask.how,
+                        How::Holding | How::Native(0xA1..=0xA4, 0x01..=0x04 | 0x21)
+                    ),
+                    "{ask:?}"
+                );
+                assert!((1..=96).contains(&ask.count), "{ask:?}");
+            }
+        }
     }
 }

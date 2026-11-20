@@ -1,10 +1,11 @@
 [integration]
 id = "esphome"
-name = "Appareil ESPHome (satellite vocal)"
-# Any ESPHome device with the native API and an encryption key; first used
-# with the Home Assistant Voice Preview Edition.
+name = "Appareil ESPHome (satellite vocal, prise, compteur P1…)"
+# Any ESPHome device with the native API and an encryption key: voice
+# satellites (Home Assistant Voice PE), and any other device's sensors and
+# switches (a metering plug, a P1 meter reader).
 brands = ["Nabu Casa", "ESPHome"]
-models = ["Home Assistant Voice PE"]
+models = ["Home Assistant Voice PE", "prise mesurée", "lecteur P1"]
 transport = "tcp"
 driver = "esphome"
 crate = "moli-esphome"

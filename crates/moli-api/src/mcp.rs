@@ -8,6 +8,7 @@ use std::sync::Arc;
 use moli_core::{DeviceId, Origin, PointId, Value};
 use moli_history::History;
 use moli_runtime::{CommandError, DeviceView, Hub, LabelPatch};
+use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Extensions};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -18,14 +19,48 @@ use serde_json::{Value as Json, json};
 
 use crate::caller::Caller;
 
+/// The tools that change something; the others only read.
+const WRITES: [&str; 3] = ["send_command", "set_label", "save_automation_draft"];
+
+/// Which MCP route: every tool, or the reads only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    Full,
+    ReadOnly,
+}
+
+/// Every tool's name, for checking `[mcp] disabled_tools` at startup: a
+/// misspelt name would switch nothing off.
+#[must_use]
+pub fn tool_names() -> Vec<String> {
+    MoliMcp::tool_router()
+        .list_all()
+        .into_iter()
+        .map(|t| t.name.into_owned())
+        .collect()
+}
+
 pub(crate) fn service(
-    hub: Hub,
-    history: Option<History>,
-    bench: Option<std::path::PathBuf>,
-    energy: Option<moli_energy::Energy>,
-    automations: Option<moli_automation::Automations>,
-    demo: bool,
+    hub: &Hub,
+    options: &crate::Options,
+    route: Route,
 ) -> StreamableHttpService<MoliMcp, LocalSessionManager> {
+    // Switched off = hidden from tools/list and refused by tools/call.
+    let mut tools = MoliMcp::tool_router();
+    for name in &options.mcp_disabled_tools {
+        tools.disable_route(name.clone());
+    }
+    if route == Route::ReadOnly {
+        for name in WRITES {
+            tools.disable_route(name);
+        }
+    }
+    let hub = hub.clone();
+    let history = options.history.clone();
+    let bench = options.bench_path.clone();
+    let energy = options.energy.clone();
+    let automations = options.automations.clone();
+    let demo = options.demo;
     // Host validation is done once, for every surface, by `guard`.
     let config = StreamableHttpServerConfig::default()
         .disable_allowed_hosts()
@@ -40,6 +75,7 @@ pub(crate) fn service(
                 energy: energy.clone(),
                 automations: automations.clone(),
                 demo,
+                tools: tools.clone(),
             })
         },
         Arc::new(LocalSessionManager::default()),
@@ -57,6 +93,8 @@ pub(crate) struct MoliMcp {
     /// A demo house: what would stay for the next visitors (names, drafts)
     /// is not for anyone to write.
     demo: bool,
+    /// The tools this route offers (some switched off, see `service`).
+    tools: ToolRouter<MoliMcp>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -169,6 +207,7 @@ struct JournalArgs {
 #[tool_router]
 impl MoliMcp {
     #[tool(
+        annotations(read_only_hint = true),
         description = "Health of the system: uptime, memory, devices, points and driver statuses."
     )]
     async fn system_status(&self) -> Result<CallToolResult, McpError> {
@@ -191,6 +230,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "List devices with their label, room, availability and every point's current value, unit and writability."
     )]
     async fn list_devices(
@@ -227,6 +267,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Full detail of one device: its points with kind, allowed values or range, unit, access, and current value."
     )]
     async fn get_device(
@@ -240,6 +281,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "A fresh image from a camera (devices listed with `camera: true`). Cameras in protected rooms are refused: only a human in the dashboard may look into those rooms."
     )]
     async fn camera_snapshot(
@@ -267,6 +309,11 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        ),
         description = "Write a value to a writable point. The order is validated against the point's spec, sent to the device and journaled. The device confirms by reporting its new state."
     )]
     async fn send_command(
@@ -309,6 +356,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = false, destructive_hint = false),
         description = "Set the human name and/or room of a device. Labels never change identities."
     )]
     async fn set_label(
@@ -334,6 +382,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Recent writes (commands and label changes): who, through which surface, what, and the outcome."
     )]
     async fn get_journal(
@@ -344,6 +393,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "History of one point: number of changes, min/max/average, first and last values, and a compact series (≤ 60 points) over the last N hours."
     )]
     async fn history(
@@ -362,6 +412,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Electricity consumption and cost. Without arguments: live power, today, yesterday, this month (with projection) and last month, in kWh and money, per meter (Linky tariffs, circuits) and what no circuit explains. With `step` (hour/day/month): a series of kWh and cost per meter. Days and months are local time."
     )]
     async fn energy(
@@ -399,6 +450,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Automations of the house (graphs of triggers, conditions, actions): id, name, what it does in French, whether it is live (switched on AND approved by a person)."
     )]
     async fn list_automations(&self) -> Result<CallToolResult, McpError> {
@@ -424,6 +476,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "One automation: its graph, the checker's problems, protected rooms it reaches, and its last runs (step by step)."
     )]
     async fn get_automation(
@@ -444,6 +497,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = false, destructive_hint = false),
         description = "Save an automation as a DRAFT. Nothing runs until a person approves it in the Moli OS dashboard (any change you make to an approved one needs their approval again). Returns the checker's verdict and the French summary: fix the errors it lists."
     )]
     async fn save_automation_draft(
@@ -481,6 +535,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Dry run of an automation: conditions are read for real, nothing acts, nothing waits. Shows the path it would take, step by step."
     )]
     async fn test_automation(
@@ -501,6 +556,7 @@ impl MoliMcp {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Run ONE read-only SQL query (SQLite) over the recorded history. View: history(point, ts ms, kind b/i/f/t/z, num, txt). Writes, ATTACH and PRAGMA are refused; 2 s and 200 rows max. Use it for questions the other tools cannot answer (counts, durations, comparisons)."
     )]
     async fn history_sql(
@@ -565,8 +621,9 @@ fn summarize(series: &moli_history::Series) -> Json {
 }
 
 // Macro arguments must be literals; the version comes from this crate.
-#[allow(unknown_lints, clippy::unused_async_trait_impl)]
+#[allow(unknown_lints, clippy::unused_async_trait_impl)] // generated by the macro
 #[tool_handler(
+    router = self.tools,
     name = "moli-os",
     instructions = "Moli OS controls a real home. Point ids look like `<device_id>/<key>`. Call list_devices first; only points marked writable accept send_command. Every write is journaled with your actor name. Prefer harmless points when testing and restore the previous value."
 )]

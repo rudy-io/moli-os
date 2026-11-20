@@ -1,0 +1,19 @@
+{
+  "intent": "All three discovery bits set",
+  "input": {
+    "version": 0,
+    "vendor_id": 65523,
+    "product_id": 256,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "SoftAp",
+      "Ble",
+      "OnNetwork"
+    ],
+    "discriminator": 291,
+    "passcode": 50005000
+  },
+  "expected": {
+    "qr": "MT:C0L90YPQ13UZN906210"
+  }
+}

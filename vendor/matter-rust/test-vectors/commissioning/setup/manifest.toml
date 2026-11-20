@@ -1,0 +1,55 @@
+# Setup-payload byte-parity fixtures. Captured from matter.js by
+# `cargo xtask capture-setup`. Edit `xtask/scripts/capture-setup/index.js`
+# to change the scenario set, then re-capture.
+
+[fixtures.qr-spec-example]
+file = "qr-spec-example.json"
+description = "Matter Core Spec §5.1.3.1 worked example"
+
+[fixtures.qr-minimal]
+file = "qr-minimal.json"
+description = "Standard flow, on-network discovery, mid-range fields"
+
+[fixtures.qr-all-discovery]
+file = "qr-all-discovery.json"
+description = "All three discovery bits set"
+
+[fixtures.qr-user-intent]
+file = "qr-user-intent.json"
+description = "UserIntent commissioning flow"
+
+[fixtures.qr-high-vid-pid]
+file = "qr-high-vid-pid.json"
+description = "VID/PID near the 16-bit ceiling"
+
+[fixtures.qr-edge-discriminator-0]
+file = "qr-edge-discriminator-0.json"
+description = "discriminator = 0"
+
+[fixtures.qr-edge-discriminator-fff]
+file = "qr-edge-discriminator-fff.json"
+description = "discriminator = 0xFFF (max 12-bit)"
+
+[fixtures.qr-edge-passcode-min]
+file = "qr-edge-passcode-min.json"
+description = "smallest allowed passcode (1)"
+
+[fixtures.qr-edge-passcode-max]
+file = "qr-edge-passcode-max.json"
+description = "largest 27-bit passcode that is not disallowed"
+
+[fixtures.manual-11-minimal]
+file = "manual-11-minimal.json"
+description = "11-digit form, mid-range short discriminator, test passcode"
+
+[fixtures.manual-11-mid]
+file = "manual-11-mid.json"
+description = "11-digit form, another value"
+
+[fixtures.manual-21-with-vidpid]
+file = "manual-21-with-vidpid.json"
+description = "21-digit form, with VID/PID"
+
+[fixtures.manual-21-edges]
+file = "manual-21-edges.json"
+description = "short=0xF, passcode near max, VID/PID near max"

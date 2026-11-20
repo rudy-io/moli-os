@@ -43,8 +43,19 @@ pub struct Write {
     pub point: String,
     /// `GET` path. `{value}`: the commanded value; `{request.path}`: a value
     /// of that request's latest answer (`{a.x|b.y}`: the first present; the
-    /// path may hold `{value}`, as in `{control.dt{value}}`).
+    /// path may hold `{value}`, as in `{control.dt{value}}`). With
+    /// `transport = "meross"`: where the message is posted, as written.
     pub path: String,
+    /// `get` (default) or `meross` (signed `SET` message, Meross local API).
+    #[serde(default)]
+    pub transport: Transport,
+    /// Meross: message namespace (`Appliance.Control.ToggleX`).
+    #[serde(default)]
+    pub namespace: Option<String>,
+    /// Meross: message payload, as JSON text; the string `"{value}"` is
+    /// where the commanded value goes.
+    #[serde(default)]
+    pub payload: Option<String>,
     /// Commanded value (as text) → text sent.
     #[serde(default)]
     pub map: BTreeMap<String, String>,
@@ -185,7 +196,7 @@ const MAX_ROUND: u32 = 6;
 
 /// Units accepted beyond those the core knows by name.
 const EXTRA_UNITS: &[&str] = &[
-    "mired", "lqi", "dBm", "Hz", "L", "m³", "µg/m³", "ppb", "rpm", "km/h", "mm", "°", "UV",
+    "mired", "lqi", "dBm", "Hz", "L", "m³", "µg/m³", "ppb", "rpm", "UV",
 ];
 
 /// Raw values that mean « no reading ».
@@ -244,12 +255,29 @@ pub struct CompiledWrite {
     map: BTreeMap<String, String>,
     decimals: Option<u32>,
     pub expect: Option<String>,
+    /// How the write leaves.
+    pub call: WriteCall,
+    /// A text point: its value always leaves as text.
+    text: bool,
     /// Requests whose answers the path echoes (indexes): read again just
     /// before writing, so a change made meanwhile (remote, app) is not undone.
     pub reads: Vec<usize>,
     /// Request read again right after.
     pub refresh: Option<usize>,
 }
+
+/// How a write is made on the wire.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteCall {
+    /// `GET` on the rendered path.
+    Get,
+    /// Meross local API: signed `SET` message posted as JSON. The payload
+    /// holds the string `"{value}"` where the commanded value goes.
+    Meross { namespace: String, payload: Json },
+}
+
+/// The JSON string a Meross write payload carries in place of the value.
+const VALUE: &str = "{value}";
 
 /// A part of a write path.
 #[derive(Debug, Clone, PartialEq)]
@@ -481,12 +509,13 @@ impl Answers<'_> {
                 "{what} {path:?} must be <request id>.<path> without empty segments"
             ));
         }
-        if let Some(bad) = rest
-            .iter()
-            .find(|seg| (seg.starts_with('[') || seg.ends_with(']')) && selector(seg).is_none())
-        {
+        if let Some(bad) = rest.iter().find(|seg| {
+            (seg.starts_with('[') || seg.ends_with(']'))
+                && selector(seg).is_none()
+                && largest(seg).is_none()
+        }) {
             return Err(format!(
-                "{what} {path:?}: {bad:?} is not a selector; write [field=value]"
+                "{what} {path:?}: {bad:?} is not a selector; write [field=value] or [>field]"
             ));
         }
         if self.0[index].format == Format::Kv && rest.len() != 1 {
@@ -620,6 +649,16 @@ fn check_read_query(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A meaning a profile may not declare. A profile reads states; a press is
+/// an occurrence a driver sends with `pulse_state` (#211): a polled value
+/// would replay the last one.
+fn declarable(semantic: Semantic) -> Result<(), String> {
+    if semantic == Semantic::Press {
+        return Err("semantic press is for a driver that receives presses, not a profile".into());
+    }
+    Ok(())
+}
+
 fn compile_request(
     r: &Request,
     secrets: Secrets,
@@ -657,22 +696,10 @@ fn compile_request(
             return Err("namespace/payload only apply to transport = \"meross\"".into());
         }
         Transport::Meross => {
-            let namespace = r
-                .namespace
-                .clone()
-                .filter(|n| {
-                    !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.')
-                })
-                .ok_or("meross needs a namespace like Appliance.System.All")?;
-            let payload: Json = serde_json::from_str(r.payload.as_deref().unwrap_or("{}"))
-                .ok()
-                .filter(Json::is_object)
-                .ok_or("payload must be a JSON object")?;
+            let (namespace, payload) =
+                meross_message(r.namespace.as_deref(), r.payload.as_deref(), secrets)?;
             if r.format != Format::Json {
                 return Err("meross answers are json".into());
-            }
-            if !secrets.declared {
-                return Err("transport meross needs [profile] secret = \"<name>\"".into());
             }
             Call::Meross { namespace, payload }
         }
@@ -685,6 +712,82 @@ fn compile_request(
         every,
         call,
     })
+}
+
+/// The namespace and payload of a Meross message (a read's or a write's),
+/// which only a profile with a key can sign.
+fn meross_message(
+    namespace: Option<&str>,
+    payload: Option<&str>,
+    secrets: Secrets,
+) -> Result<(String, Json), String> {
+    let namespace = namespace
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.'))
+        .ok_or("meross needs a namespace like Appliance.System.All")?;
+    let payload: Json = serde_json::from_str(payload.unwrap_or("{}"))
+        .ok()
+        .filter(Json::is_object)
+        .ok_or("payload must be a JSON object")?;
+    if !secrets.declared {
+        return Err("transport meross needs [profile] secret = \"<name>\"".into());
+    }
+    Ok((namespace.to_owned(), payload))
+}
+
+/// How many times a write payload carries `"{value}"`. Nothing else in it
+/// may look like a placeholder: it would leave as written.
+fn value_slots(json: &Json) -> Result<usize, String> {
+    let plain = |text: &str| {
+        if text.contains(['{', '}']) {
+            Err(format!(
+                "payload: {text:?} would be sent as written; only the string \"{VALUE}\" is replaced"
+            ))
+        } else {
+            Ok(0)
+        }
+    };
+    match json {
+        Json::String(text) if text == VALUE => Ok(1),
+        Json::String(text) => plain(text),
+        Json::Array(items) => items.iter().map(value_slots).sum(),
+        Json::Object(fields) => fields
+            .iter()
+            .map(|(name, value)| Ok(plain(name)? + value_slots(value)?))
+            .sum(),
+        _ => Ok(0),
+    }
+}
+
+/// `json` with each `"{value}"` replaced by `value`.
+fn fill_slots(json: &Json, value: &Json) -> Json {
+    match json {
+        Json::String(text) if text == VALUE => value.clone(),
+        Json::Array(items) => Json::Array(items.iter().map(|i| fill_slots(i, value)).collect()),
+        Json::Object(fields) => Json::Object(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), fill_slots(field, value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// The text a write sends, as the JSON a device expects: a number or a
+/// boolean when it is one (`1`, `21.5`, `true`), a text otherwise.
+fn typed(text: &str) -> Json {
+    if let Ok(n) = text.parse::<i64>() {
+        return Json::from(n);
+    }
+    match text {
+        "true" => return Json::Bool(true),
+        "false" => return Json::Bool(false),
+        _ => {}
+    }
+    text.parse::<f64>()
+        .ok()
+        .and_then(serde_json::Number::from_f64)
+        .map_or_else(|| Json::String(text.to_owned()), Json::Number)
 }
 
 /// One point: its kind, value map, unit and meaning, checked together.
@@ -750,15 +853,32 @@ fn compile_point(
         && !EXTRA_UNITS.contains(&&**symbol)
     {
         return Err(format!(
-            "unknown unit {symbol:?} (known: W kWh Wh VA V mV A °C % lx hPa dB ppm s min h, or {})",
+            "unknown unit {symbol:?} (known: W kWh Wh VA V mV A °C % lx hPa dB ppm s min h km/h mm mm/h °, or {})",
             EXTRA_UNITS.join(" ")
         ));
     }
     let semantic = p
         .semantic
         .unwrap_or_else(|| Semantic::infer(&p.key, unit.as_ref()));
+    declarable(semantic)?;
     if semantic == Semantic::Alert && kind != Kind::Binary {
         return Err("semantic alert is a binary point (true: something is wrong)".into());
+    }
+    // A weather meaning has one unit: the composed « Dehors » device copies
+    // values without converting them, so the profile converts (`scale`).
+    if let Some(want) = semantic.fixed_unit() {
+        let name = serde_json::to_value(semantic).unwrap_or_default();
+        let name = name.as_str().unwrap_or_default();
+        if !matches!(kind, Kind::Numeric { .. }) {
+            return Err(format!("semantic {name} is a numeric point"));
+        }
+        if unit != want {
+            return Err(format!(
+                "semantic {name} is in {}, not {}",
+                want.as_ref().map_or("no unit", Unit::symbol),
+                unit.as_ref().map_or("no unit", Unit::symbol),
+            ));
+        }
     }
     Ok(CompiledPoint {
         spec: PointSpec {
@@ -791,9 +911,35 @@ fn compile_write(
     vars: &mut BTreeSet<String>,
 ) -> Result<CompiledWrite, String> {
     let pieces = write_template(&w.path)?;
-    if !pieces.contains(&Piece::Value) {
-        return Err("path must send {value}".into());
-    }
+    let call = match w.transport {
+        Transport::Get if w.namespace.is_none() && w.payload.is_none() => {
+            if !pieces.contains(&Piece::Value) {
+                return Err("path must send {value}".into());
+            }
+            WriteCall::Get
+        }
+        Transport::Get => {
+            return Err("namespace/payload only apply to transport = \"meross\"".into());
+        }
+        Transport::Meross => {
+            // The path is where the message is posted, sent as written.
+            if pieces.iter().any(|p| !matches!(p, Piece::Text(_))) {
+                return Err(
+                    "a meross write sends {value} in its payload: no placeholder in path".into(),
+                );
+            }
+            let (namespace, payload) =
+                meross_message(w.namespace.as_deref(), w.payload.as_deref(), secrets)?;
+            if value_slots(&payload)? == 0 {
+                return Err(format!("payload must send the string \"{VALUE}\""));
+            }
+            // The device says itself whether it obeyed (`SETACK`).
+            if w.expect.is_some() {
+                return Err("expect does not apply to a meross write (SETACK is required)".into());
+            }
+            WriteCall::Meross { namespace, payload }
+        }
+    };
     let mut reads = Vec::new();
     for piece in &pieces {
         match piece {
@@ -844,6 +990,8 @@ fn compile_write(
         map: w.map.clone(),
         decimals: w.decimals,
         expect: w.expect.clone(),
+        call,
+        text: spec.kind == Kind::Text,
         reads,
         refresh,
     })
@@ -960,6 +1108,18 @@ impl CompiledWrite {
         Ok(self.map.get(&raw).cloned().unwrap_or(raw))
     }
 
+    /// A Meross write's `payload` with the commanded value in place of
+    /// each `"{value}"`: built as JSON, so a value can never add a field.
+    pub fn fill(&self, payload: &Json, value: &Value) -> Result<Json, String> {
+        let text = self.value_text(value)?;
+        let value = if self.text {
+            Json::String(text)
+        } else {
+            typed(&text)
+        };
+        Ok(fill_slots(payload, &value))
+    }
+
     /// The path to send, percent-encoded: `{value}`, vars and the latest
     /// answers filled in. Refuses rather than send a partial order.
     pub fn render(
@@ -1057,18 +1217,7 @@ impl Answer {
     /// The raw JSON at `path` (kv answers are one level deep).
     fn lookup(&self, path: &[String]) -> Option<Json> {
         match self {
-            // In an array, `[channel=1]` picks the element whose field has
-            // that value (robust to reordering); a number picks by position.
-            Self::Json(json) => path
-                .iter()
-                .try_fold(json, |j, k| match (j, selector(k), k.parse::<usize>()) {
-                    (Json::Array(items), Some((field, want)), _) => {
-                        items.iter().find(|item| matches(item.get(field), want))
-                    }
-                    (Json::Array(items), None, Ok(i)) => items.get(i),
-                    _ => j.get(k),
-                })
-                .cloned(),
+            Self::Json(json) => path.iter().try_fold(json, |j, k| step(j, k)).cloned(),
             Self::Kv(map) => {
                 (path.len() == 1).then(|| map.get(&path[0]).cloned().map(Json::String))?
             }
@@ -1093,6 +1242,33 @@ impl Answer {
             _ => None,
         }
     }
+}
+
+/// One segment down a JSON answer. In an array, `[channel=1]` picks the
+/// element whose field has that value (robust to reordering), `[>time]` the
+/// one whose field is the largest number (the latest of a history), a
+/// number picks by position.
+fn step<'a>(json: &'a Json, segment: &str) -> Option<&'a Json> {
+    let Json::Array(items) = json else {
+        return json.get(segment);
+    };
+    if let Some((field, want)) = selector(segment) {
+        items.iter().find(|item| matches(item.get(field), want))
+    } else if let Some(field) = largest(segment) {
+        items
+            .iter()
+            .filter_map(|item| Some((item.get(field)?.as_f64()?, item)))
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, item)| item)
+    } else {
+        items.get(segment.parse::<usize>().ok()?)
+    }
+}
+
+/// `[>field]` → `field`.
+fn largest(segment: &str) -> Option<&str> {
+    let field = segment.strip_prefix("[>")?.strip_suffix(']')?;
+    (!field.is_empty() && !field.contains('=')).then_some(field)
 }
 
 /// `[field=value]` → `(field, value)`.
@@ -1202,7 +1378,12 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
     "tempo",
     "iopool",
     "meross-em06",
+    "jackery-meter",
+    "meross-mss110",
+    "meross-mss310",
+    "meross-multiprise",
     "moonraker",
+    "shelly-em-gen1",
 ];
 
 #[cfg(test)]
@@ -1258,6 +1439,42 @@ snapshot = \"{path}\""
     }
 
     #[test]
+    fn a_profile_never_declares_a_press() {
+        let text = "[profile]\nid = \"boitier\"\nname = \"Boîtier\"\n\
+             [[request]]\nid = \"s\"\npath = \"/etat\"\nformat = \"json\"\nevery = \"5m\"\n\
+             [[point]]\nkey = \"action\"\nlabel = \"Action\"\nfrom = \"s.action\"\nkind = \"text\"\nsemantic = \"press\"\n";
+        let err = try_compile(text).unwrap_err();
+        assert!(err.message.contains("press"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_weather_meaning_has_its_unit() {
+        let with = |unit: &str, semantic: &str| {
+            format!(
+                "[profile]\nid = \"station\"\nname = \"Station\"\n\
+                 [[request]]\nid = \"s\"\npath = \"/mesures\"\nformat = \"json\"\nevery = \"5m\"\n\
+                 [[point]]\nkey = \"vent\"\nlabel = \"Vent\"\nfrom = \"s.vent\"\nkind = \"numeric\"\n{unit}semantic = \"{semantic}\"\n"
+            )
+        };
+        let compiled = try_compile(&with("unit = \"km/h\"\n", "wind_speed")).unwrap();
+        assert_eq!(compiled.points[0].spec.semantic, Semantic::WindSpeed);
+        assert_eq!(compiled.points[0].spec.unit, Some(Unit::KilometrePerHour));
+        // Another unit is refused: the profile converts with `scale`.
+        let err = try_compile(&with("unit = \"m/s\"\n", "wind_speed")).unwrap_err();
+        assert!(err.message.contains("unit"), "{}", err.message);
+        let err = try_compile(&with("unit = \"mm\"\n", "wind_gust")).unwrap_err();
+        assert!(
+            err.message.contains("wind_gust is in km/h"),
+            "{}",
+            err.message
+        );
+        // The UV index has no unit.
+        assert!(try_compile(&with("", "uv_index")).is_ok());
+        let err = try_compile(&with("unit = \"UV\"\n", "uv_index")).unwrap_err();
+        assert!(err.message.contains("no unit"), "{}", err.message);
+    }
+
+    #[test]
     fn builtin_profiles_are_valid() {
         for (id, _) in BUILTIN {
             let c = compile(id);
@@ -1268,10 +1485,11 @@ snapshot = \"{path}\""
                 .filter(|p| p.spec.access.write)
                 .map(|p| &*p.spec.key)
                 .collect();
-            let declared: &[&str] = if *id == "daikin-brp069" {
-                &["on", "mode", "target_temperature", "fan"]
-            } else {
-                &[]
+            let declared: &[&str] = match *id {
+                "daikin-brp069" => &["on", "mode", "target_temperature", "fan"],
+                "meross-mss110" | "meross-mss310" => &["on"],
+                "meross-multiprise" => &["on", "on_1", "on_2", "on_3", "on_4", "on_5"],
+                _ => &[],
             };
             assert_eq!(writable, declared, "{id}: only declared writes");
             assert_eq!(c.writes.len(), declared.len());
@@ -1619,6 +1837,33 @@ refresh = "control"
     }
 
     #[test]
+    fn jackery_meter_answers_decode() {
+        let c = compile("jackery-meter");
+        // Captured from a real single-phase meter (serial replaced).
+        let m = Answer::parse(
+            Format::Json,
+            include_bytes!("../../../integrations/jackery-meter/fixtures/measurement.json"),
+        )
+        .unwrap();
+        let get = |key: &str| {
+            c.points
+                .iter()
+                .find(|p| &*p.spec.key == key)
+                .unwrap()
+                .read(&m)
+        };
+        assert_eq!(get("power"), Some(Value::Float(958.0)));
+        assert_eq!(get("power_factor"), Some(Value::Float(0.77)));
+        assert_eq!(get("energy"), Some(Value::Float(251.33)));
+        assert_eq!(get("energy_returned"), Some(Value::Float(24.51)));
+        // Sending out: the sign is the meter's, nothing is clamped.
+        let out = Answer::parse(Format::Json, br#"{"sn":"x","power":-766}"#).unwrap();
+        let power = c.points.iter().find(|p| &*p.spec.key == "power").unwrap();
+        assert_eq!(power.read(&out), Some(Value::Float(-766.0)));
+        assert!(c.writes.is_empty(), "read-only");
+    }
+
+    #[test]
     fn meross_em06_answers_decode_with_array_indexes() {
         let c = compile("meross-em06");
         assert!(matches!(c.requests[0].call, Call::Meross { .. }));
@@ -1673,6 +1918,35 @@ refresh = "control"
             );
             assert!(try_compile(&toml).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn shelly_em_gen1_status_decodes_both_clamps() {
+        let c = compile("shelly-em-gen1");
+        // Captured from a real meter (firmware v1.14.0), made anonymous.
+        let status = Answer::parse(
+            Format::Json,
+            include_bytes!("../../../integrations/shelly-em-gen1/fixtures/status.json"),
+        )
+        .unwrap();
+        let get = |key: &str| {
+            c.points
+                .iter()
+                .find(|p| &*p.spec.key == key)
+                .unwrap()
+                .read(&status)
+        };
+        assert_eq!(get("power_1"), Some(Value::Float(314.2)));
+        assert_eq!(get("voltage_1"), Some(Value::Float(240.2)));
+        assert_eq!(get("power_factor_1"), Some(Value::Float(-0.31)));
+        // The counters are in Wh on the wire, kWh for `[energy]`.
+        assert_eq!(get("energy_1"), Some(Value::Float(455.816)));
+        assert_eq!(get("energy_returned_1"), Some(Value::Float(9.688)));
+        assert_eq!(get("power_2"), Some(Value::Float(107.1)));
+        assert_eq!(get("energy_2"), Some(Value::Float(113.088)));
+        assert_eq!(get("signal"), Some(Value::Float(-67.0)));
+        // Read only: neither the relay nor a reboot.
+        assert!(c.writes.is_empty());
     }
 
     #[test]
@@ -1753,6 +2027,262 @@ kind = \"numeric\"
                 .and_then(|p| p.compile(Source::Builtin))
                 .unwrap_err();
             assert!(err.to_string().contains(expect), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_meross_write_is_a_declared_set_message() {
+        let c = compile("meross-mss310");
+        let write = &c.writes[0];
+        let WriteCall::Meross { namespace, payload } = &write.call else {
+            panic!("{:?}", write.call);
+        };
+        assert_eq!(namespace, "Appliance.Control.ToggleX");
+        assert_eq!(write.refresh, Some(0), "the state is read again");
+        assert!(write.reads.is_empty());
+        // The value leaves as the number the plug expects, built as JSON.
+        assert_eq!(
+            write.fill(payload, &Value::Bool(true)).unwrap(),
+            serde_json::json!({"togglex": {"channel": 0, "onoff": 1}})
+        );
+        assert_eq!(
+            write.fill(payload, &Value::Bool(false)).unwrap(),
+            serde_json::json!({"togglex": {"channel": 0, "onoff": 0}})
+        );
+        assert!(write.fill(payload, &Value::Null).is_err());
+        // Each outlet of a strip writes to its own channel.
+        for (i, write) in compile("meross-multiprise").writes.iter().enumerate() {
+            let WriteCall::Meross { payload, .. } = &write.call else {
+                panic!("{:?}", write.call);
+            };
+            assert_eq!(payload["togglex"]["channel"], i, "{}", write.key);
+        }
+        // Reads stay reads: a request has no way to name a method, and its
+        // message is a GET whatever its payload says.
+        let base = builtin("meross-mss310").unwrap();
+        let err = try_compile(&base.replacen(
+            "transport = \"meross\"\n",
+            "transport = \"meross\"\nmethod = \"SET\"\n",
+            1,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("unknown field"), "{}", err.message);
+        assert!(
+            c.requests
+                .iter()
+                .all(|r| matches!(r.call, Call::Meross { .. }))
+        );
+    }
+
+    #[test]
+    fn broken_meross_writes_are_explained() {
+        let base = builtin("meross-mss310").unwrap();
+        let payload = r#"payload = '{"togglex": {"channel": 0, "onoff": "{value}"}}'"#;
+        assert!(base.contains(payload));
+        for (broken, expect) in [
+            (
+                base.replace(payload, r#"payload = '{"togglex": {"onoff": 1}}'"#),
+                "payload must send",
+            ),
+            (
+                base.replace(payload, r#"payload = '{"togglex": "on{value}"}'"#),
+                "sent as written",
+            ),
+            (
+                base.replace(payload, r#"payload = '{"k": "{secret}", "v": "{value}"}'"#),
+                "sent as written",
+            ),
+            (
+                base.replace(payload, r#"payload = '{"{value}": "{value}"}'"#),
+                "sent as written",
+            ),
+            (
+                base.replace(payload, r#"payload = '["{value}"]'"#),
+                "JSON object",
+            ),
+            (
+                base.replace(
+                    "namespace = \"Appliance.Control.ToggleX\"",
+                    "namespace = \"a b\"",
+                ),
+                "namespace",
+            ),
+            (
+                base.replace("namespace = \"Appliance.Control.ToggleX\"\n", ""),
+                "namespace",
+            ),
+            (
+                base.replace(
+                    "path = \"/config\"\ntransport = \"meross\"\nnamespace = \"Appliance.Control.ToggleX\"",
+                    "path = \"/config?v={value}\"\ntransport = \"meross\"\nnamespace = \"Appliance.Control.ToggleX\"",
+                ),
+                "no placeholder in path",
+            ),
+            (
+                base.replace("refresh = \"all\"", "expect = \"SETACK\""),
+                "expect does not apply",
+            ),
+            (
+                base.replace("secret = \"key\"\n", ""),
+                "needs [profile] secret",
+            ),
+        ] {
+            let err = try_compile(&broken).unwrap_err();
+            assert!(err.to_string().contains(expect), "{expect}: {err}");
+        }
+        // A GET write has no message to describe.
+        let err = try_compile(&WRITABLE.replace(
+            "refresh = \"control\"",
+            "namespace = \"Appliance.Control.ToggleX\"",
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("only apply to transport"), "{err}");
+        // A file may write this way too, but only to a host of its own.
+        let file = |text: &str| Profile::parse(text).and_then(|p| p.compile(Source::File));
+        assert!(file(base).is_err());
+        assert!(
+            file(&base.replace(
+                "secret = \"key\"",
+                "secret = \"key\"\nhost = \"plug.example\""
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_commanded_value_cannot_add_a_field_to_a_meross_payload() {
+        let text = format!(
+            "{}\n[[point]]\nkey = \"label\"\nlabel = \"L\"\nfrom = \"all.payload.name\"\nkind = \"text\"\n\
+             [[point]]\nkey = \"level\"\nlabel = \"N\"\nfrom = \"all.payload.level\"\nkind = \"numeric\"\n\
+             [[write]]\npoint = \"label\"\npath = \"/config\"\ntransport = \"meross\"\nnamespace = \"Appliance.X\"\n\
+             payload = '{{\"x\": {{\"name\": \"{{value}}\", \"again\": [\"{{value}}\"]}}}}'\n\
+             [[write]]\npoint = \"level\"\npath = \"/config\"\ntransport = \"meross\"\nnamespace = \"Appliance.X\"\n\
+             payload = '{{\"x\": \"{{value}}\"}}'\n",
+            builtin("meross-mss110").unwrap()
+        );
+        let c = try_compile(&text).unwrap();
+        let filled = |key: &str, value: Value| {
+            let write = c.writes.iter().find(|w| &*w.key == key).unwrap();
+            let WriteCall::Meross { payload, .. } = &write.call else {
+                panic!("{:?}", write.call);
+            };
+            write.fill(payload, &value).unwrap()
+        };
+        // A text stays one JSON string, whatever it holds; a text point's
+        // value is never turned into a number.
+        let evil = "\", \"onoff\": 1, \"y\": \"";
+        assert_eq!(
+            filled("label", Value::from(evil)),
+            serde_json::json!({"x": {"name": evil, "again": [evil]}})
+        );
+        assert_eq!(
+            filled("label", Value::from("12")),
+            serde_json::json!({"x": {"name": "12", "again": ["12"]}})
+        );
+        assert_eq!(
+            filled("level", Value::Float(21.5)),
+            serde_json::json!({"x": 21.5})
+        );
+        assert_eq!(filled("level", Value::Int(3)), serde_json::json!({"x": 3}));
+    }
+
+    /// Built from the protocol's descriptions (`meross_lan`, `merossiot`):
+    /// no MSS310 was at hand, these are not captures.
+    #[test]
+    fn meross_plug_answers_decode() {
+        let c = compile("meross-mss310");
+        let answer = |request: &str, body: &[u8]| {
+            (
+                request.to_owned(),
+                Answer::parse(Format::Json, body).unwrap(),
+            )
+        };
+        let answers: HashMap<String, Answer> = [
+            answer(
+                "all",
+                include_bytes!("../../../integrations/meross-mss310/fixtures/all.json"),
+            ),
+            answer(
+                "e",
+                include_bytes!("../../../integrations/meross-mss310/fixtures/electricity.json"),
+            ),
+            answer(
+                "c",
+                include_bytes!("../../../integrations/meross-mss310/fixtures/consumption.json"),
+            ),
+        ]
+        .into();
+        let get = |key: &str| {
+            let point = c.points.iter().find(|p| &*p.spec.key == key).unwrap();
+            point.read(&answers[&point.request])
+        };
+        assert_eq!(get("on"), Some(Value::Bool(true)));
+        // mW, dV, mA on the wire.
+        assert_eq!(get("power"), Some(Value::Float(228.4)));
+        assert_eq!(get("voltage"), Some(Value::Float(233.1)));
+        assert_eq!(get("current"), Some(Value::Float(1.042)));
+        // The latest day, wherever it is in the list.
+        assert_eq!(get("energy_today"), Some(Value::Float(412.0)));
+        let spec = |key: &str| &c.points.iter().find(|p| &*p.spec.key == key).unwrap().spec;
+        assert_eq!(spec("on").semantic, Semantic::OnOff);
+        assert_eq!(spec("power").semantic, Semantic::Power);
+        assert_eq!(spec("energy_today").semantic, Semantic::Energy);
+        assert_eq!(spec("energy_today").unit, Some(Unit::WattHour));
+        assert_eq!(
+            answers["all"]
+                .text(&["payload", "all", "system", "hardware", "uuid"].map(String::from))
+                .as_deref(),
+            Some("00000000000000000000000000000001")
+        );
+
+        // A strip: each outlet by its channel, an absent one stays absent.
+        let strip = compile("meross-multiprise");
+        let all = Answer::parse(
+            Format::Json,
+            include_bytes!("../../../integrations/meross-multiprise/fixtures/all.json"),
+        )
+        .unwrap();
+        let read = |key: &str, answer: &Answer| {
+            strip
+                .points
+                .iter()
+                .find(|p| &*p.spec.key == key)
+                .unwrap()
+                .read(answer)
+        };
+        assert_eq!(read("on", &all), Some(Value::Bool(true)));
+        assert_eq!(read("on_2", &all), Some(Value::Bool(false)));
+        assert_eq!(read("on_5", &all), Some(Value::Bool(true)));
+        let double = Answer::parse(
+            Format::Json,
+            br#"{"payload":{"all":{"digest":{"togglex":[
+                {"channel":2,"onoff":1},{"channel":0,"onoff":1},{"channel":1,"onoff":0}]}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(read("on_1", &double), Some(Value::Bool(false)));
+        assert_eq!(read("on_2", &double), Some(Value::Bool(true)));
+        assert_eq!(read("on_3", &double), None);
+    }
+
+    #[test]
+    fn the_largest_selector_picks_the_latest_entry() {
+        let days = Answer::parse(
+            Format::Json,
+            br#"{"d":[{"time":5,"value":1},{"time":"9","value":2},{"time":7,"value":3},{"value":4}]}"#,
+        )
+        .unwrap();
+        let path = |p: &str| -> Vec<String> { p.split('.').map(str::to_owned).collect() };
+        // Entries without a numeric field do not count.
+        assert_eq!(days.raw(&path("d.[>time].value")).as_deref(), Some("3"));
+        assert_eq!(days.raw(&path("d.[>nope].value")), None);
+        let empty = Answer::parse(Format::Json, br#"{"d":[]}"#).unwrap();
+        assert_eq!(empty.raw(&path("d.[>time].value")), None);
+        for bad in ["[>]", "[>time", ">time]", "[>a=b"] {
+            let toml = builtin("meross-mss310").unwrap().replace(
+                "consumptionx.[>time].value",
+                &format!("consumptionx.{bad}.value"),
+            );
+            assert!(try_compile(&toml).is_err(), "{bad}");
         }
     }
 

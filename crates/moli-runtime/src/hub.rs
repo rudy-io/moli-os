@@ -102,6 +102,9 @@ pub enum ApprovalError {
     Expired,
     #[error("this request is about another point than the one shown")]
     Mismatch,
+    /// Approving it wants the code typed now (`[guard] code_each_time`).
+    #[error("the house's code is needed for this order, each time")]
+    CodeNeeded,
     #[error("approved, but the order failed: {0}")]
     Command(CommandError),
 }
@@ -197,6 +200,8 @@ struct Prepared {
     key: Arc<str>,
     value: Value,
     commands: mpsc::Sender<CommandRequest>,
+    /// Its driver changes nothing outside Moli: a mirror lets it through.
+    inside: bool,
     /// An on/off switch that reports its state: its order is followed until
     /// the state says it was obeyed (see [`CONFIRM_WINDOW`]). Sending it again
     /// changes nothing when it was; a momentary point (a gate's pulse) is
@@ -333,6 +338,8 @@ impl LabelPatch {
 }
 
 /// Everything known about one device, as served to the surfaces.
+// One flag per capability a surface asks about (images, printing, live, past).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Serialize)]
 pub struct DeviceView {
     #[serde(flatten)]
@@ -349,6 +356,9 @@ pub struct DeviceView {
     /// Live video the browser plays (`/api/devices/{id}/live`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live: bool,
+    /// A past to review (`/api/devices/{id}/review/…`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub review: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -465,6 +475,7 @@ struct Model {
     snapshots: HashMap<DeviceId, Arc<dyn crate::media::SnapshotSource>>,
     printers: HashMap<DeviceId, Arc<dyn crate::media::PrintSink>>,
     lives: HashMap<DeviceId, Arc<dyn crate::media::LiveSource>>,
+    reviews: HashMap<DeviceId, Arc<dyn crate::media::ReviewSource>>,
 }
 
 #[derive(Debug)]
@@ -474,6 +485,8 @@ struct DriverSlot {
     status: DriverStatus,
     warning: Option<String>,
     commands: mpsc::Sender<CommandRequest>,
+    /// Its orders change nothing outside Moli ([`Driver::stays_inside`]).
+    inside: bool,
 }
 
 #[derive(Debug)]
@@ -643,6 +656,21 @@ impl Hub {
         ))
     }
 
+    /// Whether a point is there to be read: its device is in the house,
+    /// has this point, and is not known to be offline.
+    #[must_use]
+    pub fn answers(&self, point: &PointId) -> bool {
+        let Some((device, key)) = point.split() else {
+            return false;
+        };
+        let model = self.read();
+        model
+            .devices
+            .get(&device)
+            .is_some_and(|d| d.points.iter().any(|p| &*p.key == key))
+            && model.availability.get(&device) != Some(&false)
+    }
+
     #[must_use]
     pub fn state(&self, point: &PointId) -> Option<Sample> {
         let (device, key) = point.split()?;
@@ -742,12 +770,21 @@ impl Hub {
             );
             return Err(error);
         }
+        // The guard judges the value as the device will take it (validated:
+        // `0` and `0.0` are one number), not as it was spelt.
         let result = match self.prepare(point, &value) {
             Err(e) => Err(e),
-            Ok(prepared) => match self.verdict_for(point, &value, origin) {
+            Ok(prepared) => match self.verdict_for(point, &prepared.value, origin) {
                 Verdict::Allow => self.send_followed(prepared, origin, actor.as_ref()).await,
                 Verdict::Approval(reason) => {
-                    let id = self.hold(point, &value, origin, actor.clone(), caller, &reason);
+                    let id = self.hold(
+                        point,
+                        &prepared.value,
+                        origin,
+                        actor.clone(),
+                        caller,
+                        &reason,
+                    );
                     Err(CommandError::NeedsApproval { id, reason })
                 }
             },
@@ -784,7 +821,17 @@ impl Hub {
         origin: Origin,
     ) -> Option<String> {
         let verdict = match value {
-            Some(value) => self.verdict_for(point, value, origin),
+            Some(value) => {
+                let value = self.validated(point, value);
+                self.verdict_for(point, &value, origin)
+            }
+            // No value (a toggle): what wants the code each time, whichever
+            // way it goes, is held.
+            None if origin != Origin::Automation
+                && self.0.opts.guard.code_each_time_on(point.as_str()) =>
+            {
+                Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"))
+            }
             // No value (a toggle): what may open is held, whichever way it goes.
             None if is_agent(origin) && self.opener_of(point) != Opener::None => {
                 Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"))
@@ -795,6 +842,27 @@ impl Hub {
             Verdict::Allow => None,
             Verdict::Approval(reason) => Some(reason),
         }
+    }
+
+    /// Whether an order on this point wants the house's code typed for it,
+    /// each time (`[guard] code_each_time`): `value` as it will be sent, or
+    /// `None` for a toggle (any rule on the point counts). An automation
+    /// carrying such an order is approved with the code.
+    #[must_use]
+    pub fn wants_code(&self, point: &PointId, value: Option<&Value>) -> bool {
+        let guard = &self.0.opts.guard;
+        match value {
+            Some(value) => guard.code_each_time(point.as_str(), &self.validated(point, value)),
+            None => guard.code_each_time_on(point.as_str()),
+        }
+    }
+
+    /// `value` as the point would take it, or as it is when the point does
+    /// not take it (unknown, read-only, the wrong kind): the guard then
+    /// judges what was asked.
+    fn validated(&self, point: &PointId, value: &Value) -> Value {
+        self.prepare(point, value)
+            .map_or_else(|_| value.clone(), |prepared| prepared.value)
     }
 
     /// What the guard says about an order on this point from this origin.
@@ -831,8 +899,31 @@ impl Hub {
     /// The verdict on this very order: opening a lock, a garage door or a gate is a
     /// person's call, whatever the room (closing is not); then the point's verdict.
     fn verdict_for(&self, point: &PointId, value: &Value, origin: Origin) -> Verdict {
+        // Some orders want the code each time, an open session or not
+        // (disarming the alarm). Only an automation goes without: a person
+        // approved it with the code (`Automations::approve_with_code`). The
+        // house's own orders (a scene, a fixture, a driven load) are sent on
+        // somebody's behalf, from a gesture that typed no code: held too.
+        if origin != Origin::Automation && self.0.opts.guard.code_each_time(point.as_str(), value) {
+            return Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"));
+        }
         if is_agent(origin) && self.opens(point, value) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"));
+        }
+        // A person allowed agents this very order (arming the alarm by
+        // voice): no person is needed for the control or the device, but
+        // protected rooms and quiet hours still hold.
+        if is_agent(origin) && self.0.opts.guard.agents_may(point.as_str(), value) {
+            let rooms = point
+                .split()
+                .map(|(device, _)| self.rooms_of(&device))
+                .unwrap_or_default();
+            let rooms: Vec<&str> = rooms.iter().map(String::as_str).collect();
+            return self
+                .0
+                .opts
+                .guard
+                .check(&rooms, origin, jiff::Timestamp::now());
         }
         self.verdict(point, origin)
     }
@@ -1034,6 +1125,7 @@ impl Hub {
                 device_name,
                 native_name,
                 rooms,
+                code: self.0.opts.guard.code_each_time(point.as_str(), value),
             });
             let held = Held {
                 request: Arc::clone(&request),
@@ -1077,9 +1169,10 @@ impl Hub {
             .collect()
     }
 
-    /// A human approves (the order runs now) or denies a held order.
-    /// Only the dashboard (`Origin::Ui`) may decide, and it must name the
-    /// point it saw: a decision never lands on a request it did not show.
+    /// [`Hub::resolve_approval_with_code`], the code not typed for it.
+    ///
+    /// # Errors
+    /// See [`ApprovalError`].
     pub async fn resolve_approval(
         &self,
         id: u64,
@@ -1087,6 +1180,22 @@ impl Hub {
         approve: bool,
         origin: Origin,
         actor: Option<String>,
+    ) -> Result<(), ApprovalError> {
+        self.resolve_approval_with_code(id, expected_point, approve, origin, actor, false)
+            .await
+    }
+
+    /// A human approves (the order runs now) or denies a held order.
+    /// Only the dashboard (`Origin::Ui`) may decide, and it must name the
+    /// point it saw: a decision never lands on a request it did not show.
+    pub async fn resolve_approval_with_code(
+        &self,
+        id: u64,
+        expected_point: &PointId,
+        approve: bool,
+        origin: Origin,
+        actor: Option<String>,
+        code_typed: bool,
     ) -> Result<(), ApprovalError> {
         if origin != Origin::Ui {
             return Err(ApprovalError::HumanOnly);
@@ -1102,6 +1211,10 @@ impl Hub {
                 None => return Err(ApprovalError::Unknown),
                 Some(held) if &held.request.point != expected_point => {
                     return Err(ApprovalError::Mismatch);
+                }
+                // Left waiting: the code can still be typed.
+                Some(held) if approve && held.request.code && !code_typed => {
+                    return Err(ApprovalError::CodeNeeded);
                 }
                 Some(_) => approvals.take(id).ok_or(ApprovalError::Unknown)?,
             }
@@ -1543,7 +1656,7 @@ impl Hub {
     /// Resolves and validates an order without sending it.
     fn prepare(&self, point: &PointId, value: &Value) -> Result<Prepared, CommandError> {
         let (device_id, key) = point.split().ok_or(CommandError::UnknownPoint)?;
-        let (device, key, kind, commands, confirm) = {
+        let (device, key, kind, commands, inside, confirm) = {
             let model = self.read();
             let device = model
                 .devices
@@ -1564,6 +1677,7 @@ impl Hub {
                 spec.key.clone(),
                 spec.kind.clone(),
                 slot.commands.clone(),
+                slot.inside,
                 confirm,
             )
         };
@@ -1578,6 +1692,7 @@ impl Hub {
             key,
             value,
             commands,
+            inside,
             confirm,
         })
     }
@@ -1702,8 +1817,10 @@ impl Hub {
 
     /// Hands a prepared order to its driver and waits for the answer.
     async fn send(&self, prepared: Prepared) -> Result<(), CommandError> {
-        // Every order ends here, approved ones too: a mirror stops them all.
-        if self.0.opts.mirror {
+        // Every order ends here, approved ones too: a mirror stops them all,
+        // but those that change nothing outside Moli (it runs them in the
+        // shadow of the real house).
+        if self.0.opts.mirror && !prepared.inside {
             return Err(CommandError::Mirror);
         }
         let Prepared {
@@ -1712,6 +1829,7 @@ impl Hub {
             key,
             value,
             commands,
+            inside: _,
             confirm: _,
         } = prepared;
         let (reply, answer) = oneshot::channel();
@@ -1980,6 +2098,7 @@ impl Hub {
         instance: &InstanceId,
         kind: &'static str,
         integration: Arc<str>,
+        inside: bool,
     ) -> mpsc::Receiver<CommandRequest> {
         let (commands, rx) = mpsc::channel(COMMAND_QUEUE);
         let restored = {
@@ -1992,6 +2111,7 @@ impl Hub {
                     status: DriverStatus::Starting,
                     warning: None,
                     commands,
+                    inside,
                 },
             );
             let foreign: Vec<_> = model
@@ -2347,6 +2467,7 @@ impl Hub {
             model.snapshots.remove(id);
             model.printers.remove(id);
             model.lives.remove(id);
+            model.reviews.remove(id);
             let removed = model.devices.remove(id).is_some();
             if states_removed || restored_removed || cached_removed || removed {
                 self.0.state_dirty.store(true, Ordering::Release);
@@ -2372,6 +2493,20 @@ impl Hub {
         source: Arc<dyn crate::media::SnapshotSource>,
     ) {
         self.write().snapshots.insert(device.clone(), source);
+    }
+
+    pub(crate) fn provide_review(
+        &self,
+        device: &DeviceId,
+        source: Arc<dyn crate::media::ReviewSource>,
+    ) {
+        self.write().reviews.insert(device.clone(), source);
+    }
+
+    /// The device's past, from its NVR (called without the model lock).
+    #[must_use]
+    pub fn review_source(&self, device: &DeviceId) -> Option<Arc<dyn crate::media::ReviewSource>> {
+        self.read().reviews.get(device).cloned()
     }
 
     pub(crate) fn provide_live(
@@ -2540,17 +2675,31 @@ impl Hub {
     /// Records a value. Unknown devices/points are ignored (the model only
     /// holds what drivers declared). Only actual changes are broadcast.
     pub(crate) fn set_state(&self, device: &DeviceId, key: &str, value: Value) {
-        self.record_state(device, key, value, false);
+        self.record_state(device, key, value, false, None);
+    }
+
+    /// Like `set_state`, but the value keeps the time it was read at, not
+    /// the time it is recorded: a value copied from another device (the
+    /// « Dehors » weather) is as old as its source's reading.
+    pub(crate) fn set_state_at(&self, device: &DeviceId, key: &str, value: Value, ts: u64) {
+        self.record_state(device, key, value, false, Some(ts));
     }
 
     /// Like `set_state`, but always broadcast: for points that are
     /// occurrences (button presses), where the same value twice is two events.
     pub(crate) fn pulse_state(&self, device: &DeviceId, key: &str, value: Value) {
-        self.record_state(device, key, value, true);
+        self.record_state(device, key, value, true, None);
     }
 
-    fn record_state(&self, device: &DeviceId, key: &str, value: Value, always: bool) {
-        let ts = now_ms();
+    fn record_state(
+        &self,
+        device: &DeviceId,
+        key: &str,
+        value: Value,
+        always: bool,
+        at: Option<u64>,
+    ) {
+        let ts = at.unwrap_or_else(now_ms);
         let event = {
             let mut model = self.write();
             let Some(spec) = model.devices.get(device).and_then(|d| d.point(key)) else {
@@ -2563,7 +2712,13 @@ impl Hub {
                 .get_mut(device)
                 .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
+            // A copied value also tells when its reading got newer: its age is
+            // what it says.
+            let changed = always
+                || first_live
+                || states
+                    .get(&key)
+                    .is_none_or(|s| s.value != value || (at.is_some() && s.ts != ts));
             states.insert(
                 key.clone(),
                 Sample {
@@ -2694,6 +2849,7 @@ impl Model {
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),
             live: self.lives.contains_key(&device.id),
+            review: self.reviews.contains_key(&device.id),
         }
     }
 }

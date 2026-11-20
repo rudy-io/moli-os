@@ -1,0 +1,29 @@
+[integration]
+id = "androidtv"
+name = "Box ou télé Android TV (sans API de constructeur)"
+brands = ["Free"]
+models = ["Freebox Player POP"]
+transport = "tcp"
+driver = "androidtv"
+crate = "moli-androidtv"
+
+[discovery]
+# No discovery: the instance gives the box's address (fixed: it is the identity).
+mdns = []
+ssdp = []
+# 6466 Android TV Remote (open apps, app on screen, keys) ; 8009 Google Cast
+# (what plays) ; 5555 ADB (option `adb`: what any app plays) ; 5001 TvOverlay
+# (option `overlay`: notifications over the picture).
+ports = [6466, 8009, 5555, 5001]
+
+[needs]
+# Optional: `atv_cert` / `atv_key` (PEM), an Android TV Remote pairing (Home
+# Assistant's `.storage/androidtv_remote_*.pem`); without them, Cast alone.
+# `atv_pin`, `cast_pin` and `adb_key` are written by the core itself.
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"

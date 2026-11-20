@@ -296,11 +296,12 @@ fn spec(key: &str) -> PointSpec {
             Some(Unit::Percent),
             Semantic::Battery,
         ),
+        // A remote's press, sent with `pulse_state` (#211).
         "button" => (
             tr!("pilotes.dirigera.bouton"),
             Kind::Text,
             None,
-            Semantic::Other,
+            Semantic::Press,
         ),
         "position" => (
             tr!("pilotes.dirigera.ouverture"),
@@ -1321,6 +1322,9 @@ mod tests {
                 values: ["single", "double", "long"].map(Arc::from).to_vec()
             }
         );
+        let button = remote.point("button").unwrap();
+        assert_eq!(button.semantic, Semantic::Press);
+        assert!(!button.access.write);
         let press = json!({"id": "b1", "clickPattern": "doublePress"});
         assert_eq!(
             load.index.press(&press),

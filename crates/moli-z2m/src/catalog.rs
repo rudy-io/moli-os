@@ -39,6 +39,9 @@ struct Codec {
     /// A relay wired as a trigger (a gate, a garage door): its point is an
     /// order, never a state. The wire value that fires it (`"ON"`).
     impulse: Option<Json>,
+    /// A reading converted on its way in (a wind in m/s × 3.6 = km/h), so
+    /// that a meaning keeps one unit. Read-only points only.
+    scale: Option<f64>,
 }
 
 /// The only value of an impulse point: one order, no state.
@@ -143,6 +146,7 @@ impl Entry {
         let id = DeviceId::new(instance, &raw.ieee_address);
         mark_impulses(&id, impulses, &mut points, &mut codecs, applied);
         mark_soil(&mut points);
+        mark_presses(&mut points);
         let flame = mark_flame(&mut points, &mut codecs);
         let device = Device {
             id,
@@ -233,6 +237,11 @@ impl Entry {
                     return None;
                 }
                 let json = lookup(payload, &point.key)?;
+                // Z2M clears a press right after it (`action: ""`): no press,
+                // and the last one stays on show (#198).
+                if is_press(point) && json.as_str().is_none_or(str::is_empty) {
+                    return None;
+                }
                 if codec.is_some_and(|c| c.xy_hex) {
                     let axis = |a: &str| json.get(a).and_then(Json::as_f64);
                     let hex = axis("x")
@@ -248,8 +257,11 @@ impl Entry {
                     return Some((point.key.clone(), Value::Null));
                 }
                 let level = codec.and_then(|c| c.level_max).zip(json.as_f64());
+                let scaled = codec.and_then(|c| c.scale).zip(json.as_f64());
                 let value = if let Some((max, level)) = level {
                     Value::Int(level_to_percent(level, max))
+                } else if let Some((scale, reading)) = scaled {
+                    Value::Float((reading * scale * 100.0).round() / 100.0)
                 } else {
                     match codec.and_then(|c| c.binary.as_ref()) {
                         Some((on, _)) if json == on => Value::Bool(true),
@@ -367,6 +379,46 @@ fn shutter_semantic(group: &str, property: &str, kind: &Kind) -> Option<Semantic
     }
 }
 
+/// A weather station's reading (Shelly WS90, the generic wind sensor), as
+/// Zigbee2MQTT names it: its meaning, with the one unit that meaning has.
+struct Weather {
+    semantic: Semantic,
+    kind: Kind,
+    unit: Option<Unit>,
+    /// A wind in m/s is converted to km/h (`× 3.6`), bounds included.
+    scale: Option<f64>,
+}
+
+/// The weather meaning of a read-only point, by its Z2M name and its unit.
+/// A reading in another unit keeps no weather meaning. The WS90's
+/// `precipitation` is an endless counter, not today's rain: none either.
+fn weather(property: &str, kind: &Kind, unit: Option<&Unit>) -> Option<Weather> {
+    let Kind::Numeric { min, max, step } = kind else {
+        return None;
+    };
+    let (semantic, scale) = match (property, unit.map(Unit::symbol)) {
+        ("wind_speed", Some("km/h")) => (Semantic::WindSpeed, None),
+        ("wind_speed", Some("m/s")) => (Semantic::WindSpeed, Some(3.6)),
+        ("gust_speed" | "wind_gust" | "wind_gusts", Some("km/h")) => (Semantic::WindGust, None),
+        ("gust_speed" | "wind_gust" | "wind_gusts", Some("m/s")) => (Semantic::WindGust, Some(3.6)),
+        ("wind_direction", Some("°")) => (Semantic::WindDirection, None),
+        ("rain_rate", Some("mm/h")) => (Semantic::RainRate, None),
+        ("uv_index", None) => (Semantic::UvIndex, None),
+        _ => return None,
+    };
+    let scaled = |v: &Option<f64>| v.map(|v| v * scale.unwrap_or(1.0));
+    Some(Weather {
+        semantic,
+        kind: Kind::Numeric {
+            min: scaled(min),
+            max: scaled(max),
+            step: scaled(step),
+        },
+        unit: semantic.fixed_unit().flatten(),
+        scale,
+    })
+}
+
 /// A group of exposes: a composite value or a specific type (light, cover…).
 fn flatten_group<'a>(
     expose: &'a RawExpose,
@@ -412,7 +464,7 @@ fn flatten<'a>(
     if points.iter().any(|p| p.key == key) {
         return;
     }
-    let (kind, binary) = match &*expose.kind {
+    let (mut kind, binary) = match &*expose.kind {
         // Z2M declares `contact` upside down (`value_on: false`, `value_off: true`,
         // "closed (= true) or open (= false)"), whereas Moli's convention is
         // `true` = closed. Map the wire value straight through instead of via
@@ -455,8 +507,9 @@ fn flatten<'a>(
         level_max: None,
         xy_hex: false,
         impulse: None,
+        scale: None,
     };
-    let unit = expose.unit.as_deref().and_then(Unit::parse);
+    let mut unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
     // A lock's state (`LOCK`/`UNLOCK`, Z2M's `lock` expose) is no switch: `true` is
     // locked, and the guard asks a person before an agent opens it.
@@ -472,6 +525,13 @@ fn flatten<'a>(
         Semantic::Lock
     } else if let Some(semantic) = shutter_semantic(group, property, &kind) {
         semantic
+    } else if let Some(reading) = (expose.access & ACCESS_SET == 0)
+        .then(|| weather(property, &kind, unit.as_ref()))
+        .flatten()
+    {
+        codec.scale = reading.scale;
+        (kind, unit) = (reading.kind, reading.unit);
+        reading.semantic
     } else {
         Semantic::infer(&key, unit.as_ref())
     };
@@ -556,6 +616,7 @@ fn mark_flame(points: &mut Vec<PointSpec>, codecs: &mut HashMap<Arc<str>, Codec>
                 level_max: None,
                 xy_hex: false,
                 impulse: None,
+                scale: None,
             },
         );
     }
@@ -601,6 +662,30 @@ fn mark_impulses(
         codec.gettable = false;
         applied.insert(id);
     }
+}
+
+/// A button's or a remote's `action` (`single`, `double`, `hold`…): a press, an
+/// occurrence, never a state: the same value twice is two presses (#198).
+pub fn is_press(point: &PointSpec) -> bool {
+    &*point.key == "action" && matches!(point.kind, Kind::Enum { .. }) && !point.access.write
+}
+
+/// A button's `action` says it is a press (#211): the driver sends it with
+/// `pulse_state`, so the dashboard and the assistant know it whatever the brand.
+fn mark_presses(points: &mut [PointSpec]) {
+    for point in points.iter_mut() {
+        if is_press(point) {
+            point.semantic = Semantic::Press;
+        }
+    }
+}
+
+/// What a button sends in `command` mode (`on`, `off`, `brightness_*`,
+/// `color_temperature_*`): in `event` mode, no press of its own (#214).
+pub fn is_command_action(action: &str) -> bool {
+    matches!(action, "on" | "off")
+        || action.starts_with("brightness_")
+        || action.starts_with("color_temperature_")
 }
 
 /// A plant sensor's `dry` (Tuya soil sensors): its alarm is the plant's thirst.
@@ -664,6 +749,7 @@ fn push_color(
             level_max: None,
             xy_hex: true,
             impulse: None,
+            scale: None,
         },
     );
 }
@@ -747,6 +833,77 @@ mod tests {
         all[ieee].as_object().unwrap().clone()
     }
 
+    /// A weather station (Shelly WS90, as Zigbee2MQTT exposes it): its wind
+    /// in m/s is published in km/h, the unit of its meaning; its endless
+    /// `precipitation` counter is not today's rain.
+    #[test]
+    fn a_weather_station_speaks_the_units_of_its_meanings() {
+        let numeric = |property: &str, unit: Option<&str>, max: f64| {
+            let mut e = json!({ "type": "numeric", "name": property, "property": property, "access": 5, "value_min": 0, "value_max": max });
+            if let Some(unit) = unit {
+                e["unit"] = json!(unit);
+            }
+            e
+        };
+        let bridge = json!([
+            { "ieee_address": "0x00124b00000000c1", "type": "EndDevice", "friendly_name": "station",
+              "definition": { "model": "WS90", "vendor": "Shelly", "description": "Weather station",
+                "exposes": [
+                    numeric("wind_speed", Some("m/s"), 40.0),
+                    numeric("gust_speed", Some("m/s"), 40.0),
+                    numeric("wind_direction", Some("°"), 360.0),
+                    numeric("uv_index", None, 15.0),
+                    numeric("rain_rate", Some("mm/h"), 1000.0),
+                    numeric("precipitation", Some("mm"), 9999.0),
+                    numeric("temperature", Some("°C"), 60.0)
+                ] } },
+            { "ieee_address": "0x00124b00000000c2", "type": "Router", "friendly_name": "ventilateur",
+              "definition": { "model": "F", "vendor": "Y", "description": "Fan",
+                "exposes": [{ "type": "numeric", "name": "wind_speed", "property": "wind_speed", "access": 7, "value_min": 0, "value_max": 9 }] } }
+        ]);
+        let catalog = Catalog::from_bridge_devices(
+            &InstanceId::from("z2m"),
+            serde_json::to_vec(&bridge).unwrap().as_slice(),
+        )
+        .unwrap();
+        let station = catalog.by_name("station").unwrap();
+        let point = |key: &str| station.device.point(key).unwrap().clone();
+        let wind = point("wind_speed");
+        assert_eq!(wind.semantic, Semantic::WindSpeed);
+        assert_eq!(wind.unit, Some(Unit::KilometrePerHour));
+        assert!(
+            matches!(wind.kind, Kind::Numeric { max: Some(max), .. } if (max - 144.0).abs() < 1e-9)
+        );
+        assert_eq!(point("gust_speed").semantic, Semantic::WindGust);
+        assert_eq!(point("gust_speed").unit, Some(Unit::KilometrePerHour));
+        assert_eq!(point("wind_direction").semantic, Semantic::WindDirection);
+        assert_eq!(point("wind_direction").unit, Some(Unit::Degree));
+        assert_eq!(point("uv_index").semantic, Semantic::UvIndex);
+        assert_eq!(point("rain_rate").semantic, Semantic::RainRate);
+        assert_eq!(point("precipitation").semantic, Semantic::Other);
+        assert_eq!(point("temperature").semantic, Semantic::Temperature);
+
+        let reading =
+            json!({ "wind_speed": 2.5, "gust_speed": 10, "wind_direction": 270, "uv_index": 3 });
+        let values: HashMap<_, _> = station
+            .decode(reading.as_object().unwrap())
+            .into_iter()
+            .collect();
+        assert_eq!(values[&Arc::<str>::from("wind_speed")], Value::Float(9.0));
+        assert_eq!(values[&Arc::<str>::from("gust_speed")], Value::Float(36.0));
+        assert_eq!(
+            values[&Arc::<str>::from("wind_direction")],
+            Value::from_json(&json!(270))
+        );
+
+        // A fan's settable `wind_speed` (no unit) is no weather.
+        let fan = catalog.by_name("ventilateur").unwrap();
+        assert_eq!(
+            fan.device.point("wind_speed").unwrap().semantic,
+            Semantic::Other
+        );
+    }
+
     /// A Tuya soil sensor (COOLO CS-201Z): its soil is a plant's, its `dry` the
     /// plant's thirst (#163). A bare `dry` elsewhere stays what it is.
     #[test]
@@ -793,10 +950,53 @@ mod tests {
         assert_eq!(values["soil_warning"].as_f64(), Some(50.0));
     }
 
+    /// Real frames of an Aqara WXKG06LM and a Tuya ZG-101ZL (TS004F): their
+    /// `action` is a press (#198); the button's `operation_mode` is a setting.
+    #[test]
+    fn a_buttons_action_is_a_press() {
+        let catalog = catalog();
+        for ieee in ["0x00124b000000000c", "0x00124b000000000d"] {
+            let entry = catalog.by_name(ieee).unwrap();
+            let action = entry.device.point("action").unwrap();
+            assert!(is_press(action), "{ieee}");
+            assert_eq!(action.semantic, Semantic::Press, "{ieee}");
+            let values: HashMap<_, _> = entry.decode(&state(ieee)).into_iter().collect();
+            assert_eq!(values["action"], Value::from("single"), "{ieee}");
+        }
+        let button = catalog.by_name("0x00124b000000000d").unwrap();
+        let mode = button.device.point("operation_mode").unwrap();
+        assert!(!is_press(mode));
+        assert_ne!(mode.semantic, Semantic::Press);
+        // Only these two buttons' `action` is a press (#211): nothing else in
+        // the bridge, and never a point Moli can set.
+        let mut presses: Vec<_> = catalog
+            .entries()
+            .flat_map(|e| e.device.points.iter().map(move |p| (e, p)))
+            .filter(|(_, p)| p.semantic == Semantic::Press)
+            .map(|(e, p)| {
+                assert!(!p.access.write, "{}/{}", e.ieee, p.key);
+                format!("{}/{}", e.ieee, p.key)
+            })
+            .collect();
+        presses.sort();
+        assert_eq!(
+            presses,
+            ["0x00124b000000000c/action", "0x00124b000000000d/action"]
+        );
+        // Z2M clears a press right after it: nothing to tell, nothing to show.
+        let cleared = serde_json::json!({ "action": "", "battery": 100 });
+        let values: HashMap<_, _> = button
+            .decode(cleared.as_object().unwrap())
+            .into_iter()
+            .collect();
+        assert!(!values.contains_key("action"));
+        assert!(values.contains_key("battery"));
+    }
+
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 10, "coordinator excluded, 10 real devices");
+        assert_eq!(catalog.len(), 12, "coordinator excluded, 12 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),

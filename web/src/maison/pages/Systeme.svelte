@@ -7,6 +7,7 @@
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
   import Rules from '../moli/Rules.svelte';
   import AlexaAccount from '../ui/AlexaAccount.svelte';
+  import EngieAccount from '../ui/EngieAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
   import { hub, home, hidden, watches } from '../lib/home.svelte.js';
@@ -98,7 +99,7 @@
   // ---- words ------------------------------------------------------------------
   // Driver kinds: their name and description are in the catalog
   // (systeme.pilotes.<kind>.nom / .desc); a kind not listed shows as it is.
-  const KINDS = ['z2m', 'zwave', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'shelly', 'igd', 'presence', 'telegram', 'phones', 'profile', 'izypower', 'solarman'];
+  const KINDS = ['z2m', 'zwave', 'rfxcom2mqtt', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'shelly', 'igd', 'presence', 'telegram', 'phones', 'profile', 'izypower', 'solarman'];
   const kindWord = (kind, part) => (KINDS.includes(kind) ? t(`systeme.pilotes.${kind}.${part}`) : null);
   const driverName = (d) => (d.kind === 'profile' ? d.instance.charAt(0).toUpperCase() + d.instance.slice(1) : (kindWord(d.kind, 'nom') ?? d.kind));
 
@@ -183,6 +184,8 @@
   <Rules />
 
   <AlexaAccount />
+
+  <EngieAccount />
 
   <TuyaCloudKeys />
 

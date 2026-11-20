@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor/matter-rust"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +11,7 @@ repository = "https://github.com/rudy-io/moli-os"
 rust-version = "1.89"
 
 [workspace.dependencies]
+moli-matter = { path = "crates/moli-matter" }
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
@@ -20,6 +22,7 @@ moli-voltalis = { path = "crates/moli-voltalis" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-zigbee = { path = "crates/moli-zigbee" }
 moli-zwave = { path = "crates/moli-zwave" }
+moli-rfxcom2mqtt = { path = "crates/moli-rfxcom2mqtt" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-homeassistant = { path = "crates/moli-homeassistant" }
@@ -40,17 +43,27 @@ moli-bambu = { path = "crates/moli-bambu" }
 moli-frigate = { path = "crates/moli-frigate" }
 moli-philips = { path = "crates/moli-philips" }
 moli-melcloud = { path = "crates/moli-melcloud" }
+moli-kasa = { path = "crates/moli-kasa" }
+moli-recycleapp = { path = "crates/moli-recycleapp" }
+moli-engie = { path = "crates/moli-engie" }
 moli-tapo = { path = "crates/moli-tapo" }
 moli-lifx = { path = "crates/moli-lifx" }
+moli-govee = { path = "crates/moli-govee" }
 moli-shelly = { path = "crates/moli-shelly" }
 moli-izypower = { path = "crates/moli-izypower" }
 moli-solarman = { path = "crates/moli-solarman" }
+moli-jackery = { path = "crates/moli-jackery" }
+moli-vicare = { path = "crates/moli-vicare" }
+moli-synology = { path = "crates/moli-synology" }
 moli-igd = { path = "crates/moli-igd" }
 moli-ipp = { path = "crates/moli-ipp" }
 moli-assistant = { path = "crates/moli-assistant" }
 moli-automation = { path = "crates/moli-automation" }
+moli-alarm = { path = "crates/moli-alarm" }
+moli-heating = { path = "crates/moli-heating" }
 moli-helpers = { path = "crates/moli-helpers" }
 moli-lights = { path = "crates/moli-lights" }
+moli-outdoor = { path = "crates/moli-outdoor" }
 moli-scenes = { path = "crates/moli-scenes" }
 moli-presence = { path = "crates/moli-presence" }
 moli-telegram = { path = "crates/moli-telegram" }
@@ -59,6 +72,7 @@ moli-phones = { path = "crates/moli-phones" }
 moli-ambiance = { path = "crates/moli-ambiance" }
 moli-moonraker = { path = "crates/moli-moonraker" }
 moli-androidtv = { path = "crates/moli-androidtv" }
+moli-appletv = { path = "crates/moli-appletv" }
 moli-esphome = { path = "crates/moli-esphome" }
 moli-alexa = { path = "crates/moli-alexa" }
 moli-demo = { path = "crates/moli-demo" }
@@ -74,6 +88,7 @@ symphonia-codec-aac = "0.6"
 symphonia-core = "0.6"
 clap = { version = "4", features = ["derive", "env"] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+bytes = "1"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
@@ -83,9 +98,9 @@ libc = "0.2"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
 # Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
-rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "0.42", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

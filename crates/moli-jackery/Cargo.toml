@@ -1,0 +1,21 @@
+[package]
+name = "moli-jackery"
+description = "Moli OS driver for Jackery HomePower / SolarVault batteries, through their local MQTT link."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+rumqttc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

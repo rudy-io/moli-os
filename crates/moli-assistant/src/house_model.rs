@@ -206,14 +206,14 @@ impl Assistant {
             let (alias, key) = written.as_str()?.trim().split_once('/')?;
             Some(format!("{}/{key}", aliases.get(alias)?.as_str()))
         };
+        // The person named a room and the model picked a device elsewhere: nothing is sent.
+        if matches!(name, "set" | "adjust" | "schedule")
+            && let Some(words) =
+                self.elsewhere(point_of(&args["point"]).as_deref(), layout, question)
+        {
+            return words;
+        }
         match name {
-            // The person named a room and the model picked a device elsewhere: nothing is sent.
-            "set" | "adjust" | "schedule"
-                if let Some(words) =
-                    self.elsewhere(point_of(&args["point"]).as_deref(), layout, question) =>
-            {
-                words
-            }
             "set" => {
                 self.house_set(point_of(&args["point"]), &args, question, run)
                     .await

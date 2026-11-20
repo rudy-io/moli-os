@@ -1,0 +1,58 @@
+{
+  "_source": "connectedhomeip @5cd2917 src/crypto/tests/TestChipCryptoPAL.cpp (TestGroup_SessionIdDerivation, kGroupSessionId1/2) + src/transport/raw/tests/TestPeerAddress.cpp (TestPeerAddressMulticast, hardcoded `expected[]`) — INDEPENDENT known-answer oracle. Group-session-id KATs additionally reproduced byte-for-byte by a separate Python3 hmac/hashlib HKDF-SHA256 (no Rust involved); see _independence_check.",
+  "_derivation_sources": {
+    "group_session_id": "connectedhomeip src/crypto/CHIPCryptoPAL.cpp::DeriveGroupSessionId (lines ~846-889)",
+    "operational_group_key": "connectedhomeip src/crypto/CHIPCryptoPAL.cpp::DeriveGroupOperationalKey (lines ~850-869)",
+    "multicast_ipv6": "connectedhomeip src/transport/raw/PeerAddress.h::BuildMatterPerGroupMulticastAddress (lines ~247-261)"
+  },
+
+  "_session_id_kdf": "session_id = BigEndian::Get16( HKDF-SHA256(ikm=operational_group_key, salt=[] (zero-length), info=\"GroupKeyHash\", L=2) ). NOTE: the info string is the 12-byte ASCII \"GroupKeyHash\" (47726f75704b657948617368) — NOT \"GroupKeyHash v1.0\"; chip's source comment says v1.0 but the actual kGroupKeyHashInfo[] byte array carries no \" v1.0\" suffix. Bit rule: take the first 2 output bytes, interpret big-endian as the u16 (out[0]<<8 | out[1]). No masking / no bit-set rule applied.",
+
+  "_multicast_layout": "16-byte IPv6 (ff35::/...): [0]=0xff,[1]=0x35 (multicast, flags=3 => non-perm/has-prefix, scope=5 site-local); [2]=0x00,[3]=0x40 (prefix length 0x40=64); [4]=0xfd (locally-assigned ULA designator); [5..11]=upper 56 bits of FabricId in BIG-ENDIAN ((fabric>>8)&0x00ffffffffffffff); [12]=lowest 8 bits of FabricId (fabric & 0xff); [13]=0x00; [14..15]=GroupId in BIG-ENDIAN. Group-id endianness = big-endian (network byte order).",
+
+  "group_session_id_vectors": [
+    {
+      "_note": "chip self-consistent KAT #1: kGroupOperationalKey1 -> kGroupSessionId1. Both hardcoded in TestChipCryptoPAL.cpp.",
+      "operational_group_key_hex": "1f19ed3cef8a211baf306faeeee7aac6",
+      "group_session_id": "0x6c80"
+    },
+    {
+      "_note": "chip self-consistent KAT #2: kGroupOperationalKey2 -> kGroupSessionId2. Both hardcoded in TestChipCryptoPAL.cpp.",
+      "operational_group_key_hex": "aa979a48bd8cdf293a0709b9c1eb1930",
+      "group_session_id": "0x0c48"
+    }
+  ],
+
+  "operational_group_key_vectors": [
+    {
+      "_note": "chip TestGroup_OperationalKeyDerivation 'Epoch Key 3 (example from spec)': kEpochKeyBuffer3 + kCompressedFabricId2 -> kGroupOperationalKey3. Independent chip KAT for the op-key step (Salt=CFID, Info=\"GroupKey v1.0\", L=16).",
+      "epoch_key_hex": "235bf7e62823d358dca4ba50b1535f4b",
+      "compressed_fabric_id_hex": "87e1b004e235a130",
+      "operational_group_key_hex": "a6f5306baf6d050af23ba4bd6b9dd960"
+    }
+  ],
+
+  "multicast_ipv6_vectors": [
+    {
+      "_note": "chip TestPeerAddressMulticast hardcoded expected[] for BuildMatterPerGroupMulticastAddress(fabric, group).",
+      "fabric_id": "0xa1a2a4a8b1b2b4b8",
+      "group_id": "0xe10f",
+      "multicast_ipv6_bytes_hex": "ff350040fda1a2a4a8b1b2b4b800e10f",
+      "multicast_ipv6": "ff35:0040:fda1:a2a4:a8b1:b2b4:b800:e10f"
+    }
+  ],
+
+  "_anchor_chain": {
+    "_note": "Relationship to the already-validated operational_ipk_matches_matter_js test in crates/matter-crypto/src/operational.rs. That test's anchor uses epoch_key 235bf7e62823d358dcf746bfa7541cf2 (DIFFERENT from chip's kEpochKeyBuffer3 above, which is 235bf7e62823d358dca4ba50b1535f4b) with cfid 87e1b004e235a130 -> op_group_key daee424f434677afb5949706572b4ccb. The group_session_id below was computed FROM that anchor op key by the SAME independent Python HKDF that reproduced chip's KATs (so the value is independently derived, not self-referential vs the future Rust formula).",
+    "epoch_key_hex": "235bf7e62823d358dcf746bfa7541cf2",
+    "compressed_fabric_id_hex": "87e1b004e235a130",
+    "operational_group_key_hex": "daee424f434677afb5949706572b4ccb",
+    "group_session_id": "0xb13b"
+  },
+
+  "_independence_check": {
+    "tool": "python3 hmac+hashlib HKDF-SHA256 (one-off script, no Rust)",
+    "command": "python3 derive: prk=HMAC-SHA256(key=0x00*32, msg=op_key); okm=HKDF-expand(prk, info=\"GroupKeyHash\", L=2); sid=(okm[0]<<8)|okm[1]",
+    "result": "reproduced chip's hardcoded kGroupSessionId1=0x6c80 and kGroupSessionId2=0x0c48 exactly, confirming the KDF parameters (empty salt, info=\"GroupKeyHash\", L=2, big-endian Get16)."
+  }
+}

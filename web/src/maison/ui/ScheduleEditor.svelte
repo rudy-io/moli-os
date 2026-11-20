@@ -5,11 +5,11 @@
 
   // A valve's weekly schedule, one day at a time. Writing it is an order like any
   // other: it goes through `act`, the hub's normal path and the guard.
-  let { id, name } = $props();
+  // `day`: the day shown, which a week view beside it may choose.
+  let { id, name, day = $bindable() } = $props();
 
   const d = $derived(device(id));
   const spec = $derived(scheduleSpec(d));
-  let day = $state(null);
   let edited = $state(null);
   let applyTo = $state([]);
   let saving = $state(false);
@@ -31,9 +31,14 @@
 
   function pick(key) {
     day = key;
+  }
+
+  // Another day, chosen here or beside: what was being edited belonged to the other one.
+  $effect(() => {
+    void day;
     edited = null;
     applyTo = [];
-  }
+  });
 
   const edit = (next) => (edited = next);
   const toggle = (key) => (applyTo = targets.includes(key) ? targets.filter((k) => k !== key) : [...targets, key]);

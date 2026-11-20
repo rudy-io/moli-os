@@ -2,7 +2,7 @@
   import '@fontsource-variable/figtree';
   import './maison.css';
   import { onMount, untrack } from 'svelte';
-  import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
+  import { home, hub, start, value, savePref, watches, hidden, reloadLayout, deviceKind } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -14,9 +14,12 @@
   import Pieces from './pages/Pieces.svelte';
   import Plan from './pages/Plan.svelte';
   import Cameras from './pages/Cameras.svelte';
+  import Alarme from './pages/Alarme.svelte';
+  import { isAlarm } from './lib/alarm.js';
   import Energie from './pages/Energie.svelte';
   import Impression from './pages/Impression.svelte';
   import Dehors from './pages/Dehors.svelte';
+  import Chauffage from './pages/Chauffage.svelte';
   import Moli from './pages/Moli.svelte';
   import MoliSheet from './moli/MoliSheet.svelte';
   import Automatismes from './pages/Automatismes.svelte';
@@ -25,6 +28,10 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { printersPresent, camerasUseful } from './lib/tabs.js';
+  import { mapUseful } from './lib/map-tab.js';
+  import { isValve } from './lib/capabilities.js';
+  import { scheduleSpec } from './lib/schedule.js';
 
   let { route } = $props();
   $effect(() => {
@@ -51,11 +58,15 @@
     { path: 'somfy', label: 'systeme.somfy.page_title', icon: 'shutter', shown: () => hub.drivers.some(d => d.integration === 'overkiz') },
     { path: 'airzone', label: 'airzone_ui.title', icon: 'air-conditioner', shown: () => airzonePresent(hub.drivers) },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
-    { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
-    { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
+    // Where people are needs their phones: no phone and nobody located, no empty map.
+    { path: 'carte', label: 'commun.nav.carte', icon: 'map', shown: () => mapUseful(hub.drivers, hub.devices) },
+    // A camera, or something for the Sécurité card that lives on the same page.
+    { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv', shown: () => camerasUseful(hub.devices, hub.drivers, home.config) },
+    { path: 'alarme', label: 'commun.nav.alarme', icon: 'shield', shown: () => Object.values(hub.devices).some(isAlarm) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating' || (isValve(d) && scheduleSpec(d))) },
+    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => printersPresent(hub.devices) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
@@ -179,8 +190,12 @@
       <Impression />
     {:else if page === 'dehors'}
       <Dehors />
+    {:else if page === 'chauffage'}
+      <Chauffage />
     {:else if page === 'moli'}
       <Moli />
+    {:else if page === 'alarme'}
+      <Alarme />
     {:else if page === 'automatismes'}
       <Automatismes {route} />
     {:else if page === 'somfy'}

@@ -1,0 +1,33 @@
+[integration]
+id = "kasa"
+name = "Prises TP-Link Kasa (protocole local historique)"
+# HS100, HS110 (with energy meter)… on the legacy local protocol: TCP 9999,
+# XOR. Newer KLAP-only firmware is the `tapo` driver's.
+brands = ["TP-Link"]
+models = ["HS110", "HS100"]
+transport = "tcp"
+driver = "kasa"
+crate = "moli-kasa"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [9999]
+
+[needs]
+secrets = []
+vars = []
+options = ["host", "port", "poll_seconds"]
+
+[origin]
+reused = "aucun code repris : protocole d'après sa description publique (chiffrement XOR à clé 171, commandes get_sysinfo, emeter.get_realtime, set_relay_state, set_led_off), vérifié sur une HS110 réelle"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/sysinfo.json"
+
+[[fixture]]
+file = "fixtures/realtime-v1.json"
+
+[[fixture]]
+file = "fixtures/realtime-v2.json"

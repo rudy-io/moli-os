@@ -6,8 +6,10 @@
   /** A device's live video, played by this browser (WebRTC): Moli only
    *  passes the offer and the answer (/api/devices/{id}/live); the video
    *  comes straight from the device. So it plays at home, where the
-   *  browser reaches the device; elsewhere it says so. */
-  let { id } = $props();
+   *  browser reaches the device; elsewhere it says so, or tells `onfail`
+   *  (the page then shows the device's images instead). `onsize(w, h)`:
+   *  the video's proportions, once known and when they change. */
+  let { id, onfail = null, onsize = null } = $props();
 
   let video = $state(null);
   let status = $state('connecting'); // connecting | playing | failed
@@ -43,8 +45,7 @@
       const unreachable = () => {
         if (pc !== peer || status === 'playing') return;
         stop();
-        status = 'failed';
-        reason = t('salon.impression.camera_injoignable');
+        failed(t('salon.impression.camera_injoignable'));
       };
       peer.onconnectionstatechange = () => {
         if (peer.connectionState === 'connected') {
@@ -67,9 +68,15 @@
       if (pc !== peer) return; // stopped meanwhile
       await peer.setRemoteDescription({ type: 'answer', sdp: body.sdp });
     } catch (e) {
-      status = 'failed';
-      reason = e.message;
+      stop();
+      failed(e.message);
     }
+  }
+
+  function failed(why) {
+    status = 'failed';
+    reason = why;
+    onfail?.(why);
   }
 
   function stop() {
@@ -95,7 +102,7 @@
 
 <div class="live" data-status={status}>
   <!-- svelte-ignore a11y_media_has_caption -->
-  <video bind:this={video} autoplay muted playsinline></video>
+  <video bind:this={video} autoplay muted playsinline onresize={() => onsize?.(video.videoWidth, video.videoHeight)}></video>
   {#if status === 'connecting'}
     <span class="badge">{t('salon.impression.camera_connexion')}</span>
   {:else if status === 'playing'}

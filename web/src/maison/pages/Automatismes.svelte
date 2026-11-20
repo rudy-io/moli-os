@@ -77,7 +77,7 @@
         await api.enabled(a.id, false);
         note(t('automatismes.liste.coupe_note', { nom: a.name }));
       } else {
-        await asHuman(t('automatismes.activer_label', { nom: a.name }), () => api.approve(a.id, item.fingerprint));
+        await asHuman(t('automatismes.activer_label', { nom: a.name }), (pin) => api.approve(a.id, item.fingerprint, pin));
         // Home Assistant's original still runs until someone switches it off.
         note(a.author === 'import' ? t('automatismes.liste.tourne_import', { nom: a.name }) : t('automatismes.liste.tourne_note', { nom: a.name }));
       }

@@ -1,0 +1,36 @@
+[
+  {
+    "name": "pi_default_disc",
+    "source": "hand-encoded: spec 4.18 + chip:src/ble/CHIPBleServiceData.h:53-136 (ChipBLEDeviceIdentificationInfo)",
+    "direction": "tx",
+    "role": "peripheral",
+    "packet_hex": "00000ff1ff008000",
+    "expect": {
+      "discriminator": 3840,
+      "adv_version": 0,
+      "vendor_id": 65521,
+      "product_id": 32768,
+      "has_additional_data": false,
+      "extended_announcement": false
+    },
+    "note": "Layout (CHIPBleServiceData.h:53-136): byte0 OpCode = 0x00 (struct is always zero-initialized via Init() for the standard DeviceIdentificationInfo block -- confirmed via GenericConfigurationManagerImpl.ipp:604-634, OpCode is never explicitly set elsewhere). kchipBLEServiceDataType_DeviceIdentificationInfo = 0x01 (CHIPBleServiceData.h:42) is a separate legacy enum for a different purpose (BLE GAP AD structure service-data type), NOT this struct's OpCode byte -- do not confuse the two. byte1 = discriminator low 8 bits (0xF00 & 0xff = 0x00). byte2 = (advVersion<<4) | discriminator high 4 bits (SetDeviceDiscriminator/SetAdvertisementVersion, CHIPBleServiceData.h:80-108) = (0<<4)|0xF = 0x0f. bytes3-4 = VendorId LE (SetVendorId, LittleEndian::Put16) = 0xFFF1 -> f1 ff. bytes5-6 = ProductId LE = 0x8000 -> 00 80. byte7 = AdditionalDataFlag bit0 (kAdditionalDataFlagMask=0x1, C3/has-additional-data) | bit1 (kExtendedAnnouncementFlagMask=0x2, extended) = 0x00. Pure layout encode from the given (discriminator, VID, PID) inputs, not observed from any device -- no live capture needed to validate this arithmetic.",
+    "provisional": false
+  },
+  {
+    "name": "mixed_fields",
+    "source": "hand-encoded: spec 4.18 + chip:src/ble/CHIPBleServiceData.h:53-136 (ChipBLEDeviceIdentificationInfo)",
+    "direction": "tx",
+    "role": "peripheral",
+    "packet_hex": "00bc0a3412785601",
+    "expect": {
+      "discriminator": 2748,
+      "adv_version": 0,
+      "vendor_id": 4660,
+      "product_id": 22136,
+      "has_additional_data": true,
+      "extended_announcement": false
+    },
+    "note": "Same layout as pi_default_disc. byte0 OpCode = 0x00. discriminator 0xABC: byte1 (low8) = 0xbc, byte2 low nibble (high4) = 0xa, adv_version 0 -> byte2 = (0<<4)|0xa = 0x0a. VendorId 0x1234 LE -> 34 12. ProductId 0x5678 LE -> 78 56. byte7 = 0x01 (kAdditionalDataFlagMask set, extended announcement clear). Pure layout encode, cross-checked byte-for-byte with an independent Python re-implementation of the struct's bit-packing.",
+    "provisional": false
+  }
+]

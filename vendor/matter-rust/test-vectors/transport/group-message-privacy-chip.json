@@ -1,0 +1,34 @@
+{
+  "source": {
+    "oracle": "connectedhomeip",
+    "file": "src/transport/tests/TestSessionManagerDispatch.cpp",
+    "vector": "\"private group message\" entry of theMessageTestVector",
+    "cross_refs": "privacy key derivation: src/crypto/tests/TestChipCryptoPAL.cpp TestGroup_PrivacyKeyDerivation; privacy nonce: src/transport/CryptoContext.cpp BuildPrivacyNonce"
+  },
+  "notes": {
+    "security_flags": "0x81 == kPrivacyFlag (0x80) | kGroupSession (0x01); chip SessionManager sets P unconditionally for group TX",
+    "aead_nonce": "u8(RAW securityFlags == 0x81, P INCLUDED) || u32_LE(counter) || u64_LE(sourceNodeId). chip BuildNonce consumes PacketHeader::GetSecurityFlags() == mSecFlags.Raw(). CAUTION: the chip test struct's .nonce field shows a masked 0x01 byte, but it is unused by that test and does NOT decrypt these frames; only 0x81 does (verified with an independent Python AES-CCM implementation, 2026-07-20).",
+    "privacy_key": "HKDF-SHA256(IKM = operational key, salt = [], info = \"PrivacyKey\", L = 16)",
+    "privacy_nonce": "u16_BE(sessionId) || MIC[5..16] — 13 bytes",
+    "privacy_region": "header bytes [4..header_len] (counter + source node id + dest group id); bytes [0..4] and ciphertext+MIC stay in the clear",
+    "privacy_cipher": "AES-CTR-128 with the CCM counter-block convention == AES-CCM encrypt with empty AAD, tag discarded (byte-verified against the frames below)"
+  },
+  "inputs": {
+    "epoch_key": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "operational_group_key": "ca92d7a0942d1a511a0e26ad074f4c2f",
+    "privacy_key": "bfe9da016a765365f2dd97a9f939e425",
+    "session_id": 56189,
+    "group_id": 2,
+    "message_counter": 305419897,
+    "source_node_id": "0000000000000001",
+    "payload_hex": "0164ee0e207d"
+  },
+  "expected": {
+    "plain_frame_hex": "067ddb817956341201000000000000000200" ,
+    "aead_nonce_hex": "81795634120100000000000000",
+    "encrypted_pre_privacy_hex": "067ddb8179563412010000000000000002002b2f915a66c9596290ebe4408217b3c0c921a2fca4e1",
+    "mic_hex": "596290ebe4408217b3c0c921a2fca4e1",
+    "privacy_nonce_hex": "db7d408217b3c0c921a2fca4e1",
+    "wire_hex": "067ddb81d926afce24c8a0981bdd44f4e7302b2f915a66c9596290ebe4408217b3c0c921a2fca4e1"
+  }
+}

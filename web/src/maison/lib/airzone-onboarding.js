@@ -1,4 +1,4 @@
-const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
+const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','dehors','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
 const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled','configuration_locked','revocation_not_persisted']);

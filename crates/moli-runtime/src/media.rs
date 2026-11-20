@@ -113,3 +113,84 @@ pub enum SnapshotError {
     #[error("image unavailable: {0}")]
     Failed(String),
 }
+
+// ---- review (an NVR's past: events, recordings, zones) ----------------------
+
+/// Something the camera saw (an NVR's review item: an alert or a detection),
+/// times in seconds since the epoch.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ReviewItem {
+    pub id: String,
+    pub start: f64,
+    /// `None` while it lasts.
+    pub end: Option<f64>,
+    /// `alert` or `detection`.
+    pub severity: String,
+    /// What was seen (`person`, `car`…).
+    pub labels: Vec<String>,
+    /// The zones it went through.
+    pub zones: Vec<String>,
+    /// The events behind it (their images and clips).
+    pub events: Vec<String>,
+}
+
+/// A stretch the NVR recorded.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct Recorded {
+    pub start: f64,
+    pub end: f64,
+}
+
+/// A zone drawn on the camera's picture: points from 0 to 1 (x right, y down).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Zone {
+    pub name: String,
+    pub points: Vec<(f64, f64)>,
+}
+
+/// One piece of the past to show.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReviewMedia {
+    /// An event's picture (with its box).
+    EventImage(String),
+    /// An event's small picture.
+    EventThumbnail(String),
+    /// An event's clip (MP4).
+    EventClip(String),
+    /// What was recorded between two times (MP4).
+    Recording { start: f64, end: f64 },
+}
+
+/// The NVR's answer, streamed (a clip can be large: never held in memory).
+pub struct MediaReply {
+    pub status: u16,
+    /// The headers worth passing on (content type, length, range).
+    pub headers: Vec<(String, String)>,
+    pub body: futures::stream::BoxStream<'static, Result<bytes::Bytes, std::io::Error>>,
+}
+
+impl std::fmt::Debug for MediaReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaReply")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A camera's past, from its NVR (Frigate): what it saw, what it recorded,
+/// its zones, and their pictures and clips. Read only.
+pub trait ReviewSource: std::fmt::Debug + Send + Sync + 'static {
+    /// What it saw between `after` and `before` (seconds), newest first.
+    fn review(&self, after: f64, before: f64) -> BoxFuture<'_, anyhow::Result<Vec<ReviewItem>>>;
+    /// What it recorded between `after` and `before`.
+    fn recorded(&self, after: f64, before: f64) -> BoxFuture<'_, anyhow::Result<Vec<Recorded>>>;
+    /// Its zones.
+    fn zones(&self) -> BoxFuture<'_, anyhow::Result<Vec<Zone>>>;
+    /// A picture or a clip; `range` is the browser's `Range` header (seeking).
+    fn media(
+        &self,
+        what: ReviewMedia,
+        range: Option<String>,
+    ) -> BoxFuture<'_, anyhow::Result<MediaReply>>;
+}

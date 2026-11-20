@@ -1,0 +1,32 @@
+[integration]
+id = "vicare"
+name = "Viessmann (pompes à chaleur et chaudières, via le cloud ViCare)"
+brands = ["Viessmann"]
+# Seen so far (in the reference installation): a Vitocal heat pump with its
+# Vitoconnect gateway, two heating circuits and a domestic hot water tank.
+models = ["Vitocal (CU401B_S)"]
+transport = "https"
+driver = "vicare"
+crate = "moli-vicare"
+
+[discovery]
+# Cloud only: the gateway keeps no port open on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["client_id", "username", "password"]
+vars = []
+options = []
+
+[origin]
+reused = "aucun code repris : points d'accès, connexion et noms de fonctionnalités de l'API publique Viessmann (developer.viessmann-climatesolutions.com), recoupés avec la bibliothèque PyViCare (openviess, licence Apache-2.0) ; réponses réelles capturées puis anonymisées"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-vicare/src/model.rs).
+[[fixture]]
+file = "fixtures/installations.json"
+
+[[fixture]]
+file = "fixtures/features-heating.json"

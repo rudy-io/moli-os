@@ -96,7 +96,7 @@
   const tintInk = $derived.by(() => {
     if (!tint) return null;
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(tint.slice(i, i + 2), 16) / 255);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? '#3a2a10' : '#fff';
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? 'var(--warm-deep)' : '#fff';
   });
 
   // [catalogue key of its name, kelvin, look]; and [key, colour sent to the lamp].
@@ -315,7 +315,7 @@
 
   .mode.on {
     background: var(--warm);
-    color: #3a2a10;
+    color: var(--warm-deep);
   }
 
   .fan {
@@ -464,7 +464,7 @@
 
   .on .bulb {
     background: var(--warm);
-    color: #fff;
+    color: var(--warm-deep);
     box-shadow: 0 0 0 6px var(--glow, var(--warm-glow)), 0 6px 22px var(--glow, var(--warm-glow));
   }
 

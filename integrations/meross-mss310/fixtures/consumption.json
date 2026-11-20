@@ -1,0 +1,31 @@
+{
+  "header": {
+    "messageId": "00000000000000000000000000000000",
+    "namespace": "Appliance.Control.ConsumptionX",
+    "method": "GETACK",
+    "payloadVersion": 1,
+    "from": "/appliance/00000000000000000000000000000001/publish",
+    "timestamp": 1767355200,
+    "timestampMs": 0,
+    "sign": "00000000000000000000000000000000"
+  },
+  "payload": {
+    "consumptionx": [
+      {
+        "date": "2026-01-01",
+        "time": 1767304800,
+        "value": 1284
+      },
+      {
+        "date": "2026-01-02",
+        "time": 1767355200,
+        "value": 412
+      },
+      {
+        "date": "2025-12-31",
+        "time": 1767218400,
+        "value": 1530
+      }
+    ]
+  }
+}

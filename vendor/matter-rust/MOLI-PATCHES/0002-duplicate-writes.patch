@@ -1,0 +1,64 @@
+From 98ee60681913859aed5d550688f41fe18fc65377 Mon Sep 17 00:00:00 2001
+From: series <series@local>
+Date: Fri, 13 Nov 2026 12:49:09 +0100
+Subject: [PATCH] fix(controller): refuse duplicate write paths before sending
+
+A write list naming the same attribute twice was only caught when the
+acknowledgement was parsed, once the device may already have applied one of
+the two values. Refuse it before any bytes are sent.
+---
+ .../crates/matter-controller/src/node.rs        | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/crates/matter-controller/src/node.rs b/crates/matter-controller/src/node.rs
+index 30b9e00..444148c 100644
+--- a/crates/matter-controller/src/node.rs
++++ b/crates/matter-controller/src/node.rs
+@@ -626,6 +626,7 @@ impl Node {
+         &self,
+         writes: &[(AttributePath, Value)],
+     ) -> Result<Vec<(AttributePath, ImStatus)>, Error> {
++        Self::unique_write_paths(writes)?;
+         let mut reqs = Vec::with_capacity(writes.len());
+         for (path, value) in writes {
+             reqs.push(AttributeWriteRequest {
+@@ -649,6 +650,20 @@ impl Node {
+         Ok(parse_write_response(&resp)?)
+     }
+ 
++    /// Refuse a write list naming the same attribute twice before any bytes
++    /// leave. The strict reply parser can only catch that from the
++    /// acknowledgement, once the device may already have applied one of the two
++    /// values; this check runs first, so nothing is transmitted.
++    fn unique_write_paths(writes: &[(AttributePath, Value)]) -> Result<(), Error> {
++        let mut seen = std::collections::HashSet::with_capacity(writes.len());
++        if writes.iter().all(|(path, _)| seen.insert(*path)) {
++            return Ok(());
++        }
++        Err(Error::InteractionModel(
++            matter_interaction::ImError::UnexpectedValue("duplicate write path"),
++        ))
++    }
++
+     /// Queue an action and wait for its reply within an absolute deadline.
+     ///
+     /// Splits the two cases a bare `timeout` hides: a request that never
+@@ -689,6 +704,7 @@ impl Node {
+         writes: &[(AttributePath, Value)],
+         deadline: std::time::Instant,
+     ) -> Result<Vec<(AttributePath, ImStatus)>, Error> {
++        Self::unique_write_paths(writes)?;
+         let mut reqs = Vec::with_capacity(writes.len());
+         for (path, value) in writes {
+             reqs.push(AttributeWriteRequest {
+@@ -733,6 +749,7 @@ impl Node {
+         writes: &[(AttributePath, Value)],
+         timeout_ms: Option<u16>,
+     ) -> Result<Vec<(AttributePath, ImStatus)>, Error> {
++        Self::unique_write_paths(writes)?;
+         let mut reqs = Vec::with_capacity(writes.len());
+         for (path, value) in writes {
+             reqs.push(AttributeWriteRequest {
+-- 
+2.56.0
+

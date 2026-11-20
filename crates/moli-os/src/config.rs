@@ -46,6 +46,9 @@ pub struct Config {
     pub drivers: Vec<DriverConfig>,
     #[serde(default)]
     pub guard: GuardConfig,
+    /// What agents reach over MCP. Edited by humans only, like `[guard]`.
+    #[serde(default)]
+    pub mcp: McpConfig,
     /// Energy meters and tariff (absent: no energy tracking).
     #[serde(default)]
     pub energy: Option<moli_energy::Config>,
@@ -53,6 +56,14 @@ pub struct Config {
     /// (D12). Moli runs them as instance `lumieres`.
     #[serde(default, rename = "fixture")]
     pub fixtures: Vec<moli_lights::Fixture>,
+    /// The weather outside (#210): the stations, then the forecast, as one
+    /// device. Moli runs it as instance `dehors` (absent: nothing changes).
+    #[serde(default)]
+    pub outdoor: Option<moli_outdoor::Config>,
+    /// The façades the sun may be on (#258), on `dehors:soleil`: their
+    /// incidence and whether the sun is on each (absent: the sun only).
+    #[serde(default)]
+    pub sun: Option<moli_outdoor::sun::Config>,
     /// Scenes: lights of several rooms set to a look in one gesture. Moli
     /// runs them (and the rhythm) as instance `scenes`.
     #[serde(default, rename = "scene")]
@@ -60,6 +71,11 @@ pub struct Config {
     /// The rhythm of the day: the white and the level lights take by the hour.
     #[serde(default)]
     pub rhythm: Option<moli_scenes::Rhythm>,
+    /// Heating: a room's own thermostat on the room's sensor, correcting its
+    /// valves' setpoints, with a weekly schedule. Moli runs the rooms as
+    /// instance `chauffage`.
+    #[serde(default)]
+    pub heating: Vec<moli_heating::Room>,
     /// The home's own assistant (absent: no conversation in the dashboard).
     /// Its API key: `moli-os secrets set assistant api_key`.
     #[serde(default)]
@@ -70,6 +86,35 @@ pub struct Config {
     /// The house's time zone, resolved once and given to every section.
     #[serde(skip)]
     pub zone: crate::timezone::Zone,
+}
+
+/// What agents reach over MCP. Edited by humans only: no surface can
+/// change it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpConfig {
+    /// Tools switched off, on `/mcp` as on `/mcp/readonly`: neither listed
+    /// nor callable (e.g. `["camera_snapshot"]`: no camera image leaves
+    /// through an agent).
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
+}
+
+impl McpConfig {
+    /// The tools to switch off, each one checked: a misspelt name would
+    /// switch nothing off and look like a guard.
+    pub fn disabled_tools(&self) -> anyhow::Result<Vec<String>> {
+        let known = moli_api::mcp_tool_names();
+        for name in &self.disabled_tools {
+            if !known.contains(name) {
+                bail!(
+                    "[mcp] disabled_tools: no tool {name:?} (tools: {})",
+                    known.join(", ")
+                );
+            }
+        }
+        Ok(self.disabled_tools.clone())
+    }
 }
 
 /// Where and when agents need a human's approval. Edited by humans only:
@@ -92,6 +137,14 @@ pub struct GuardConfig {
     /// order (agents, scripts, the CLI) waits for one.
     #[serde(default)]
     pub dashboard: moli_runtime::guard::Dashboard,
+    /// Orders that want the code each time, even from an open session:
+    /// `[[guard.code_each_time]] point = "alarme:maison/mode", values = ["off"]`.
+    #[serde(default)]
+    pub code_each_time: Vec<moli_runtime::guard::CodeEachTime>,
+    /// Orders agents may give themselves on a point kept for a person:
+    /// `[[guard.agents_may]] point = "alarme:maison/mode", values = ["home", "night"]`.
+    #[serde(default)]
+    pub agents_may: Vec<moli_runtime::guard::PointValues>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +184,8 @@ impl GuardConfig {
             quiet_hours,
             protect_unassigned: self.protect_unassigned,
             dashboard: self.dashboard,
+            code_each_time: self.code_each_time.clone(),
+            agents_may: self.agents_may.clone(),
         })
     }
 }
@@ -244,7 +299,9 @@ pub(crate) fn reserved_instance(id: &str) -> bool {
         moli_energy::points::INSTANCE,
         moli_energy::load::INSTANCE,
         moli_lights::INSTANCE,
+        moli_outdoor::INSTANCE,
         moli_scenes::INSTANCE,
+        moli_heating::INSTANCE,
         moli_api::PEOPLE_INSTANCE,
     ]
     .contains(&id)
@@ -358,6 +415,7 @@ impl Config {
     }
 
     fn check(&self) -> anyhow::Result<()> {
+        self.mcp.disabled_tools()?;
         if !moli_i18n::languages().contains(&self.server.language.as_str()) {
             bail!(
                 "[server] language = {:?}: Moli speaks {}",
@@ -401,15 +459,61 @@ impl Config {
         if self.server.worker_threads == 0 {
             bail!("worker_threads must be ≥ 1");
         }
-        self.guard.policy()?;
+        let guard = self.guard.policy()?;
         if let Some(energy) = &self.energy {
             energy
                 .check()
                 .map_err(|e| anyhow::anyhow!("[energy] {e}"))?;
+            // A driven load switches on its own, in the house's name: never
+            // a point whose orders want the code each time.
+            for load in &energy.loads {
+                if guard.code_each_time_on(&load.switch) {
+                    bail!(
+                        "[[energy.load]] {:?}: {} wants the code each time \
+                         ([[guard.code_each_time]]); a load cannot switch it",
+                        load.id,
+                        load.switch
+                    );
+                }
+            }
+        }
+        // A scene runs on a gesture that typed no code (a button, a page, an
+        // agent): it never carries an order that wants it each time.
+        for scene in &self.scenes {
+            for order in &scene.orders {
+                if guard.code_each_time(&order.point, &order.value.value()) {
+                    bail!(
+                        "[[scene]] {:?}: the order on {} wants the code each time \
+                         ([[guard.code_each_time]]); a scene cannot carry it",
+                        scene.id,
+                        order.point
+                    );
+                }
+            }
         }
         moli_lights::check(&self.fixtures).map_err(|e| anyhow::anyhow!("[[fixture]] {e}"))?;
+        if let Some(outdoor) = &self.outdoor {
+            moli_outdoor::check(outdoor).map_err(|e| anyhow::anyhow!("[outdoor] {e}"))?;
+        }
+        if let Some(sun) = &self.sun {
+            moli_outdoor::sun::check(sun).map_err(|e| anyhow::anyhow!("[sun] {e}"))?;
+        }
         moli_scenes::check(&self.scenes, self.rhythm.as_ref())
             .map_err(|e| anyhow::anyhow!("[[scene]] {e}"))?;
+        moli_heating::check(&self.heating).map_err(|e| anyhow::anyhow!("[[heating]] {e}"))?;
+        // The heating writes its valves by itself, with no code typed.
+        for room in &self.heating {
+            for valve in &room.valves {
+                if guard.code_each_time_on(valve) {
+                    bail!(
+                        "[[heating]] {:?}: {} wants the code each time \
+                         ([[guard.code_each_time]]); the heating cannot write it",
+                        room.id,
+                        valve
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -417,6 +521,38 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_tools_switched_off_must_exist() {
+        let config: Config =
+            toml::from_str("[mcp]\ndisabled_tools = [\"camera_snapshot\"]\n").unwrap();
+        assert_eq!(config.mcp.disabled_tools().unwrap(), ["camera_snapshot"]);
+        // Misspelt: refused, rather than a guard that guards nothing.
+        let config: Config =
+            toml::from_str("[mcp]\ndisabled_tools = [\"camera_snaphot\"]\n").unwrap();
+        let error = config.check().unwrap_err().to_string();
+        assert!(error.contains("camera_snaphot"), "{error}");
+        assert!(toml::from_str::<Config>("[mcp]\ndisabled = []\n").is_err());
+    }
+
+    #[test]
+    fn a_scene_never_carries_an_order_that_wants_the_code_each_time() {
+        let guard =
+            "[[guard.code_each_time]]\npoint = \"alarme:maison/mode\"\nvalues = [\"off\"]\n";
+        let scene = |value: &str| {
+            format!(
+                "{guard}[[scene]]\nid = \"retour\"\nname = \"Retour\"\n\
+                 orders = [{{ point = \"alarme:maison/mode\", value = \"{value}\" }}]\n"
+            )
+        };
+        // Arming from a scene: the code is not wanted for it.
+        let config: Config = toml::from_str(&scene("away")).unwrap();
+        config.check().unwrap();
+        // Disarming from a scene: refused at start, not held at each press.
+        let config: Config = toml::from_str(&scene("off")).unwrap();
+        let error = config.check().unwrap_err().to_string();
+        assert!(error.contains("retour"), "{error}");
+    }
 
     #[test]
     fn example_config_is_valid() {

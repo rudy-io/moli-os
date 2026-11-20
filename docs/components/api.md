@@ -210,6 +210,25 @@ dashboard commande sans code), `via` et `who` (l'e-mail reconnu par Access).
 
 Règles, dans l'ordre :
 
+0. **Code à chaque fois** (`[[guard.code_each_time]]` : `point`, `values` ; aucune valeur =
+   toutes) : cet ordre est retenu **même venant d'une personne avec sa session** (désarmer
+   l'alarme : `point = "alarme:maison/mode"`, `values = ["off"]`). Raison `le code de la
+   maison, à chaque fois` ; la demande porte `code: true`. La valider exige le code dans la
+   décision (`pin`), vérifié à ce moment, avec le même verrouillage que la connexion, et
+   seulement pour une personne en session (sans session : `403`, aucun code essayé) ; sans
+   lui, `401` et la demande reste en attente. La valeur se compare par son sens (`0`, `0.0`
+   et `"0"` sont un même nombre), telle que l'appareil la recevra. Seul un automatisme validé
+   y échappe, et c'est pourquoi **valider ou allumer un automatisme qui porte un tel ordre**
+   (`set` sur une de ces valeurs, `toggle` sur le point) **demande le code** (`pin` dans
+   `/approve` ou `/enabled`, `401` sans lui) ; le tableau de bord sans code ne le lance pas.
+   Les ordres du système (scènes, luminaires, charges pilotées) sont retenus comme les
+   autres ; une scène ou une charge qui viserait un tel ordre est refusée dès la lecture de
+   `moli.toml`.
+0 bis. **Ce que les agents peuvent** (`[[guard.agents_may]]` : `point`, `values`) : un ordre qu'une
+   personne a permis aux agents dans le fichier (armer l'alarme à la voix : `point =
+   "alarme:maison/mode"`, `values = ["home", "night", "away"]`) passe sans personne pour la commande
+   ou l'appareil protégé ; les pièces protégées et les heures calmes valent toujours. Jamais réglable
+   depuis un écran ni l'API.
 1. **Pièce protégée** (`protected_rooms`) : l'appareil, ou un membre s'il s'agit d'un
    groupe, est dans une pièce protégée. Toutes ses pièces comptent : l'étiquette de
    l'utilisateur **et** la pièce native (Hue…). Comparaison insensible à la casse, aux
@@ -269,7 +288,9 @@ Chemin d'une commande (`Hub::command`, `crates/moli-runtime/src/hub.rs`) :
    `state` suivant.
 
 Décision humaine : `POST /api/approvals/{id}` avec `x-moli-origin: ui`, le cookie de
-session, et le corps `{"approve": true|false, "point": "<point affiché sur la carte>"}`.
+session, et le corps `{"approve": true|false, "point": "<point affiché sur la carte>",
+"pin"?: "<code>"}` (`pin` exigé pour une demande `code: true` ; faux : `401`, trop
+d'essais : `429`).
 
 | Contrôle | Échec |
 |---|---|
@@ -337,7 +358,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
 | POST | `/api/devices/{id}/live` | comme `/snapshot` (invités refusés ; **humain** dans une pièce protégée) | `{sdp}` : l'offre WebRTC du navigateur (64 Kio au plus) | `{sdp}` : la réponse de l'appareil ; la vidéo va ensuite de l'appareil au navigateur, sans passer par Moli (au réseau de la maison seulement : l'adresse du navigateur vue par Moli est passée à l'appareil) | `400` pas une offre ; `403` ; `404` appareil inconnu / pas de vidéo en direct ; `502` pas de réponse en 10 s ou échec |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
-| GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
+| GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent ; chaque pièce avec `outside` (dehors ou non), et en fin de `rooms` les pièces extérieures que seuls les appareils ou le Plan nomment (`"added": true`) | `500` JSON invalide |
 | GET | `/api/system` | libre | aucune | `{version, timezone, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
 | GET | `/api/bench` | libre | aucune | `data/bench.json` tel quel (comparaison avec Home Assistant, écrite par un script côté hôte, hors de ce dépôt) | `404` no comparison available yet |
 
@@ -588,13 +609,17 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 - `kind` : `{"type":"binary"}`, `{"type":"numeric","min"?,"max"?,"step"?}`,
   `{"type":"enum","values":[…]}`, `{"type":"text"}`.
 - `unit` : symbole (`W`, `kWh`, `Wh`, `VA`, `V`, `mV`, `A`, `°C`, `%`, `lx`, `hPa`, `dB`,
-  `ppm`, `s`, `min`, `h`, ou tout autre texte).
+  `ppm`, `s`, `min`, `h`, `km/h`, `mm`, `mm/h`, `°`, ou tout autre texte).
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
   `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`,
   `soil_moisture` (humidité du sol, %), `soil_dry` (binaire, `true` = la plante a soif ; jamais
   une alerte de sécurité), `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose
-  ne va pas), `other`.
+  ne va pas), `press` (en lecture seule : un appui de bouton, un événement et non un état ; la
+  valeur est le genre d'appui tel que la marque le donne, `single`, `double`, `short_release`… ;
+  jamais déduit d'un nom), la météo avec une seule unité chacun : `wind_speed` et `wind_gust` (km/h),
+  `wind_direction` (°, d'où vient le vent, 0 = nord), `rain_rate` (mm/h), `rain_today` (mm,
+  remis à zéro chaque jour par la source), `uv_index` (sans unité), et `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
 
@@ -791,8 +816,20 @@ Canal de 256 messages ; un abonné en retard **perd silencieusement** les messag
 
 ### 4.1 Point d'entrée
 
-`http://<hôte>:8790/mcp`, transport « streamable HTTP » (`rmcp` 3.5,
-`crates/moli-api/src/mcp.rs`) :
+`http://<hôte>:8790/mcp`, transport « streamable HTTP » (`rmcp` 3.9,
+`crates/moli-api/src/mcp.rs`). Deux routes, un même serveur :
+
+- **`/mcp`** : les 14 outils (moins ceux que la maison coupe, voir plus bas).
+- **`/mcp/readonly`** : les 11 lectures seulement. `send_command`, `set_label` et
+  `save_automation_draft` n'y sont **ni listés ni appelables** : le serveur répond
+  `tool not found` (erreur JSON-RPC), quoi que fasse le client. Pour un agent branché pour
+  regarder. Mêmes gardes que `/mcp` (foyer, pas de distant, limiteur `mcp`).
+- **Outils coupés par la maison** : `[mcp] disabled_tools = ["camera_snapshot"]` dans
+  `moli.toml`, réglable par des humains seulement (comme `[guard]`). Un outil coupé
+  disparaît des **deux** routes : absent de `tools/list`, `tool not found` à l'appel. Un
+  nom inconnu empêche Moli de démarrer (une faute de frappe ne coupe rien en silence).
+
+Le service :
 
 - `StreamableHttpService` avec `LocalSessionManager` (sessions en mémoire),
   `json_response(true)` : les réponses arrivent en `application/json` plutôt qu'en flux ;
@@ -815,7 +852,15 @@ est un résultat `isError: true` avec un message texte (pas une erreur JSON-RPC)
 exception : `camera_snapshot` renvoie un bloc image (base64 + type MIME).
 
 Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/mcp`
-(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent.
+(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent ; `…/mcp/readonly`
+pour un agent qui ne doit que lire.
+
+**Annotations** (MCP `ToolAnnotations`, dans `tools/list`) : `readOnlyHint: true` sur les
+11 lectures ; `readOnlyHint: false, destructiveHint: false` sur `set_label` et
+`save_automation_draft` (un nom se remet, un brouillon n'agit pas) ; `readOnlyHint: false,
+destructiveHint: true, openWorldHint: true` sur `send_command` (il agit sur le monde
+physique). Elles aident le client à décider quand demander confirmation ; **elles ne
+gardent rien** : la garde est côté serveur (route, outils coupés, § 1.4 et 1.5).
 
 ### 4.2 Les 14 outils
 

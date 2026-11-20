@@ -1,11 +1,13 @@
 // The family dashboard's model: the hub's live state (SSE, shared with the
 // Atelier), the home layout (/api/home), and gentle helpers on top.
 
+import { orderError } from './errors.js';
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
 import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
+import { coverPositionTarget } from './cover-controls.js';
 
-export { hub, positionPoint, coverOrder };
+export { hub };
 
 export const home = $state({
   /** @type {any} layout from /api/home ({} = automatic) */
@@ -81,6 +83,41 @@ export function value(id, key) {
 export function since(id, key) {
   return hub.devices[id]?.state?.[key]?.ts ?? null;
 }
+
+/** A button's or a remote's last press (#198, #211): the most recent of its
+ *  `press` points (the driver says which, whatever the key: Z2M `action`, Hue
+ *  `button<N>`, Dirigera `button`, Tuya `switch_mode…`), with when. `button`:
+ *  the point's label when the device has several (a Hue dimmer), else null.
+ *  `null`: no button; `{ action: null }`: no press seen yet. */
+export function lastPress(d) {
+  const points = (d?.points ?? []).filter((p) => p.semantic === 'press' && !p.access?.write);
+  if (!points.length) return null;
+  let last = { action: null, ts: null, button: null };
+  for (const p of points) {
+    const action = value(d.id, p.key);
+    if (typeof action !== 'string' || !action) continue;
+    const ts = since(d.id, p.key);
+    if (last.action == null || (ts ?? 0) > (last.ts ?? 0)) {
+      last = { action, ts, button: points.length > 1 ? (p.label ?? p.key) : null };
+    }
+  }
+  return last;
+}
+
+// Each gesture named by the event that ends it: a Hue press sends
+// `initial_press` then `short_release` (or `long_press`, `repeat`… then
+// `long_release`), and the chip shows the last one, so a hold ends « maintenu ».
+const PRESSES = {
+  single: 'commun.appui.simple', click: 'commun.appui.simple', short_release: 'commun.appui.simple',
+  double: 'commun.appui.double', double_click: 'commun.appui.double', double_short_release: 'commun.appui.double',
+  triple: 'commun.appui.triple',
+  hold: 'commun.appui.maintenu', long: 'commun.appui.maintenu', press: 'commun.appui.maintenu',
+  long_press: 'commun.appui.maintenu', repeat: 'commun.appui.maintenu', long_release: 'commun.appui.maintenu',
+  initial_press: 'commun.appui.appui',
+  release: 'commun.appui.relache',
+};
+/** A press in words (« simple », « double », « maintenu »); any other, as told. */
+export const pressWord = (action) => (PRESSES[action] ? t(PRESSES[action]) : action);
 
 // What a sensor says, whatever its brand: Zigbee (`contact` true when
 // closed, `water_leak`), Tuya (`doorcontact_state` true when open,
@@ -174,6 +211,20 @@ export function pending(id, point = null) {
   return key ? `${id}/${key}` in hub.pending : false;
 }
 
+/** A cover's position: the point whose semantic says so, or the legacy Tuya
+ *  reading (display only), never a point chosen by its name alone. */
+export function coverPosition(id) {
+  const point = positionPoint(device(id), true);
+  const reported = point ? value(id, point.key) : null;
+  return point?.kind?.type === 'numeric' && Number.isFinite(reported) && reported >= 0 && reported <= 100
+    ? reported : null;
+}
+
+/** The point a cover's position can be written to, if any (bounded by its range). */
+export function coverPositionKey(id) {
+  return coverPositionTarget(device(id))?.point?.key ?? null;
+}
+
 // ---- rooms ---------------------------------------------------------------------
 
 const norm = (s) =>
@@ -245,7 +296,9 @@ export function deviceKind(d) {
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
-  if (has(d, 'target_temperature') || isValve(d)) return 'climate';
+  // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
+  if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
+  if (has(d, 'target_temperature') || (has(d, 'heat_setpoint') && has(d, 'cool_setpoint')) || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
     return 'cover';
@@ -267,11 +320,15 @@ export function deviceKind(d) {
 /** Rooms with their devices sorted by kind, the layout's order first. */
 export function roomList() {
   const defs = home.config?.rooms ?? [];
-  const map = new Map(defs.map((r) => [r.name, []]));
+  // A room `/api/home` added (`added`: outside, not listed by the family)
+  // takes no place in the order: it comes with the other unlisted rooms.
+  const map = new Map(defs.filter((r) => !r.added).map((r) => [r.name, []]));
   // A fixture's bulbs and relay show inside it, not beside it.
   const inFixture = new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? []));
   for (const d of Object.values(hub.devices)) {
     if (hidden(d.id) || inFixture.has(d.id)) continue;
+    // A heat pump and its circuits live on the Chauffage page, not on a room's card.
+    if (deviceKind(d) === 'heating') continue;
     const room = roomOf(d);
     if (!room) continue;
     if (!map.has(room)) map.set(room, []);
@@ -293,6 +350,11 @@ export function roomList() {
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'plant', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        opened: by('cover').filter((d) => {
+          const pct = coverPosition(d.id);
+          return pct != null && pct > 0;
+        }).length,
+        coversUnknown: by('cover').filter((d) => coverPosition(d.id) == null).length,
       };
     });
 }
@@ -388,9 +450,8 @@ export async function setLook(lights, look, label) {
 }
 
 function humanError(message) {
-  if (/unreachable|injoignable|did not answer|no answer/i.test(message)) return t('commun.appareil_injoignable');
-  if (/read-only|lecture seule|cannot be set/i.test(message)) return t('commun.non_pilotable');
-  return message;
+  const e = orderError(message);
+  return e.key ? t(e.key) : e.text;
 }
 
 export function toggle(id, label, point = null) {
@@ -420,8 +481,8 @@ export async function confirmHeld(pin) {
     await held.custom(held.freshPin ? pin : undefined);
     return null;
   }
-  await decide({ id: held.id, point: held.point }, true);
-  held.onApproved?.();
+  const done = await decide({ id: held.id, point: held.point }, true, pin);
+  if (done) held.onApproved?.();
   home.held = null;
   return null;
 }

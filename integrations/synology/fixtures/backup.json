@@ -1,0 +1,19 @@
+{
+ "success": true,
+ "data": {
+  "task_list": [
+   {
+    "task_id": 8,
+    "state": "backupable",
+    "status": "none",
+    "last_bkp_result": "done",
+    "last_bkp_time": "2026/11/14 03:46:02",
+    "last_bkp_end_time": "2026/11/14 03:46:02",
+    "type": "image:image_remote",
+    "transfer_type": "image_remote",
+    "name": "Backup A"
+   }
+  ],
+  "total": 1
+ }
+}

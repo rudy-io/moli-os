@@ -178,6 +178,15 @@ pub struct Period {
     /// What went to the grid (`export` meters); its cost is what it earned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export: Option<Amount>,
+    /// Natural gas (`gas` meters), in kWh: never in `total`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas: Option<Amount>,
+    /// What went into the home battery (`charge` meters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_charge: Option<Amount>,
+    /// What came out of it (`discharge` meters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_discharge: Option<Amount>,
     #[serde(flatten)]
     pub solar: Option<SolarShare>,
 }
@@ -186,30 +195,35 @@ pub struct Period {
 /// meters): `total` stays what was bought, the bill.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct SolarShare {
-    /// Used at home: production − export (kWh).
+    /// Kept at home: production − export (kWh), used or stored.
     pub self_consumed: f64,
-    /// What the home really used: bought + self-consumed (kWh).
+    /// What the home really used (kWh): bought + self-consumed, less what
+    /// the battery stored, plus what it gave back.
     pub consumption: f64,
     /// Self-consumed / production (« autoconsommation »), 0 to 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub self_consumption_rate: Option<f64>,
-    /// Self-consumed / consumption (« autoproduction »), 0 to 1.
+    /// What the home used without buying it / consumption
+    /// (« autoproduction »), 0 to 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub self_sufficiency: Option<f64>,
 }
 
 impl SolarShare {
-    fn of(bought: f64, production: f64, export: f64) -> Self {
+    /// `stored`: what the battery kept over the period (charge − discharge;
+    /// negative when it gave back more than it took), 0 without a battery.
+    fn of(bought: f64, production: f64, export: f64, stored: f64) -> Self {
         // Meters are read at different moments: never more out than made.
         let self_consumed = (production - export).clamp(0.0, production.max(0.0));
-        let consumption = bought.max(0.0) + self_consumed;
+        let bought = bought.max(0.0);
+        let consumption = (bought + self_consumed - stored).max(0.0);
         let round = |v: f64| (v * 1000.0).round() / 1000.0;
         let ratio = |part: f64, whole: f64| (whole > 0.0).then(|| round((part / whole).min(1.0)));
         Self {
             self_consumed: round(self_consumed),
             consumption: round(consumption),
             self_consumption_rate: ratio(self_consumed, production),
-            self_sufficiency: ratio(self_consumed, consumption),
+            self_sufficiency: ratio((consumption - bought).max(0.0), consumption),
         }
     }
 }
@@ -244,19 +258,28 @@ impl Period {
             of_role(Role::Circuit),
         );
         let (production, export) = (of_role(Role::Solar), of_role(Role::Export));
-        // With panels, the whole-home clamp sees only what was bought: the
-        // circuits also ran on what the home made and used.
+        let gas = of_role(Role::Gas);
+        let (charge, discharge) = (of_role(Role::Charge), of_role(Role::Discharge));
+        // What the battery kept over the period (negative: it gave back more).
+        let stored = (charge.is_some() || discharge.is_some()).then(|| {
+            charge.as_ref().map_or(0.0, |a| a.kwh) - discharge.as_ref().map_or(0.0, |a| a.kwh)
+        });
+        // With panels or a battery, the whole-home clamp sees only what was
+        // bought: the circuits also ran on what the home made and used, and
+        // on what the battery gave back (not on what it stored).
         let made_here = production
             .as_ref()
             .zip(export.as_ref())
             .map(|(p, e)| (p.kwh - e.kwh).clamp(0.0, p.kwh.max(0.0)));
+        let local = (made_here.is_some() || stored.is_some())
+            .then(|| made_here.unwrap_or(0.0) - stored.unwrap_or(0.0));
         let unmeasured = match (&whole, &circuits) {
             (Some(w), Some(c)) => Some(Amount {
-                kwh: (w.kwh + made_here.unwrap_or(0.0) - c.kwh).max(0.0),
+                kwh: (w.kwh + local.unwrap_or(0.0) - c.kwh).max(0.0),
                 cost: w
                     .cost
                     .zip(c.cost)
-                    .filter(|_| made_here.is_none())
+                    .filter(|_| local.is_none())
                     .map(|(w, c)| (w - c).max(0.0)),
             }),
             _ => None,
@@ -272,7 +295,7 @@ impl Period {
         let solar = production
             .as_ref()
             .zip(export.as_ref())
-            .map(|(p, e)| SolarShare::of(total.kwh, p.kwh, e.kwh));
+            .map(|(p, e)| SolarShare::of(total.kwh, p.kwh, e.kwh, stored.unwrap_or(0.0)));
         Self {
             from,
             to,
@@ -281,6 +304,9 @@ impl Period {
             unmeasured: unmeasured.map(|a| a.rounded()),
             production: production.map(|a| a.rounded()),
             export: export.map(|a| a.rounded()),
+            gas: gas.map(|a| a.rounded()),
+            battery_charge: charge.map(|a| a.rounded()),
+            battery_discharge: discharge.map(|a| a.rounded()),
             solar,
         }
     }
@@ -314,6 +340,39 @@ mod tests {
     fn at(s: &str) -> u64 {
         let z: Zoned = s.parse().unwrap();
         millis(&z)
+    }
+
+    #[test]
+    // Sums of exact inputs (2.0, 11.0): equal to the bit, as in the other tests.
+    #[allow(clippy::float_cmp)]
+    fn gas_is_counted_apart_from_the_electricity() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"day\"\nname = \"Jour\"\npoint = \"p:m/day\"\nrole = \"grid\"\n\
+             [[meter]]\nid = \"gas\"\nname = \"Gaz\"\npoint = \"p:m/gas\"\nrole = \"gas\"\nkwh_per_unit = 11.3868\n",
+        )
+        .unwrap();
+        config.check().unwrap();
+        let row = |meter: &str, kwh, cost| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost: Some(cost),
+        };
+        let p = Period::of(
+            &config,
+            &[row("day", 2.0, 0.6), row("gas", 11.0, 1.5)],
+            0,
+            HOUR_MS,
+        );
+        assert_eq!(p.total.kwh, 2.0, "the electricity alone");
+        let gas = p.gas.unwrap();
+        assert_eq!((gas.kwh, gas.cost), (11.0, Some(1.5)));
+        // A gas meter converts with its own factor only.
+        let bad: Config = toml::from_str(
+            "[[meter]]\nid = \"g\"\nname = \"g\"\npoint = \"a:b/c\"\nrole = \"gas\"\nkwh_per_unit = 0\n",
+        )
+        .unwrap();
+        assert!(bad.check().is_err());
     }
 
     #[test]
@@ -528,5 +587,98 @@ mod tests {
         )
         .unwrap();
         assert!(bad.check().is_err());
+    }
+
+    #[test]
+    fn a_battery_stores_what_the_home_does_not_use_now() {
+        let config: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "achat"
+            name = "Acheté"
+            point = "pince:m/energy"
+            role = "total"
+            [[meter]]
+            id = "injecte"
+            name = "Injecté"
+            point = "pince:m/energy_returned"
+            role = "export"
+            [[meter]]
+            id = "toit"
+            name = "Toit"
+            point = "onduleur:o/total"
+            role = "solar"
+            [[meter]]
+            id = "entre"
+            name = "Charge"
+            point = "bms:b/charged"
+            role = "charge"
+            [[meter]]
+            id = "sort"
+            name = "Décharge"
+            point = "bms:b/discharged"
+            role = "discharge"
+            [[meter]]
+            id = "ce"
+            name = "Chauffe-eau"
+            point = "relais:s/energy"
+            role = "circuit"
+            "#,
+        )
+        .unwrap();
+        config.check().unwrap();
+        let row = |meter: &str, kwh: f64| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost: None,
+        };
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // A sunny hour: 10 made, 1 sent out, 4 into the battery, 2 bought.
+        let day = [
+            row("achat", 2.0),
+            row("injecte", 1.0),
+            row("toit", 10.0),
+            row("entre", 4.0),
+            row("sort", 0.0),
+            row("ce", 3.0),
+        ];
+        let p = Period::of(&config, &day, 0, HOUR_MS);
+        assert!(close(p.battery_charge.as_ref().unwrap().kwh, 4.0));
+        assert!(close(p.battery_discharge.as_ref().unwrap().kwh, 0.0));
+        let share = p.solar.unwrap();
+        // Kept: 9; used now: 2 + 9 − 4 = 7, of which 5 not bought.
+        assert!(close(share.self_consumed, 9.0), "{}", share.self_consumed);
+        assert!(close(share.consumption, 7.0), "{}", share.consumption);
+        assert_eq!(share.self_consumption_rate, Some(0.9));
+        assert_eq!(share.self_sufficiency, Some(0.714));
+        // The circuits ran on 2 bought + 9 kept − 4 stored − 3 = 4 left.
+        assert!(close(p.unmeasured.as_ref().unwrap().kwh, 4.0));
+        // The evening: no sun, the battery gives back 3, 1 bought.
+        let night = [
+            row("achat", 1.0),
+            row("injecte", 0.0),
+            row("toit", 0.0),
+            row("entre", 0.0),
+            row("sort", 3.0),
+            row("ce", 0.0),
+        ];
+        let share = Period::of(&config, &night, 0, HOUR_MS).solar.unwrap();
+        assert!(close(share.consumption, 4.0), "{}", share.consumption);
+        assert_eq!(share.self_sufficiency, Some(0.75));
+        assert_eq!(share.self_consumption_rate, None);
+        // Without a battery, nothing changes: no battery fields.
+        let plain: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "achat"
+            name = "Acheté"
+            point = "pince:m/energy"
+            role = "total"
+            "#,
+        )
+        .unwrap();
+        let p = Period::of(&plain, &[row("achat", 1.0)], 0, HOUR_MS);
+        assert!(p.battery_charge.is_none() && p.battery_discharge.is_none());
     }
 }

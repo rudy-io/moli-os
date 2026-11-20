@@ -12,6 +12,7 @@
 //! on the same network, checks its identity there, and talks to it at its
 //! new address, journaled and remembered (`data/addresses.json`).
 
+mod meross;
 mod profile;
 mod trust;
 
@@ -33,8 +34,8 @@ use tokio::net::TcpStream;
 use tokio::time::Instant;
 
 pub use profile::{
-    Answer, BUILTIN, Call, Compiled, CompiledWrite, Format, Profile, ProfileError, Source, builtin,
-    parse_every,
+    Answer, BUILTIN, Call, Compiled, CompiledWrite, Format, Profile, ProfileError, Source,
+    WriteCall, builtin, parse_every,
 };
 pub use trust::{ProfileFile, Recorded, TRUST_FILE, record as trust, sha256};
 
@@ -67,6 +68,12 @@ pub struct Config {
     /// Values for the profile's `{placeholders}` (`lat`, `lon`…).
     #[serde(default)]
     pub vars: std::collections::BTreeMap<String, String>,
+    /// The device has no key: its messages are signed with an empty one
+    /// (a Meross plug set up through Matter, never bound to an account).
+    /// Written by a human; the vault is then not read. Refused on a profile
+    /// that has no secret.
+    #[serde(default)]
+    pub empty_secret: bool,
 }
 
 /// Where and how to reach the device.
@@ -100,6 +107,11 @@ impl Target {
                 "the driver options must give vars {{ {} }}",
                 missing.join(", ")
             )));
+        }
+        if config.empty_secret && profile.meta.secret.is_none() {
+            return Err(fail(
+                "`empty_secret`: this profile has no secret to leave empty".into(),
+            ));
         }
         // A key (sent, or signing messages) goes only to the host its profile
         // names; `compile` lets only a built-in profile go without one.
@@ -617,7 +629,8 @@ async fn fetch(
         Call::Get => exchange(target, &path, &headers, &request.path, None, MAX_BODY).await?,
         Call::Meross { namespace, payload } => {
             let key = secret.context("meross request without its key")?;
-            let message = meross_message(namespace, payload, key);
+            // A read is a `GET` message, whatever the profile says.
+            let message = meross_message("GET", namespace, payload, key);
             exchange(
                 target,
                 &path,
@@ -640,9 +653,40 @@ async fn fetch(
     Ok(answer)
 }
 
-/// A signed Meross local-API `GET` message:
-/// `sign = md5(messageId ‖ key ‖ timestamp)`.
-fn meross_message(namespace: &str, payload: &serde_json::Value, key: &str) -> serde_json::Value {
+/// One Meross `GET` outside the profile's requests, its `GETACK` or an error.
+async fn meross_ask(
+    target: &Target,
+    path: &str,
+    namespace: &str,
+    key: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let message = meross_message("GET", namespace, &serde_json::json!({}), key);
+    let body = exchange(
+        target,
+        path,
+        &[],
+        path,
+        Some(message.to_string().into_bytes()),
+        MAX_BODY,
+    )
+    .await?;
+    let answer: serde_json::Value =
+        serde_json::from_slice(&body).with_context(|| format!("{namespace}: unreadable answer"))?;
+    let method = answer["header"]["method"].as_str().unwrap_or_default();
+    if method != "GETACK" {
+        bail!("{namespace}: device answered {method:?} (wrong key or namespace?)");
+    }
+    Ok(answer)
+}
+
+/// A signed Meross local-API message (`GET` for a read, `SET` for a
+/// declared write): `sign = md5(messageId ‖ key ‖ timestamp)`.
+fn meross_message(
+    method: &str,
+    namespace: &str,
+    payload: &serde_json::Value,
+    key: &str,
+) -> serde_json::Value {
     use md5::{Digest as _, Md5};
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let now = std::time::SystemTime::now()
@@ -662,7 +706,7 @@ fn meross_message(namespace: &str, payload: &serde_json::Value, key: &str) -> se
         "header": {
             "from": "/appliance/moli/subscribe",
             "messageId": message_id,
-            "method": "GET",
+            "method": method,
             "namespace": namespace,
             "payloadVersion": 1,
             "sign": sign,
@@ -670,6 +714,27 @@ fn meross_message(namespace: &str, payload: &serde_json::Value, key: &str) -> se
         },
         "payload": payload,
     })
+}
+
+/// Why the answer to a Meross `SET` does not count as done (`None`: it is
+/// a `SETACK`). Names what the device said (its method, its error), never
+/// what was sent.
+fn meross_refusal(namespace: &str, body: &[u8]) -> Option<String> {
+    let answer: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let method = answer["header"]["method"].as_str().unwrap_or("?");
+    if method == "SETACK" {
+        return None;
+    }
+    let error = &answer["payload"]["error"];
+    let said = format!(
+        "{namespace}: {method} {} {}",
+        error["code"]
+            .as_i64()
+            .map(|c| c.to_string())
+            .unwrap_or_default(),
+        error["detail"].as_str().unwrap_or_default(),
+    );
+    Some(said.trim().chars().take(80).collect())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -684,11 +749,19 @@ fn hex(bytes: &[u8]) -> String {
 
 /// The key a signing transport needs. `None` once a human has been told
 /// how to provide it and the system is shutting down; `Some(None)` when the
-/// profile needs no secret.
-async fn required_secret(profile: &Compiled, ctx: &DriverCtx) -> Option<Option<String>> {
+/// profile needs no secret; an empty key when the instance says the device
+/// has none (`empty_secret`).
+async fn required_secret(
+    config: &Config,
+    profile: &Compiled,
+    ctx: &DriverCtx,
+) -> Option<Option<String>> {
     let Some(name) = &profile.meta.secret else {
         return Some(None);
     };
+    if config.empty_secret {
+        return Some(Some(String::new()));
+    }
     if let Some(value) = ctx.secret(name) {
         return Some(Some(value));
     }
@@ -735,6 +808,8 @@ struct Session<'a> {
     offline: bool,
     /// Polls in a row that reached nobody at the address (any request).
     silent: u32,
+    /// How this Meross device takes its orders, learned at the first one.
+    meross: Option<meross::Orders>,
 }
 
 /// Nobody answered at the address (refused, unreachable, silent), as
@@ -755,7 +830,39 @@ impl<'a> Session<'a> {
             failures: vec![0; profile.requests.len()],
             offline: false,
             silent: 0,
+            meross: None,
         }
+    }
+
+    /// Whether this device's orders must be encrypted, asked once (in clear,
+    /// as every firmware still answers a `GET`): its abilities, then, if it
+    /// encrypts, its uuid and MAC for the key.
+    async fn meross_cipher(
+        &mut self,
+        path: &str,
+        key: &str,
+    ) -> anyhow::Result<Option<meross::Cipher>> {
+        if let Some(known) = self.meross {
+            return Ok(known.cipher());
+        }
+        let ability = meross_ask(self.target, path, "Appliance.System.Ability", key).await?;
+        let cipher = if ability["payload"]["ability"]
+            .get(meross::ENCRYPTED)
+            .is_some()
+        {
+            let all = meross_ask(self.target, path, "Appliance.System.All", key).await?;
+            let hardware = &all["payload"]["all"]["system"]["hardware"];
+            let (Some(uuid), Some(mac)) =
+                (hardware["uuid"].as_str(), hardware["macAddress"].as_str())
+            else {
+                bail!("Appliance.System.All: no uuid or MAC to encrypt with");
+            };
+            meross::Orders::Encrypted(meross::Cipher::new(uuid, key, mac))
+        } else {
+            meross::Orders::Clear
+        };
+        self.meross = Some(cipher);
+        Ok(cipher.cipher())
     }
 
     /// Nobody has answered at the address for a while: it may have moved.
@@ -871,6 +978,37 @@ impl<'a> Session<'a> {
                 moli_i18n::tr!("pilotes.profile.relecture", error = format!("{e:#}"))
             })?;
         }
+        if let WriteCall::Meross { namespace, payload } = &write.call {
+            let key = self
+                .secret
+                .ok_or_else(|| moli_i18n::tr!("pilotes.profile.sans_valeur", name = "{secret}"))?;
+            let cipher = self
+                .meross_cipher(&write.path, key)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            let message = meross_message("SET", namespace, &write.fill(payload, value)?, key)
+                .to_string()
+                .into_bytes();
+            let body = exchange(
+                self.target,
+                &write.path,
+                &[],
+                &write.path,
+                Some(cipher.map_or(message.clone(), |c| c.seal(&message))),
+                MAX_BODY,
+            )
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+            // An encrypting device answers encrypted (an error may come in clear).
+            let body = cipher
+                .and_then(|c| c.open(&body))
+                .unwrap_or_else(|| body.to_vec());
+            // Done only once the device says so itself.
+            return match meross_refusal(namespace, &body) {
+                None => Ok(()),
+                Some(answer) => Err(moli_i18n::tr!("pilotes.profile.refuse", answer = answer)),
+            };
+        }
         let path = render(write, value, &self.answers, self.target, self.secret)?;
         let body = exchange(self.target, &path, &[], &write.path, None, MAX_BODY)
             .await
@@ -921,7 +1059,7 @@ async fn run(driver: &ProfileDriver, ctx: &mut DriverCtx) -> anyhow::Result<()> 
     {
         return Ok(()); // waiting for a human, then shut down
     }
-    let Some(secret) = required_secret(profile, ctx).await else {
+    let Some(secret) = required_secret(&driver.config, profile, ctx).await else {
         return Ok(()); // waiting for a human, then shut down
     };
     let follow = followable(&driver.config, profile, driver.lan);
@@ -1274,6 +1412,7 @@ mod tests {
             host: Some("192.0.2.1".into()),
             port: None,
             vars: std::collections::BTreeMap::new(),
+            empty_secret: false,
         }
     }
 
@@ -1395,7 +1534,12 @@ mod tests {
 
     #[test]
     fn meross_messages_are_signed_like_the_device_expects() {
-        let message = meross_message("Appliance.System.All", &serde_json::json!({}), "secret-key");
+        let message = meross_message(
+            "GET",
+            "Appliance.System.All",
+            &serde_json::json!({}),
+            "secret-key",
+        );
         let header = &message["header"];
         let expected = hex(&Md5::digest(
             format!(
@@ -1408,7 +1552,12 @@ mod tests {
         assert_eq!(header["sign"], expected);
         assert_eq!(header["method"], "GET");
         assert_eq!(header["messageId"].as_str().unwrap().len(), 32);
-        let other = meross_message("Appliance.System.All", &serde_json::json!({}), "secret-key");
+        let other = meross_message(
+            "GET",
+            "Appliance.System.All",
+            &serde_json::json!({}),
+            "secret-key",
+        );
         assert_ne!(
             other["header"]["messageId"], header["messageId"],
             "ids never repeat"
@@ -1417,6 +1566,403 @@ mod tests {
             !message.to_string().contains("secret-key"),
             "the key never travels"
         );
+    }
+
+    #[test]
+    fn a_meross_write_counts_only_once_the_device_acknowledged_it() {
+        let ns = "Appliance.Control.ToggleX";
+        assert_eq!(
+            meross_refusal(ns, br#"{"header":{"method":"SETACK"},"payload":{}}"#),
+            None
+        );
+        assert_eq!(
+            meross_refusal(
+                ns,
+                br#"{"header":{"method":"ERROR"},"payload":{"error":{"code":5001,"detail":"sign error"}}}"#
+            )
+            .as_deref(),
+            Some("Appliance.Control.ToggleX: ERROR 5001 sign error")
+        );
+        // A read's acknowledgement, a page, nothing at all: not done either.
+        assert_eq!(
+            meross_refusal(ns, br#"{"header":{"method":"GETACK"}}"#).as_deref(),
+            Some("Appliance.Control.ToggleX: GETACK")
+        );
+        assert_eq!(
+            meross_refusal(ns, b"<html>").as_deref(),
+            Some("Appliance.Control.ToggleX: ?")
+        );
+        let long = format!(
+            r#"{{"header":{{"method":"ERROR"}},"payload":{{"error":{{"detail":"{}"}}}}}}"#,
+            "x".repeat(500)
+        );
+        assert_eq!(
+            meross_refusal(ns, long.as_bytes()).unwrap().chars().count(),
+            80
+        );
+    }
+
+    /// The key of the plug of these tests (fictional).
+    const PLUG_KEY: &str = "fictional-device-key";
+    const PLUG: &str = "prise:00000000000000000000000000000001";
+
+    /// A plug as the protocol's descriptions give it: it answers
+    /// `Appliance.System.All` with the package's fixture and its relay's
+    /// state, and `Appliance.System.Ability`, obeys a `ToggleX` `SET`
+    /// (unless `stubborn`), and answers `ERROR` to a message its key did not
+    /// sign. An `encrypting` one behaves like an MSS110 on firmware 7.3.46:
+    /// `Appliance.Encrypt.ECDHE` among its abilities, a `GET` read in clear,
+    /// a `SET` only encrypted (one in clear: the connection dropped, no
+    /// answer), and its answer to an encrypted message encrypted.
+    struct Plug {
+        port: u16,
+        /// The key it checks signatures against (`""`: a plug never bound).
+        key: &'static str,
+        on: Arc<std::sync::atomic::AtomicBool>,
+        seen: Arc<Mutex<Vec<serde_json::Value>>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Plug {
+        async fn start(stubborn: bool) -> Self {
+            Self::keyed(stubborn, PLUG_KEY).await
+        }
+
+        async fn keyed(stubborn: bool, key: &'static str) -> Self {
+            Self::serve(stubborn, key, false).await
+        }
+
+        async fn encrypting() -> Self {
+            Self::serve(false, PLUG_KEY, true).await
+        }
+
+        #[allow(clippy::too_many_lines)]
+        async fn serve(stubborn: bool, key: &'static str, encrypting: bool) -> Self {
+            use std::sync::atomic::Ordering::Relaxed;
+            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+            let cipher =
+                meross::Cipher::new("00000000000000000000000000000001", key, "02:00:00:00:00:01");
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let on = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let (relay, messages) = (on.clone(), seen.clone());
+            let task = tokio::spawn(async move {
+                while let Ok((mut tcp, _)) = listener.accept().await {
+                    let mut request = Vec::new();
+                    let mut buf = [0u8; 2048];
+                    let body = loop {
+                        match tcp.read(&mut buf).await {
+                            Ok(0) | Err(_) => break None,
+                            Ok(n) => request.extend_from_slice(&buf[..n]),
+                        }
+                        let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                            continue;
+                        };
+                        let head = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                        assert!(head.starts_with("post /config "), "{head}");
+                        let length: usize = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .unwrap()
+                            .trim()
+                            .parse()
+                            .unwrap();
+                        if request.len() >= end + 4 + length {
+                            break Some(request[end + 4..end + 4 + length].to_vec());
+                        }
+                    };
+                    let Some(body) = body else { continue };
+                    let sealed = !body.starts_with(b"{");
+                    let body = if sealed {
+                        assert!(
+                            encrypting,
+                            "only an encrypting plug is sent sealed messages"
+                        );
+                        cipher.open(&body).expect("sealed with this plug's key")
+                    } else {
+                        body
+                    };
+                    let message: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    let header = &message["header"];
+                    let signed = hex(&Md5::digest(
+                        format!(
+                            "{}{key}{}",
+                            header["messageId"].as_str().unwrap(),
+                            header["timestamp"].as_u64().unwrap()
+                        )
+                        .as_bytes(),
+                    ));
+                    let method = header["method"].as_str().unwrap();
+                    let namespace = header["namespace"].as_str().unwrap();
+                    if encrypting && !sealed && method == "SET" {
+                        messages
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .push(message);
+                        continue;
+                    }
+                    let answer = if header["sign"] != signed {
+                        serde_json::json!({"header": {"method": "ERROR"},
+                            "payload": {"error": {"code": 5001, "detail": "sign error"}}})
+                    } else if (method, namespace) == ("GET", "Appliance.System.All") {
+                        let mut all: serde_json::Value = serde_json::from_slice(include_bytes!(
+                            "../../../integrations/meross-mss110/fixtures/all.json"
+                        ))
+                        .unwrap();
+                        all["payload"]["all"]["digest"]["togglex"][0]["onoff"] =
+                            u8::from(relay.load(Relaxed)).into();
+                        all
+                    } else if (method, namespace) == ("GET", "Appliance.System.Ability") {
+                        let mut ability = serde_json::json!({"Appliance.Control.ToggleX": {}});
+                        if encrypting {
+                            ability[meross::ENCRYPTED] = serde_json::json!({});
+                        }
+                        serde_json::json!({"header": {"method": "GETACK"},
+                            "payload": {"ability": ability}})
+                    } else if (method, namespace) == ("SET", "Appliance.Control.ToggleX")
+                        && !stubborn
+                    {
+                        relay.store(message["payload"]["togglex"]["onoff"] == 1, Relaxed);
+                        serde_json::json!({"header": {"method": "SETACK"}, "payload": {}})
+                    } else {
+                        serde_json::json!({"header": {"method": "ERROR"},
+                            "payload": {"error": {"code": 5000, "detail": "refused"}}})
+                    };
+                    messages
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(message);
+                    let answer = if sealed {
+                        String::from_utf8(cipher.seal(answer.to_string().as_bytes())).unwrap()
+                    } else {
+                        answer.to_string()
+                    };
+                    let answer = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    );
+                    let _ = tcp.write_all(answer.as_bytes()).await;
+                }
+            });
+            Self {
+                port,
+                key,
+                on,
+                seen,
+                task,
+            }
+        }
+
+        fn is_on(&self) -> bool {
+            self.on.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        /// The `SET` messages it received.
+        fn orders(&self) -> Vec<serde_json::Value> {
+            let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            seen.iter()
+                .filter(|m| m["header"]["method"] != "GET")
+                .cloned()
+                .collect()
+        }
+    }
+
+    /// A house whose instance `prise` is that plug: its key in the vault, or
+    /// `empty_secret` for a plug that has none.
+    async fn plugged(
+        name: &str,
+        plug: &Plug,
+    ) -> (
+        moli_runtime::Hub,
+        tokio_util::sync::CancellationToken,
+        tokio::task::JoinHandle<()>,
+        PathBuf,
+    ) {
+        let dir = std::env::temp_dir().join(format!("moli-profile-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = dir.join("secrets.enc");
+        let master = || moli_runtime::MasterKey::new("ab".repeat(32));
+        let empty = plug.key.is_empty();
+        if !empty {
+            moli_runtime::set_secret(&vault, &master(), "prise/key", plug.key)
+                .await
+                .unwrap();
+        }
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions {
+            secrets: Some((vault, master())),
+            ..moli_runtime::HubOptions::default()
+        })
+        .unwrap();
+        let config = Config {
+            profile: "meross-mss110".into(),
+            host: Some(Ipv4Addr::LOCALHOST.to_string()),
+            port: Some(plug.port),
+            vars: std::collections::BTreeMap::new(),
+            empty_secret: empty,
+        };
+        let driver = ProfileDriver::new(config, dir.join(TRUST_FILE)).unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let task =
+            moli_runtime::spawn_driver(&hub, "prise".into(), Arc::new(driver), cancel.clone());
+        (hub, cancel, task, dir)
+    }
+
+    /// Whether the hub soon shows the plug's relay as `on`.
+    async fn shows(hub: &moli_runtime::Hub, on: bool) -> bool {
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        for _ in 0..300 {
+            if hub
+                .state(&point)
+                .is_some_and(|s| s.value == Value::Bool(on))
+            {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn a_meross_order_is_a_signed_set_and_the_state_is_read_again() {
+        let plug = Plug::start(false).await;
+        let (hub, cancel, task, dir) = plugged("plug", &plug).await;
+        assert!(shows(&hub, true).await, "read from the plug");
+        assert!(plug.orders().is_empty(), "reading sends GET messages only");
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        hub.command(&point, Value::Bool(false), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(!plug.is_on(), "the relay opened");
+        assert!(
+            shows(&hub, false).await,
+            "read again, well before the next poll"
+        );
+        let orders = plug.orders();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0]["header"]["method"], "SET");
+        assert_eq!(
+            orders[0]["header"]["namespace"],
+            "Appliance.Control.ToggleX"
+        );
+        assert_eq!(
+            orders[0]["payload"],
+            serde_json::json!({"togglex": {"channel": 0, "onoff": 0}})
+        );
+        let seen = plug.seen.lock().unwrap().clone();
+        assert!(
+            seen.iter().all(|m| !m.to_string().contains(PLUG_KEY)),
+            "the key never travels"
+        );
+        // And back.
+        hub.command(&point, Value::Bool(true), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(plug.is_on() && shows(&hub, true).await);
+        cancel.cancel();
+        task.await.unwrap();
+        plug.task.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_plug_without_a_key_is_read_and_ordered_with_an_empty_one() {
+        let plug = Plug::keyed(false, "").await;
+        let (hub, cancel, task, dir) = plugged("keyless", &plug).await;
+        assert!(shows(&hub, true).await, "read, the vault never asked");
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        hub.command(&point, Value::Bool(false), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(!plug.is_on() && shows(&hub, false).await);
+        cancel.cancel();
+        task.await.unwrap();
+        plug.task.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn an_order_to_a_plug_that_wants_it_encrypted_is_encrypted() {
+        let plug = Plug::encrypting().await;
+        let (hub, cancel, task, dir) = plugged("encrypting", &plug).await;
+        assert!(shows(&hub, true).await, "read in clear");
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        hub.command(&point, Value::Bool(false), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(!plug.is_on() && shows(&hub, false).await);
+        hub.command(&point, Value::Bool(true), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(plug.is_on() && shows(&hub, true).await);
+        let orders = plug.orders();
+        assert_eq!(orders.len(), 2, "never sent in clear first: {orders:?}");
+        let asked = plug
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m["header"]["namespace"] == "Appliance.System.Ability")
+            .count();
+        assert_eq!(asked, 1, "asked once whether to encrypt");
+        cancel.cancel();
+        task.await.unwrap();
+        plug.task.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_empty_secret_is_refused_where_there_is_no_secret() {
+        let (meteo, _) = open("open-meteo").unwrap();
+        let web = Config {
+            host: None,
+            vars: [("lat", "45.0"), ("lon", "4.0")]
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+            empty_secret: true,
+            ..config("open-meteo")
+        };
+        let error = Target::of(&web, &meteo).unwrap_err().to_string();
+        assert!(error.contains("empty_secret"), "{error}");
+        let (plug, _) = open("meross-mss310").unwrap();
+        let keyless = Config {
+            empty_secret: true,
+            ..config("meross-mss310")
+        };
+        assert!(Target::of(&keyless, &plug).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_meross_order_the_plug_refuses_or_does_not_hear_is_refused() {
+        let mut plug = Plug::start(true).await;
+        let (hub, cancel, task, dir) = plugged("stubborn", &plug).await;
+        assert!(shows(&hub, true).await);
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        let order = || hub.command(&point, Value::Bool(false), moli_core::Origin::Ui, None);
+        // It answers, but not `SETACK`: not done, and said so.
+        let refused = order().await.unwrap_err().to_string();
+        assert!(
+            refused.contains("Appliance.Control.ToggleX: ERROR 5000 refused"),
+            "{refused}"
+        );
+        assert!(!refused.contains(PLUG_KEY), "{refused}");
+        assert_eq!(plug.orders().len(), 1);
+        // Unplugged: the order is refused at once, never kept for later.
+        plug.task.abort();
+        let _ = (&mut plug.task).await;
+        let started = std::time::Instant::now();
+        let unheard = order().await.unwrap_err().to_string();
+        assert!(started.elapsed() <= Duration::from_secs(6), "{unheard}");
+        assert!(!unheard.contains(PLUG_KEY), "{unheard}");
+        assert!(plug.is_on(), "nothing changed");
+        assert!(shows(&hub, true).await, "and nothing is shown as done");
+        cancel.cancel();
+        task.await.unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1551,6 +2097,7 @@ mod tests {
                 host: Some(CONFIGURED.to_string()),
                 port: Some(port),
                 vars: std::collections::BTreeMap::new(),
+                empty_secret: false,
             };
             let driver = ProfileDriver {
                 lan,

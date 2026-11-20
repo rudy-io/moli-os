@@ -1,0 +1,9 @@
+{
+  "session": {
+    "id": 5001, "vehicleName": "Ma voiture", "sessionType": "SMART_CHARGING", "status": "ENDED", "source": "ENODE",
+    "start": "2026-11-10T22:05:00+01:00", "end": "2026-11-11T05:40:00+01:00",
+    "batteryLevelStart": 31, "batteryLevelEnd": 80, "totalConsumptionKwh": 18.4, "cost": 2.31, "reward": 0.87,
+    "smartChargeOutcome": {"state": "ON_TARGET"}
+  },
+  "consumptions": [{"start": "2026-11-10T22:00:00+01:00", "kwh": 1.2}]
+}

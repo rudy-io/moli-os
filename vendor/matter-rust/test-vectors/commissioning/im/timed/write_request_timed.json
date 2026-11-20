@@ -1,0 +1,11 @@
+{
+  "writes": [
+    {
+      "endpoint": 0,
+      "cluster": 40,
+      "attribute": 5,
+      "value_tlv_b64": "DAttYXR0ZXItcnVzdA=="
+    }
+  ],
+  "expected_message_b64": "FSgAKQE2AhU3ASQCACQDKCQEBRgsAgttYXR0ZXItcnVzdBgYJP8LGA=="
+}

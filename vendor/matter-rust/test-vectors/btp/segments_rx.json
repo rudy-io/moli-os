@@ -1,0 +1,118 @@
+[
+  {
+    "name": "handle_characteristic_received_one_packet",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:60-77",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "05010100ff",
+    "expect": {
+      "complete": true,
+      "payload_hex": "ff"
+    },
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_two_packet",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:79-97",
+    "direction": "rx",
+    "role": "central",
+    "packets_hex": [
+      "01010200fe",
+      "0402ff"
+    ],
+    "expect": {
+      "complete": true,
+      "payload_hex": "feff"
+    },
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_three_packet",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:99-124",
+    "direction": "rx",
+    "role": "central",
+    "packets_hex": [
+      "01010300fd",
+      "0202fe",
+      "0403ff"
+    ],
+    "expect": {
+      "complete": true,
+      "payload_hex": "fdfeff"
+    },
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_with_padding",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:524-552",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "05010100ff0000000000",
+    "expect": {
+      "complete": true,
+      "payload_hex": "ff"
+    },
+    "note": "Header declares payload length 1; 5 trailing 0x00 bytes are BLE characteristic padding the engine must ignore (it truncates to mRxFragmentSize / the declared msgLen, not the raw characteristic length).",
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_incorrect_sequence",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:430-465",
+    "direction": "rx",
+    "role": "central",
+    "packets_hex": [
+      "05010100ff",
+      "05020100ff"
+    ],
+    "expect": {
+      "error": "reassembler_incorrect_state"
+    },
+    "note": "This vector encodes chip BtpEngine-ISOLATION semantics (chip's unit test never calls TakeRxPacket, so a completed-but-untaken message rejects a fresh Begin). Our fused receive+take engine takes the SDU synchronously, so it reproduces the same reassembler_incorrect_state via a Begin arriving MID-reassembly instead (see session.rs module docs). DISCREPANCY with the first hand-derivation, which implied error 'invalid_sequence'. Despite the chip test's own name (HandleCharacteristicReceivedIncorrectSequence), both packets carry valid/expected sequence numbers (0x01 then 0x02) -- chip's own inline comment at TestBtpEngine.cpp:461 says this fails 'due to engine state (unacked previous message), not sequence number.' The engine has already completed message #1 (RxState==Complete, unacked) when message #2's Begin|End packet (seq 0x02) arrives; HandleCharacteristicReceived rejects a new Begin fragment while RxState is not Idle, returning BLE_ERROR_REASSEMBLER_INCORRECT_STATE (chip source wins).",
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_unexpected_standalone_ack",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:468-486",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "080001",
+    "expect": {
+      "error": "invalid_ack",
+      "did_receive_ack": true,
+      "received_ack": 0
+    },
+    "note": "A stand-alone ack (flags 0x08 kFragmentAck, ack_num 0x00, seq 0x01) for a sequence number nothing has been sent at yet -> BLE_ERROR_INVALID_ACK, RxState becomes Error.",
+    "provisional": false
+  },
+  {
+    "name": "handle_ack_received_incorrect_sequence",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:489-521",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "080002",
+    "precondition": "Engine must first HandleCharacteristicSend() a 30-byte payload with send_ack=false, then a second HandleCharacteristicSend(nullptr, false) to complete the 2-fragment send (mirrors TestBtpEngine.cpp:491-502) before this ack packet is delivered, so ExpectingAck()==1 and the engine's own next-tx-seq counter is at 1.",
+    "expect": {
+      "error": "invalid_btp_sequence_number",
+      "did_receive_ack": true,
+      "received_ack": 0,
+      "expecting_ack_after": 1
+    },
+    "note": "DISCREPANCY with the first hand-derivation, which expected 'invalid_ack'. The ack payload's own sequence-number byte (third byte, 0x02) is checked against mRxNextSeqNum (expected 0x01) BEFORE the ack_num byte (0x00, which is itself correct) is evaluated by HandleAckReceived. chip's sequence check (BleLayer... actually BtpEngine.cpp HandleCharacteristicReceived, mRxNewestUnackedSeqNum == mRxNextSeqNum VerifyOrExit) fires first, returning BLE_ERROR_INVALID_BTP_SEQUENCE_NUMBER, not BLE_ERROR_INVALID_ACK (chip source wins; see TestBtpEngine.cpp:516-517).",
+    "provisional": false
+  },
+  {
+    "name": "handle_characteristic_received_sequence_wraparound_invalid_ack",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:554-613",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "085f1a",
+    "precondition": "Engine must first HandleCharacteristicSend() a large payload sized so exactly 257 send calls are needed to complete it (mirrors TestBtpEngine.cpp:559-566), driving the tx sequence counter through a full 0..255 wraparound back to a small value. Every 10th send, a valid stand-alone ack (flags 0x08, ack_num = send_count % 256, seq = send_count / 10) is delivered and accepted (HandleCharacteristicReceived returns CHIP_NO_ERROR, didReceiveAck=true). After the 257th send completes (TxState==Complete), this final ack packet is delivered with an ack_num (95 / 0x5f) that was never actually sent as an unacked sequence number, and ack-packet-own-seq 26 (0x1a) = (256/10)+1, continuing the ack-seq counter correctly.",
+    "expect": {
+      "error": "invalid_ack",
+      "did_receive_ack": true,
+      "received_ack": 95
+    },
+    "note": "Demonstrates that ack validation is checked against the actual outstanding (unacked) tx sequence range, not just parity of the wrapped byte -- 95 was never a pending unacked seq number at this point in the run, so BLE_ERROR_INVALID_ACK fires even though 95 is a structurally valid uint8.",
+    "provisional": false
+  }
+]

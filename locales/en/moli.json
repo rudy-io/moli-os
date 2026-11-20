@@ -85,6 +85,7 @@
   "moli.action.rate": "Failed",
 
   "moli.historique.indisponible": "History unavailable.",
+  "moli.historique.ecartes": "Left out (unknown point, badly written or beyond 8): {points}",
   "moli.historique.maintenant": "Now",
   "moli.historique.min": "Min",
   "moli.historique.max": "Max",

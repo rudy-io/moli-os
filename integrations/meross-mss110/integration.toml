@@ -1,0 +1,26 @@
+[integration]
+id = "meross-mss110"
+name = "Prise connectée Meross (MSS110, MSS210)"
+brands = ["Meross"]
+models = ["MSS110", "MSS210"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the plug's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = ["key"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "meross_lan et merossiot (communauté, licence MIT) : protocole, signature, espaces de noms et unités ; aucun code copié"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/all.json"
+request = "all"

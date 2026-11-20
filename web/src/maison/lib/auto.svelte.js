@@ -193,8 +193,10 @@ export function nodeText(node) {
       const base = `${pointName(node.point)} ${what}`;
       return node.for_s ? t('automatismes.texte.pendant', { texte: base, duree: duration(node.for_s) }) : base;
     }
-    case 'at_time':
-      return `${node.at ?? '—'} · ${daysText(node.days)}`;
+    case 'at_time': {
+      const base = `${node.at ?? '—'} · ${daysText(node.days)}`;
+      return (node.weeks ?? 1) > 1 ? t('automatismes.texte.semaines', { texte: base, n: node.weeks }) : base;
+    }
     case 'at_sun': {
       const rise = node.event === 'rise';
       const off = Number(node.offset_min) || 0;
@@ -344,8 +346,12 @@ export const api = {
   remove: (id) => call('DELETE', `/api/automations/${encodeURIComponent(id)}`),
   // Approving, switching on and running name the version the person saw:
   // another version in between is refused (409) and must be looked at again.
-  approve: (id, fingerprint) => call('POST', `/api/automations/${encodeURIComponent(id)}/approve`, { fingerprint }),
-  enabled: (id, on, fingerprint) => call('POST', `/api/automations/${encodeURIComponent(id)}/enabled`, { on, fingerprint }),
+  // `pin`: the code typed for this very gesture, for an automation carrying
+  // an order that wants it each time (disarming the alarm): 401 without it.
+  approve: (id, fingerprint, pin) =>
+    call('POST', `/api/automations/${encodeURIComponent(id)}/approve`, pin ? { fingerprint, pin } : { fingerprint }),
+  enabled: (id, on, fingerprint, pin) =>
+    call('POST', `/api/automations/${encodeURIComponent(id)}/enabled`, pin ? { on, fingerprint, pin } : { on, fingerprint }),
   test: (id) => call('POST', `/api/automations/${encodeURIComponent(id)}/test`),
   run: (id, fingerprint) => call('POST', `/api/automations/${encodeURIComponent(id)}/run`, { fingerprint }),
   restore: (id) => call('POST', `/api/automations/${encodeURIComponent(id)}/restore`),
@@ -357,20 +363,25 @@ export const api = {
 /** What a person does (approve, run, delete) needs « c'est moi »: asks the
  *  code once, then does it. */
 export async function asHuman(label, action) {
+  // 401 in a session: this gesture wants the code typed for it, each time
+  // (an automation that disarms the alarm). The sheet then hands it over.
+  let eachTime = false;
   if (hub.session?.human) {
     try {
       return await action();
     } catch (err) {
-      if (err.status !== 403) throw err;
+      if (err.status !== 403 && err.status !== 401) throw err;
+      eachTime = err.status === 401;
     }
   }
   return new Promise((resolve, reject) => {
     home.held = {
       label,
-      reason: 'automatisme',
-      custom: async () => {
+      reason: eachTime ? 'automatisme · chaque fois' : 'automatisme',
+      freshPin: true,
+      custom: async (pin) => {
         try {
-          resolve(await action());
+          resolve(await action(pin));
         } catch (err) {
           note(err.message, 'error');
           reject(err);

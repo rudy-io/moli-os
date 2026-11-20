@@ -23,6 +23,7 @@
   "moteur.verif.decalage_soleil": "The offset from sunrise or sunset is more than 6 h.",
   "moteur.verif.intervalle": "Between 1 minute and 24 hours.",
   "moteur.verif.peremption": "Staleness goes from 1 second to 24 hours.",
+  "moteur.verif.appui_duree": "A press does not last: with a duration, this trigger fires after the last press, not during it.",
   "moteur.verif.condition_manquante": "Add at least one condition.",
   "moteur.verif.valeur_refusee": "Value refused for “{nom}”: {erreur}.",
   "moteur.verif.pas_bascule": "“{nom}” can’t be turned on or off.",
@@ -113,6 +114,8 @@
   "moteur.changement.fumee": "detects smoke",
   "moteur.changement.fuite": "detects a leak",
   "moteur.changement.soif": "says the plant is thirsty",
+  "moteur.changement.appui": "gets a {appui} press",
+  "moteur.changement.appui_tout": "is pressed",
   "moteur.changement.allume": "turns on",
   "moteur.changement.eteint": "turns off",
   "moteur.changement.valeur": "· {libelle} changes to {valeur}",
@@ -187,5 +190,8 @@
   "moteur.notice.boucle_titre": "Automation turned off",
   "moteur.notice.boucle": "“{nom}” kept starting in a loop, so I stopped it. Check it in Automations.",
 
-  "moteur.refus.nom_note": "Only a person (house code) can rename an approved automation or change its note."
+  "moteur.refus.nom_note": "Only a person (house code) can rename an approved automation or change its note.",
+  "moteur.verif.semaines": "The rhythm goes from 1 to 8 weeks.",
+  "moteur.verif.semaine_depart": "One week in several needs its starting week (a date, 2026-09-23).",
+  "moteur.decrit.semaines": "{texte}, one week in {n} (from the week of {depuis})"
 }

@@ -223,7 +223,7 @@ pub struct Counters {
 }
 
 impl Counters {
-    fn accept(&mut self, key: &str, value: f64) -> bool {
+    pub(crate) fn accept(&mut self, key: &str, value: f64) -> bool {
         if value < 0.1 {
             return false;
         }
@@ -362,7 +362,8 @@ mod tests {
         let mut info = Vec::new();
         let mut live = Vec::new();
         for (start, count, sequence, bytes) in fixture(name) {
-            let Frame::Registers(r, _) = parse(&bytes, 1_234_567_890, sequence, count).unwrap()
+            let Frame::Registers(r, _) =
+                parse(&bytes, 1_234_567_890, sequence, crate::v5::HOLDING, count).unwrap()
             else {
                 panic!()
             };

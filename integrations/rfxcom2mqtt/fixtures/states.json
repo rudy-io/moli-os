@@ -1,0 +1,135 @@
+[
+  {
+    "topic": "rfxcom2mqtt/devices",
+    "payload": {
+      "subtype": 2,
+      "id": "0x7C03",
+      "seqnbr": 24,
+      "temperature": 23.7,
+      "humidity": 50,
+      "humidityStatus": 1,
+      "batteryLevel": 9,
+      "rssi": 5,
+      "type": "temperaturehumidity1",
+      "deviceName": [
+        "THGR810",
+        "THGN800",
+        "THGN801"
+      ],
+      "group": false,
+      "subTypeValue": ""
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x5A01",
+    "payload": {
+      "subtype": 2,
+      "id": "0x5A01",
+      "seqnbr": 218,
+      "temperature": 21.4,
+      "humidity": 52,
+      "humidityStatus": 1,
+      "batteryLevel": 9,
+      "rssi": 5,
+      "type": "temperaturehumidity1",
+      "deviceName": [
+        "THGR810",
+        "THGN800",
+        "THGN801"
+      ],
+      "group": false,
+      "subTypeValue": ""
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x6B02",
+    "payload": {
+      "subtype": 1,
+      "id": "0x6B02",
+      "seqnbr": 216,
+      "temperature": 11.8,
+      "humidity": 77,
+      "humidityStatus": 3,
+      "batteryLevel": 0,
+      "rssi": 4,
+      "type": "temperaturehumidity1",
+      "deviceName": [
+        "THGN122",
+        "THGN123",
+        "THGN132",
+        "THGR122",
+        "THGR228",
+        "THGR238",
+        "THGR268"
+      ],
+      "group": false,
+      "subTypeValue": ""
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x7C03",
+    "payload": {
+      "subtype": 2,
+      "id": "0x7C03",
+      "seqnbr": 2,
+      "temperature": 17.7,
+      "humidity": 98,
+      "humidityStatus": 3,
+      "batteryLevel": 0,
+      "rssi": 4,
+      "type": "temperaturehumidity1",
+      "deviceName": [
+        "THGR810",
+        "THGN800",
+        "THGN801"
+      ],
+      "group": false,
+      "subTypeValue": ""
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x00ABCDE1/12",
+    "payload": {
+      "seqnbr": 195,
+      "subtype": 0,
+      "id": "0x00ABCDE1",
+      "unitCode": 12,
+      "commandNumber": 0,
+      "command": "Off",
+      "level": 0,
+      "rssi": 5,
+      "type": "lighting2",
+      "deviceName": [
+        "KlikAanKlikUit",
+        "HomeEasyUK",
+        "Chacon",
+        "NEXA",
+        "Intertechno"
+      ],
+      "group": false,
+      "subTypeValue": "AC"
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x00ABCDE1/12",
+    "payload": {
+      "type": "lighting2",
+      "command": "On",
+      "commandNumber": 1,
+      "rfxFunction": "switchOn"
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/devices/0x00ABCDE1/12",
+    "payload": {
+      "type": "lighting2",
+      "command": "Off",
+      "commandNumber": 0,
+      "rfxFunction": "switchOff"
+    }
+  },
+  {
+    "topic": "rfxcom2mqtt/bridge/status",
+    "payload": "online"
+  }
+]

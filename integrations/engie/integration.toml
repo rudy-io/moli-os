@@ -1,0 +1,51 @@
+[integration]
+id = "engie"
+name = "ENGIE Belgique (prix, tarif capacitaire, recharge intelligente)"
+# Unofficial: the ENGIE Smart app's API, which ENGIE may change at any time.
+# Prices of the contract, capacity-tariff peaks, and the vehicles of ENGIE
+# smart charging (departure, target, charge now, savings).
+brands = ["ENGIE"]
+models = ["Compte client ENGIE Belgique", "Recharge intelligente"]
+transport = "https"
+driver = "engie"
+crate = "moli-engie"
+
+[discovery]
+# A cloud account: nothing to find on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# Given by the dashboard's sign-in, never typed into a file.
+secrets = ["refresh_token"]
+vars = []
+options = ["language", "timezone", "vehicles"]
+
+[origin]
+reused = "aucun code repris : adresses, client et champs lus dans aioengiebelgium (bibliothèque de l'intégration engie_be de Home Assistant) comme référence du protocole"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/customer-account-relations.json"
+
+[[fixture]]
+file = "fixtures/supplier-energy-prices.json"
+
+[[fixture]]
+file = "fixtures/peaks.json"
+
+[[fixture]]
+file = "fixtures/vehicles.json"
+
+[[fixture]]
+file = "fixtures/latest-session.json"
+
+[[fixture]]
+file = "fixtures/charge-settings.json"
+
+[[fixture]]
+file = "fixtures/sessions.json"
+
+[[fixture]]
+file = "fixtures/reward-balance.json"

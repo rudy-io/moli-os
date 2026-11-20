@@ -60,6 +60,20 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     heures qui suivent**, sans redémarrage ; une heure déjà comptée garde le prix de son
     époque (rien n'est recalculé). Un prix au-dessus de 5 par kWh est refusé : c'est un prix
     tapé en centimes.
+  - **Prix d'un fournisseur** (`price_point`, `price_extra`, par compteur) : `price_point` = le
+    point qui donne le prix du kWh du fournisseur (le pilote `engie` :
+    `engie:contract-…/electricity_offtake_peak`), suivi quand il change ; `price_extra` = ce que
+    ce prix laisse de côté, ajouté à chaque kWh (coûts de réseau, accises, certificats, TVA
+    comprise ; 0 à 5). Le prix d'une heure est celui du point au moment où elle est comptée.
+    Sans valeur au point (pilote pas encore connecté, ou une valeur au-dessus de 5), le `price`
+    fixe du compteur sert, et c'est aussi lui qui chiffre l'historique importé. Pour un compteur
+    d'injection (`export`), `price_point` seul : la revente n'a ni réseau ni taxes.
+  - **Gaz** (`role = "gas"`) : un index de gaz (celui d'un compteur P1, en m³) avec
+    `kwh_per_unit` = le facteur de conversion du fournisseur (environ 11,4 kWh/m³, sur la
+    facture). Compté et chiffré à part (`gas` dans chaque période, carte « Gaz ce mois ») :
+    jamais ajouté à l'électricité, jamais chiffré par la période tarifaire ni le prix de la
+    maison, seulement par son `price` ou son `price_point` (+ `price_extra`). `kwh_per_unit`
+    sert aussi à tout compteur dont le point n'est ni en Wh ni en kWh.
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple
@@ -73,7 +87,9 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   résumés, pas des compteurs à additionner. Sert les automatismes (par exemple une alerte de
   budget mensuel) et les agents.
 - Robustesse : saut impossible (> 36 kW) ou baisse = suspect ; remise à zéro comptée une fois
-  confirmée ; nouveau socle après 3 relevés cohérents ; chaque heure au prix de sa période
+  confirmée ; nouveau socle après 3 relevés cohérents ; un compteur dont on change le `point`
+  (un autre appareil sous le même `id`) repart de son premier relevé, sans compter l'écart
+  entre les deux totaux, et garde son historique ; chaque heure au prix de sa période
   (l'index HC n'est étalé que sur du temps HC).
 - Chiffre principal = la plus complète des deux mesures (`grid` et `total`, par exemple Linky
   et EM06).
@@ -96,7 +112,47 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   `consumption_w`. L'appareil `energie:maison` gagne `today_production_kwh`,
   `today_export_kwh`, `today_self_consumed_kwh`, `today_self_consumption_rate`,
   `today_self_sufficiency`, `month_production_kwh`, `month_self_consumption_rate` (%).
-  Pas encore : batterie.
+- **Batterie de la maison** : rôles `charge` (index de ce qui entre dans la batterie) et
+  `discharge` (index de ce qui en sort), sans prix, jamais dans `total`. Chaque période donne
+  `battery_charge` et `battery_discharge` ; le bilan solaire en tient compte : `consumption` =
+  acheté + autoconsommé − stocké + rendu (ce que la maison a vraiment utilisé sur la période),
+  `self_sufficiency` = (consommation − acheté) / consommation, `self_consumed` reste production −
+  injection (utilisé ou stocké). « Le reste de la maison » retranche ce qui est stocké et ajoute
+  ce qui est rendu, dans le bilan comme dans les graphiques par appareil (`energy-own.js`, qui
+  y ajoute aussi l'autoconsommé, comme `unmeasured`) ; chaque part y est alors comptée au prix
+  payé par kWh utilisé, plus par kWh acheté. Sans compteur `charge` ni `discharge`, rien ne
+  change. `[energy.battery]` (optionnel) : `soc` (le point de la charge, en %), `power` (W,
+  positif en charge ; avec `discharge_positive = true`, un point positif en décharge est
+  retourné), `capacity_kwh` (ce que la charge contient en kWh). Sans `power`, la puissance vient
+  des `power` des compteurs `charge` et `discharge` (entré − sorti, chacun positif), comme
+  `solar` donne la production : une batterie qui donne deux puissances positives (Jackery :
+  `charge_power`, `discharge_power`) se déclare en deux compteurs `integrate = true`, sans
+  `[energy.battery] power`. `/api/energy` ajoute `battery` (charge, puissance signée, kWh
+  contenus ; aussi sans `[energy.battery]`, dès qu'un compteur `charge` ou `discharge` a une
+  puissance) et `flows.battery_w` ; `consumption_w` = réseau + production − batterie.
+  L'appareil `energie:maison` gagne `today_battery_charge_kwh` et `today_battery_discharge_kwh`.
+  Page Énergie : carte « Batterie » (charge, en charge / alimente la maison / au repos, kWh du
+  jour) ; le flux en direct (Accueil, Énergie) montre la batterie sous la maison. Pas encore :
+  piloter la batterie, ni distinguer ce qu'elle a pris au réseau de ce qu'elle a pris au soleil.
+  Deux limites, connues : l'autosuffisance du jour suppose que tout ce qui est stocké vient du
+  soleil (chargée en heures creuses, la journée paraît moins autonome qu'elle n'est, le lendemain
+  plus : sur le mois, cela se compense aux pertes près) ; une batterie qui injecte vers le réseau
+  voit ce qu'elle a envoyé effacé par la borne « jamais plus d'injection que de production »,
+  seulement quand l'injection dépasse la production sur la période.
+  Ce qu'un premier pilotage de batterie (sous Home Assistant, un hiver) a appris, à respecter le
+  jour où le pilotage entrera ici :
+  - la mesure du réseau ne passe jamais par la batterie : elle peut se couper du réseau au
+    repos, et la maison perdrait la pince avec elle (lire le compteur en direct, voir le
+    profil `jackery-meter`) ;
+  - une batterie se vide aussi toute seule : une limite de décharge arrête la fourniture à la
+    maison, pas sa propre consommation. La réserve se pose avec une marge au-dessus du
+    plancher du fabricant (`min` du point, que le hub fait respecter), et une alerte prévient
+    avant de l'atteindre ;
+  - une consigne ne s'écrit que si elle change vraiment, par paliers (quelques points de
+    charge), pas à chaque relevé : un réglage réécrit toutes les cinq minutes ne sert à rien
+    et sollicite l'appareil ;
+  - ce que Moli ne peut pas commander (une charge forcée depuis le réseau, par exemple) reste
+    dit comme tel à la famille : jamais de promesse qu'un réglage ne peut pas tenir.
 - **Charges pilotées** (`[[energy.load]]`, `crates/moli-energy/src/load.rs`) : un chauffe-eau
   (ou toute charge qui stocke) sur un relais, mis en marche sur le surplus solaire et complété
   en heures creuses. Logique **déterministe** (jamais de modèle dans la boucle), testée, un tour
