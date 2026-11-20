@@ -87,7 +87,9 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   résumés, pas des compteurs à additionner. Sert les automatismes (par exemple une alerte de
   budget mensuel) et les agents.
 - Robustesse : saut impossible (> 36 kW) ou baisse = suspect ; remise à zéro comptée une fois
-  confirmée ; nouveau socle après 3 relevés cohérents ; un compteur dont on change le `point`
+  confirmée ; nouveau socle après 3 relevés cohérents (le suspect est gardé dans
+  `meter_suspect` et survit à un redémarrage ; un relevé qui le suit n'est jamais compté depuis
+  l'ancien socle juste parce que le temps passé rend le saut « possible ») ; un compteur dont on change le `point`
   (un autre appareil sous le même `id`) repart de son premier relevé, sans compter l'écart
   entre les deux totaux, et garde son historique ; chaque heure au prix de sa période
   (l'index HC n'est étalé que sur du temps HC).
