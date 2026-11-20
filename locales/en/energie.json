@@ -371,5 +371,19 @@
   "energie.batterie.stocke": "{kwh} kWh of {total}",
   "energie.batterie.aujourdhui": "Today: {entre} kWh in, {sorti} kWh given back",
   "energie.flux.aujourdhui": "Today: {achete} kWh bought, {injecte} kWh sent out",
-  "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels"
+  "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels",
+  "energie.prevision.titre": "Expected solar production",
+  "energie.prevision.mise_a_jour": "Solcast · forecast of {heure}",
+  "energie.prevision.prevu": "Expected today",
+  "energie.prevision.produit": "Produced",
+  "energie.prevision.demain": "Tomorrow",
+  "energie.prevision.fourchette": "between {bas} and {haut}",
+  "energie.prevision.encore": "{kwh} kWh still expected",
+  "energie.prevision.dans": "Within the forecast ({pct} %)",
+  "energie.prevision.au_dessus": "Above the forecast: +{pct} %",
+  "energie.prevision.en_dessous": "Below the forecast: −{pct} %",
+  "energie.prevision.aria": "Solar production: {prevu} kWh expected today, {produit} kWh produced",
+  "energie.prevision.legende_produit": "produced",
+  "energie.prevision.legende_prevu": "expected",
+  "energie.prevision.legende_fourchette": "low–high range"
 }

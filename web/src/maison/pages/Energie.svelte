@@ -11,6 +11,7 @@
   import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
   import EnergyFlow from '../ui/EnergyFlow.svelte';
+  import SolarForecast from '../ui/SolarForecast.svelte';
   import { batteryNow } from '../lib/battery.js';
 
   onMount(useEnergy);
@@ -347,6 +348,9 @@
     </div>
 
     <EnergyFlow />
+
+    <!-- Where a solar forecast exists (the solcast driver). -->
+    <SolarForecast />
 
     {#if tips.length}
       <section class="card tips">
