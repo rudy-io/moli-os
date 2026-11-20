@@ -134,8 +134,7 @@ object Wall {
   }
 
   /** The window of a wall tablet: shown over the lock screen, turning the
-   *  screen on when woken, free to turn with the tablet, full screen. On the
-   *  main thread. */
+   *  screen on when woken, full screen. On the main thread. */
   fun dress(activity: Activity, on: Boolean) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
       activity.setShowWhenLocked(on)
@@ -145,8 +144,9 @@ object Wall {
       val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
       if (on) activity.window.addFlags(flags) else activity.window.clearFlags(flags)
     }
+    // A tablet turns freely, wall tablet or not; a phone stays upright.
     activity.requestedOrientation =
-      if (on) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+      if (on || isTablet(activity)) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
       else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     // Full screen: the bars come back for a moment with a swipe from the edge.
     val window = activity.window
