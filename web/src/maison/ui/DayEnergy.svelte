@@ -424,12 +424,15 @@
     stroke-linecap: round;
   }
 
+  /* Consumption to come: an outline in the colour of what is bought,
+     never a filled bar that could pass for the sun. */
   .ahead {
-    fill: var(--ink-3);
-    fill-opacity: 0.14;
-    stroke: var(--ink-3);
-    stroke-opacity: 0.55;
-    stroke-dasharray: 3 3;
+    fill: var(--cool);
+    fill-opacity: 0.06;
+    stroke: var(--cool);
+    stroke-opacity: 0.6;
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
   }
 
   .peak {
@@ -534,8 +537,8 @@
   }
 
   .sw.ahead {
-    border: 1px dashed var(--ink-3);
-    background: rgb(122 130 148 / 14%);
+    border: 1.5px dashed var(--cool);
+    background: var(--cool-soft);
   }
 
   .sw.band {

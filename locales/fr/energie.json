@@ -411,7 +411,7 @@
   "energie.jour.legende_soleil": "consommé du soleil",
   "energie.jour.legende_achete": "acheté",
   "energie.jour.legende_habitude": "une journée habituelle (7 jours)",
-  "energie.jour.legende_a_venir": "à venir (d'habitude)",
+  "energie.jour.legende_a_venir": "conso attendue (comme d'habitude)",
   "energie.jour.legende_prevision": "prévision Solcast",
   "energie.jour.unite": "kWh par heure"
 }
