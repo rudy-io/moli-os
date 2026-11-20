@@ -111,8 +111,8 @@
     if (v('carbon_monoxide') === true) out.push({ tone: 'alert', icon: 'smoke', text: t('commun.capteur.monoxyde') });
     if (leak(d.id)) out.push({ tone: 'alert', icon: 'water-alert', text: t('commun.piece.fuite', { name: nameOf(d.id) }) });
     const open = doorOpen(d.id);
-    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: '', title: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
-    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: '', title: t('commun.piece.fermee', { name: nameOf(d.id) }) });
+    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: '', title: said(d.id, t('commun.piece.ouverte')) });
+    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: '', title: said(d.id, t('commun.piece.fermee')) });
     // The temperature is the room's, in the head.
     const hum = v('humidity') ?? v('humidity_value') ?? v('va_humidity');
     if (typeof hum === 'number') out.push(measure('humidity', hum, d.id, t('commun.pourcent', { n: num(hum) })));

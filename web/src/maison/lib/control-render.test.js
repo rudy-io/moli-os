@@ -1234,6 +1234,8 @@ test('each sensor chip says which device tells it: « <name> : <value> »', () =
     { id: 'z2m:sud', native_name: 'Capteur luminosité Sud', points: [lux], values: { illuminance: 118 } },
     { id: 'z2m:est', native_name: 'Capteur luminosité Est', points: [lux], values: { illuminance: 51 } },
     { id: 'z2m:th', native_name: 'Sonde salle', points: [hum, co2], values: { humidity: 62, co2: 1200 } },
+    { id: 'z2m:door', native_name: 'Porte atelier', points: [point('contact', { type: 'binary' }, false, 'contact')], values: { contact: true } },
+    { id: 'z2m:window', native_name: 'Fenêtre bureau', points: [point('contact', { type: 'binary' }, false, 'contact')], values: { contact: false } },
   ]);
   // Two light sensors in one room: each says its name.
   assert.match(room, /title="Capteur luminosité Sud : 118 lx"/);
@@ -1242,5 +1244,8 @@ test('each sensor chip says which device tells it: « <name> : <value> »', () =
   // A graded measure keeps its grade after the value.
   assert.match(room, /title="Sonde salle : 1[\s\u202f]?200 ppm · [^"]+"/);
   assert.doesNotMatch(room, /Éclairement/);
+  // A door or a window too.
+  assert.match(room, /title="Porte atelier : fermée"/);
+  assert.match(room, /title="Fenêtre bureau : ouverte"/);
 });
 
