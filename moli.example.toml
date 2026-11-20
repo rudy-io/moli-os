@@ -19,6 +19,11 @@ timezone = "Europe/Paris"
 # those that hold a device's only connection (Tuya) or a bot's only
 # listener (Telegram).
 # mirror = true
+# History keeps every change for history_days (30 by default). These points
+# are also kept for ever as hourly statistics (average, lowest, highest):
+# winters compared with the last ones. `moli-os history import` adds the
+# hours known from before (Home Assistant's statistics, a weather archive).
+# history_hourly = ["meteo:api.open-meteo.com:443/temperature"]
 
 # Reached from the Internet through a Cloudflare tunnel behind Cloudflare
 # Access: Moli checks Access's signed assertion itself and recognizes the

@@ -206,6 +206,11 @@ pub struct Server {
     /// Days of history kept (0 = no history).
     #[serde(default = "default_history_days")]
     pub history_days: u32,
+    /// Points kept for ever as hourly statistics (average, lowest,
+    /// highest), long after their changes are pruned: the outside
+    /// temperature, to compare a winter with the last ones.
+    #[serde(default)]
+    pub history_hourly: Vec<String>,
     /// The Cloudflare Access application in front of the tunnel (absent:
     /// nobody coming through Cloudflare is recognized).
     #[serde(default)]
@@ -254,6 +259,7 @@ impl Default for Server {
             worker_threads: default_workers(),
             allowed_hosts: Vec::new(),
             history_days: default_history_days(),
+            history_hourly: Vec::new(),
             access: None,
             timezone: None,
             language: default_language(),
@@ -422,6 +428,14 @@ impl Config {
                 self.server.language,
                 moli_i18n::languages().join(", ")
             );
+        }
+        if let Some(bad) = self
+            .server
+            .history_hourly
+            .iter()
+            .find(|p| moli_core::PointId::from(p.as_str()).split().is_none())
+        {
+            bail!("[server] history_hourly: {bad:?} is not a point (« device/key »)");
         }
         if self.server.demo_seed.is_some() && !self.server.demo {
             bail!("[server] demo_seed is for a demo house only (demo = true)");

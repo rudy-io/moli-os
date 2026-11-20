@@ -650,11 +650,12 @@ pub(crate) async fn history(
     }
 }
 
-/// Hours → ms, clamped to [1 min, 1 year].
+/// Hours → ms, clamped to [1 min, 20 years] (the points kept for ever,
+/// hour by hour, go that far back; the others simply have nothing there).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub(crate) fn window_ms(hours: f64) -> u64 {
     let hours = if hours.is_finite() { hours } else { 24.0 };
-    (hours.clamp(1.0 / 60.0, 24.0 * 366.0) * 3_600_000.0) as u64
+    (hours.clamp(1.0 / 60.0, 24.0 * 366.0 * 20.0) * 3_600_000.0) as u64
 }
 
 // ---- family dashboard layout --------------------------------------------------
