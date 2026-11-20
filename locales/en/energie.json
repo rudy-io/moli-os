@@ -385,5 +385,8 @@
   "energie.prevision.aria": "Solar production: {prevu} kWh expected today, {produit} kWh produced",
   "energie.prevision.legende_produit": "produced",
   "energie.prevision.legende_prevu": "expected",
-  "energie.prevision.legende_fourchette": "low–high range"
+  "energie.prevision.legende_fourchette": "low–high range",
+  "energie.mois.vs_an": "{n} % vs {mois}",
+  "energie.mois.vs_an_aide": "From the 1st to yesterday ({jours} days): {maintenant} kWh bought, against {avant} kWh on the same days last year",
+  "energie.prevision.mois_vs_an": "This month: {kwh} kWh produced, {n} % vs {mois} (same days)"
 }

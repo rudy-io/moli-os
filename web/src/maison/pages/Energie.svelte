@@ -4,7 +4,7 @@
   import { isValve } from '../lib/capabilities.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
   import { offPeak, nextChange, clockText, minutesText, windowText, baseload, typicalDay, todayByHour, prices, advise } from '../lib/energy-advice.js';
-  import { t } from '../../lib/i18n.svelte.js';
+  import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import EnergyChart from '../ui/EnergyChart.svelte';
   import TariffPie from '../ui/TariffPie.svelte';
@@ -13,6 +13,7 @@
   import EnergyFlow from '../ui/EnergyFlow.svelte';
   import SolarForecast from '../ui/SolarForecast.svelte';
   import { batteryNow } from '../lib/battery.js';
+  import { yearOverYear } from '../lib/year-compare.js';
 
   onMount(useEnergy);
 
@@ -167,6 +168,24 @@
       /* next round */
     }
   }
+  // This month against the same days a year ago (lib/year-compare.js):
+  // the daily series, read once an hour (only whole days count).
+  let days = $state(null);
+  async function loadDays() {
+    try {
+      const r = await fetch('/api/energy/series?step=day&count=400');
+      days = r.ok ? await r.json() : null;
+    } catch {
+      /* next round */
+    }
+  }
+  const yearBought = $derived(yearOverYear(days, home.now, 'bought'));
+  const monthName = (d) => d.toLocaleDateString(locale(), { month: 'short', year: 'numeric' });
+  onMount(() => {
+    loadDays();
+    const every = setInterval(loadDays, 60 * 60_000);
+    return () => clearInterval(every);
+  });
   onMount(() => {
     // Every 10 minutes: today's hours fill in as they go.
     const timer = setInterval(learn, 10 * 60_000);
@@ -290,6 +309,12 @@
             </span>
           {/if}
           {#if monthDelta != null}<span class="chip {monthDelta > 5 ? 'warm' : monthDelta < -5 ? 'good' : ''}">{t('energie.mois.vs', { n: `${monthDelta > 0 ? '+' : ''}${monthDelta}` })}</span>{/if}
+          {#if yearBought}
+            <span
+              class="chip {yearBought.pct > 5 ? 'warm' : yearBought.pct < -5 ? 'good' : ''}"
+              title={t('energie.mois.vs_an_aide', { jours: yearBought.days, avant: kwh(yearBought.before), maintenant: kwh(yearBought.now) })}
+            >{t('energie.mois.vs_an', { n: `${yearBought.pct > 0 ? '+' : ''}${yearBought.pct}`, mois: monthName(yearBought.month) })}</span>
+          {/if}
           {#if offShare != null}<span class="muted small">{t('energie.mois.creuses', { n: offShare })}</span>{/if}
         </div>
         {#if typeof budget === 'number'}

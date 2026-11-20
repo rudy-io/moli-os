@@ -5,6 +5,7 @@
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import { forecastDevice, parseCurve, forecastHours, producedHours, dayOf, lightWindow, soFar } from '../lib/solar-forecast.js';
+  import { yearOverYear } from '../lib/year-compare.js';
 
   /** Today's solar production against the forecast (the `solcast` driver):
    *  the expected hours dashed with their low–high band, what the panels
@@ -12,6 +13,8 @@
    *  where a forecast exists. */
   const H = 3_600_000;
   let series = $state(null);
+  // The month's production against the same days a year ago.
+  let days = $state(null);
 
   async function load() {
     try {
@@ -22,11 +25,27 @@
     }
   }
 
+  async function loadDays() {
+    try {
+      const r = await fetch('/api/energy/series?step=day&count=400');
+      days = r.ok ? await r.json() : null;
+    } catch {
+      days = null;
+    }
+  }
+
   onMount(() => {
     load();
+    loadDays();
     const every = setInterval(load, 5 * 60_000);
-    return () => clearInterval(every);
+    const hourly = setInterval(loadDays, 60 * 60_000);
+    return () => {
+      clearInterval(every);
+      clearInterval(hourly);
+    };
   });
+
+  const yearSolar = $derived(yearOverYear(days, home.now, 'solar'));
 
   const device = $derived(forecastDevice(hub.devices, value));
   const v = (k) => (device ? value(device.id, k) : null);
@@ -103,6 +122,16 @@
         {#if typeof v('tomorrow_low_kwh') === 'number'}<span class="muted">{t('energie.prevision.fourchette', { bas: fmt(v('tomorrow_low_kwh')), haut: fmt(v('tomorrow_high_kwh')) })}</span>{/if}
       </div>
     </div>
+
+    {#if yearSolar}
+      <p class="year muted">
+        {t('energie.prevision.mois_vs_an', {
+          kwh: kwh(yearSolar.now),
+          n: `${yearSolar.pct > 0 ? '+' : ''}${yearSolar.pct}`,
+          mois: yearSolar.month.toLocaleDateString(locale(), { month: 'short', year: 'numeric' }),
+        })}
+      </p>
+    {/if}
 
     {#if verdict}
       <p class="verdict {verdict.verdict}">
@@ -183,6 +212,11 @@
 
   .numbers .muted {
     font-size: 13px;
+  }
+
+  .year {
+    margin: 0;
+    font-size: 13.5px;
   }
 
   .verdict {

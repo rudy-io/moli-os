@@ -385,5 +385,8 @@
   "energie.prevision.aria": "Production solaire : {prevu} kWh prévus aujourd'hui, {produit} kWh produits",
   "energie.prevision.legende_produit": "produit",
   "energie.prevision.legende_prevu": "prévu",
-  "energie.prevision.legende_fourchette": "fourchette basse–haute"
+  "energie.prevision.legende_fourchette": "fourchette basse–haute",
+  "energie.mois.vs_an": "{n} % vs {mois}",
+  "energie.mois.vs_an_aide": "Du 1er à hier ({jours} jours) : {maintenant} kWh achetés, contre {avant} kWh les mêmes jours de l'an dernier",
+  "energie.prevision.mois_vs_an": "Ce mois-ci : {kwh} kWh produits, {n} % vs {mois} (mêmes jours)"
 }
