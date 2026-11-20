@@ -70,9 +70,11 @@
     // Humidity has no universal norm (it depends on the room and the season): always blue.
     humidity: () => [null, 'cool'],
   };
-  const measure = (kind, x, label, text) => {
+  // Every sensor chip says which device tells it: « <name> : <value> ».
+  const said = (id, value) => t('commun.piece.mesure', { name: nameOf(id), value });
+  const measure = (kind, x, id, text) => {
     const [word, tone] = GRADES[kind](x);
-    return { tone, icon: kind, text, title: word ? `${label} : ${text} · ${t(word)}` : `${label} : ${text}` };
+    return { tone, icon: kind, text, title: word ? `${said(id, text)} · ${t(word)}` : said(id, text) };
   };
 
   /** How long a press stays on show outside the « Capteurs » view. */
@@ -109,18 +111,18 @@
     if (v('carbon_monoxide') === true) out.push({ tone: 'alert', icon: 'smoke', text: t('commun.capteur.monoxyde') });
     if (leak(d.id)) out.push({ tone: 'alert', icon: 'water-alert', text: t('commun.piece.fuite', { name: nameOf(d.id) }) });
     const open = doorOpen(d.id);
-    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: '', title: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
-    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: '', title: t('commun.piece.fermee', { name: nameOf(d.id) }) });
+    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: '', title: said(d.id, t('commun.piece.ouverte')) });
+    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: '', title: said(d.id, t('commun.piece.fermee')) });
     // The temperature is the room's, in the head.
     const hum = v('humidity') ?? v('humidity_value') ?? v('va_humidity');
-    if (typeof hum === 'number') out.push(measure('humidity', hum, t('commun.capteur.humidite'), t('commun.pourcent', { n: num(hum) })));
+    if (typeof hum === 'number') out.push(measure('humidity', hum, d.id, t('commun.pourcent', { n: num(hum) })));
     const co2 = v('co2_value') ?? v('co2');
-    if (typeof co2 === 'number') out.push(measure('co2', co2, 'CO₂', `${num(co2)} ppm`));
+    if (typeof co2 === 'number') out.push(measure('co2', co2, d.id, `${num(co2)} ppm`));
     const co = v('co');
-    if (typeof co === 'number') out.push(measure('co', co, t('commun.capteur.monoxyde'), `${num(co)} ppm`));
+    if (typeof co === 'number') out.push(measure('co', co, d.id, `${num(co)} ppm`));
     const lx = v('illuminance') ?? v('illuminance_lux');
-    if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: t('commun.piece.eclairement') });
-    if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: t('commun.piece.presence') });
+    if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: said(d.id, `${num(lx)} lx`) });
+    if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: said(d.id, t('commun.piece.presence_vue')) });
     // A button says its last press: shown while fresh, always among the sensors.
     const press = lastPress(d);
     if (press?.action) {
