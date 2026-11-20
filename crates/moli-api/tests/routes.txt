@@ -3,7 +3,8 @@
 # (from the test's own machine, so "household"). The model behind it: docs/SECURITY-MODEL.md.
 #
 # Level:
-#   public  a stranger (Internet, no proof) is let through: sign-in and invitation only.
+#   public  a stranger (Internet, no proof) is let through: sign-in, invitation and the app's
+#           sign-in handoff (its one-time code and secret are the proof) only.
 #   foyer   a stranger is refused (403); the household's devices may call it.
 #   humain  as foyer, and the household too is refused (403) without a person signed in with the
 #           house's code (some of these also need an owner).
@@ -32,6 +33,10 @@ POST   /api/plan/images                    humain  oui
 GET    /api/plan/images/{name}             foyer   oui
 POST   /api/mobile/register                foyer   oui
 POST   /api/phones/{id}/report             foyer   oui   # a phone's own token lets it through (checked by the route)
+GET    /api/phones/{id}/app                foyer   oui   # the app's update: the phone's own token (appli.rs)
+GET    /api/phones/{id}/app.apk            foyer   oui   # the app's file: the phone's own token
+POST   /api/phones/handoff                 public  oui   # Google sign-in in the app: one-time code + secret (PKCE)
+GET    /api/mobile/handoff                 foyer   oui   # a person Access just signed in (checked by the route)
 GET    /api/mobile/phones                  foyer   oui
 PUT    /api/mobile/phones/{id}             foyer   oui
 DELETE /api/phones/{id}                    foyer   oui

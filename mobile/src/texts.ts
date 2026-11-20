@@ -42,6 +42,15 @@ const fr = {
   fingerprintOfferText: "La prochaine fois, ton empreinte remplacera le code de la maison sur ce téléphone.",
   fingerprintNo: "Non merci",
   fingerprintYes: "Oui",
+  updateTitle: "Nouvelle version de Moli",
+  updateText: "Une mise à jour de l'appli est prête sur ta maison. L'installer maintenant ?",
+  updateInstall: "Installer",
+  updatePermTitle: "Autoriser les mises à jour",
+  updatePermText:
+    "Android demande d'autoriser Moli à installer ses propres mises à jour. Active « Autoriser cette source », puis reviens dans Moli.",
+  updateDownloading: "Téléchargement de la mise à jour…",
+  updateFailed: "La mise à jour n'a pas pu s'installer. Réessaie plus tard.",
+  googleFailed: "La connexion avec Google n'a pas abouti. Réessaie, ou choisis le code par e-mail.",
 };
 
 const en: typeof fr = {
@@ -83,6 +92,15 @@ const en: typeof fr = {
   fingerprintOfferText: "Next time, your fingerprint will replace the house code on this phone.",
   fingerprintNo: "No thanks",
   fingerprintYes: "Yes",
+  updateTitle: "New version of Moli",
+  updateText: "An update of the app is ready on your house. Install it now?",
+  updateInstall: "Install",
+  updatePermTitle: "Allow updates",
+  updatePermText:
+    "Android asks to let Moli install its own updates. Turn on “Allow from this source”, then come back to Moli.",
+  updateDownloading: "Downloading the update…",
+  updateFailed: "The update could not be installed. Try again later.",
+  googleFailed: "Signing in with Google did not work. Try again, or choose the e-mail code.",
 };
 
 const lang = getLocales()[0]?.languageCode ?? "fr";

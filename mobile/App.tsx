@@ -23,6 +23,8 @@ import { declineOffer, fingerprintReady, forgetPin, keepPin, offerDeclined, pinK
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
 import { useWall, WALL_WATCH, wallAvailable, type WallState } from "./src/wall";
+import { useUpdates } from "./src/update";
+import { googleSignIn, handoffAvailable, isGoogleSignIn } from "./src/handoff";
 
 // The shell: Moli's own dashboard, at the house's address, chosen on the
 // first screen (src/house.ts) unless this build is made for one house.
@@ -197,6 +199,8 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     );
   }, []);
   const wall = useWall(tellWall);
+  // The app's own updates, from the house (src/update.ts).
+  const updates = useUpdates(base);
   const bridge = useMemo(
     () =>
       `window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, ` +
@@ -292,6 +296,21 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     ]);
   }, [onLeave]);
 
+  // Google's sign-in, behind Cloudflare Access: in a browser tab of the
+  // app's own, its session then brought back (src/handoff.ts).
+  const signingIn = useRef(false);
+  const signInWithGoogle = useCallback(async () => {
+    if (signingIn.current) return;
+    signingIn.current = true;
+    try {
+      const done = await googleSignIn(base);
+      if (done === "ok") webRef.current?.injectJavaScript(`location.replace(${JSON.stringify(base + "/")}); true;`);
+      else if (done === "error") Alert.alert(t.unreachableTitle, t.googleFailed);
+    } finally {
+      signingIn.current = false;
+    }
+  }, [base]);
+
   // Everything outside the house's hosts (and its sign-in page) opens in the browser.
   const onShouldStart = useCallback((req: { url: string }) => {
     try {
@@ -299,12 +318,16 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       if (url.protocol === "about:" || url.protocol === "blob:" || url.protocol === "data:") return true;
       const internal = allowed.some((d) => inDomain(url.hostname, d));
       if ((url.protocol === "https:" || url.protocol === "http:") && internal) return true;
+      if (isGoogleSignIn(url.hostname) && handoffAvailable(base)) {
+        void signInWithGoogle();
+        return false;
+      }
     } catch {
       return false;
     }
     Linking.openURL(req.url).catch(() => {});
     return false;
-  }, [allowed]);
+  }, [allowed, base, signInWithGoogle]);
 
   // Once the dashboard itself shows (signed in), pair this phone if needed.
   const onLoadEnd = useCallback(async (e: { nativeEvent: { url: string } }) => {
@@ -500,6 +523,12 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
           // the page until a touch or a movement.
           <Pressable style={[StyleSheet.absoluteFill, styles.dark]} onPress={wall.wake} />
         )}
+        {updates.downloading && (
+          <View style={styles.toast} pointerEvents="none">
+            <ActivityIndicator size="small" color={GOLD} />
+            <Text style={styles.toastText}>{t.updateDownloading}</Text>
+          </View>
+        )}
         {askLocation && (
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{t.locationTitle}</Text>
@@ -522,6 +551,19 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   web: { flex: 1, backgroundColor: BG },
   dark: { backgroundColor: "#000" },
+  toast: {
+    position: "absolute",
+    alignSelf: "center",
+    bottom: 96,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: "rgba(22, 21, 18, 0.92)",
+  },
+  toastText: { color: "#f4f1ea", fontSize: 14, fontWeight: "600" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: BG, padding: 24 },
   title: { color: "#f3efe6", fontSize: 22, fontWeight: "600" },
   sub: { color: "#b9b2a4", fontSize: 14, marginTop: 8, textAlign: "center" },
