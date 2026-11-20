@@ -109,15 +109,22 @@ pub(crate) async fn search(
     model: &str,
     timezone: &str,
     query: &str,
+    spoken: bool,
 ) -> anyhow::Result<(Json, Json)> {
-    let body = request(model, timezone, query);
+    let body = request(model, timezone, query, spoken);
     let answer = endpoint.respond(key, &body).await?;
     let text = output_text(&answer);
     anyhow::ensure!(!text.is_empty(), "the search gave no answer");
     Ok((json!({ "answer": text }), answer["usage"].clone()))
 }
 
-fn request(model: &str, timezone: &str, query: &str) -> Json {
+/// `spoken`: the answer may be said as it comes, so it is asked for the ear.
+fn request(model: &str, timezone: &str, query: &str, spoken: bool) -> Json {
+    let style = if spoken {
+        moli_i18n::tr("assistant.search.spoken")
+    } else {
+        moli_i18n::tr("assistant.search.style")
+    };
     json!({
         "model": model,
         "tools": [{
@@ -125,7 +132,7 @@ fn request(model: &str, timezone: &str, query: &str) -> Json {
             "search_context_size": "low",
             "user_location": { "type": "approximate", "timezone": timezone },
         }],
-        "input": format!("{query}\n\n{}", moli_i18n::tr("assistant.search.style")),
+        "input": format!("{query}\n\n{style}"),
         "max_output_tokens": 500,
     })
 }
@@ -202,6 +209,7 @@ mod tests {
             "gpt-4.1-mini",
             "Europe/Paris",
             "Quand joue l'équipe de France ?",
+            false,
         );
         assert_eq!(body["tools"][0]["type"], "web_search");
         assert_eq!(
