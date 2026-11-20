@@ -14,6 +14,8 @@ use std::collections::BTreeMap;
 
 /// Solcast's step (`PT30M`): the only one its rooftop forecasts use.
 pub const STEP: i64 = 1800;
+/// Two refreshes are never closer than this (seconds).
+const MIN_GAP: i64 = 1800;
 /// Half-hours kept: two days back is enough for yesterday's curve.
 const KEEP_BACK: i64 = 2 * 86_400;
 
@@ -285,18 +287,34 @@ pub fn next_refresh(cache: &Cache, sites: usize, per_day: u32, now: i64, tz: &Ti
         return now;
     };
     let refreshes = (per_day / sites).max(1);
-    let window = |day: i64| -> Option<(i64, i64)> {
+    let total = cache.total();
+    // The hours of light of a day, from the first to the last half-hour
+    // expected to produce, and whether that day's dawn is known (an answer
+    // received in the afternoon does not tell when the day began).
+    let lit = |day: i64| -> Option<(i64, i64, bool)> {
         let from = midnight(now, day, tz)?;
         let to = midnight(now, day + 1, tz)?;
-        let total = cache.total();
-        let lit: Vec<i64> = total
-            .range(from + 1..=to)
+        let mut slots = total.range(from + 1..=to).peekable();
+        let dawn_known = slots.peek().is_some_and(|(_, s)| s.kw <= 0.0);
+        let ends: Vec<i64> = slots
             .filter(|(_, s)| s.kw > 0.0)
             .map(|(end, _)| *end)
             .collect();
-        match (lit.first(), lit.last()) {
-            (Some(first), Some(last)) => Some((first - STEP, *last)),
-            _ => Some((from + 6 * 3600, from + 20 * 3600)),
+        Some((*ends.first()? - STEP, *ends.last()?, dawn_known))
+    };
+    let window = |day: i64| -> Option<(i64, i64)> {
+        let from = midnight(now, day, tz)?;
+        match lit(day) {
+            Some((start, end, true)) => Some((start, end)),
+            // Dawn unknown: the next day's light, a day earlier (a 48-hour
+            // answer always holds the whole next day); else 06:00 to 20:00.
+            _ => match lit(day + 1) {
+                Some((start, end, true)) => {
+                    let shift = midnight(now, day + 1, tz)? - from;
+                    Some((start - shift, end - shift))
+                }
+                _ => Some((from + 6 * 3600, from + 20 * 3600)),
+            },
         }
     };
     for day in [0, 1] {
@@ -311,7 +329,8 @@ pub fn next_refresh(cache: &Cache, sites: usize, per_day: u32, now: i64, tz: &Ti
                 .collect()
         };
         if let Some(at) = times.into_iter().find(|at| *at > fetched) {
-            return at.max(now);
+            // Never two refreshes closer than half an hour.
+            return at.max(fetched + MIN_GAP).max(now);
         }
     }
     // Past tomorrow's window (should not happen): in six hours.

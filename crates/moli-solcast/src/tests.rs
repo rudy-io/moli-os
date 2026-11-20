@@ -167,9 +167,15 @@ fn the_calls_are_spread_over_the_light_within_the_quota() {
     // A first answer at 07:00 UTC (two sites, two calls).
     cache.count_call(at(7, 0));
     cache.count_call(at(7, 0));
-    // Light from 07:30 to 16:00 UTC (Paris in late November).
-    cache.merge("east", slots(at(7, 30), 17, 1.0), at(7, 0));
-    cache.merge("west", slots(at(7, 30), 17, 0.5), at(7, 0));
+    // Light from 07:30 to 16:00 UTC (Paris in late November), the dark
+    // half-hour before it known: the day's dawn is.
+    let day = |kw: f64| {
+        let mut d = slots(at(7, 0), 1, 0.0);
+        d.extend(slots(at(7, 30), 17, kw));
+        d
+    };
+    cache.merge("east", day(1.0), at(7, 0));
+    cache.merge("west", day(0.5), at(7, 0));
     let next = model::next_refresh(&cache, 2, 10, at(7, 5), &tz);
     // Five refreshes a day over the light (07:30 → 16:00 UTC): the next
     // after 07:00 is the first light, 07:30.
@@ -223,4 +229,26 @@ fn only_plain_site_ids_and_sound_settings_are_accepted() {
     let mut bad_zone = config(&["abcd-1234"], 10);
     bad_zone.timezone = "Mars/Base".into();
     assert!(Solcast::new(bad_zone).is_err());
+}
+
+#[test]
+fn a_first_answer_in_the_afternoon_does_not_crowd_the_calls() {
+    // Moli starts at 14:14 UTC: Solcast answers from 14:30 on, so today's
+    // dawn is unknown; tomorrow's whole light is (07:30 → 16:00 UTC).
+    let tz = paris();
+    let mut cache = Cache::default();
+    let mut answer = slots(at(14, 0), 4, 1.0); // 14:00–16:00, lit
+    answer.extend(slots(at(16, 0), 16, 0.0)); // the night
+    answer.extend(slots(at(7, 30) + 86_400, 17, 1.0)); // tomorrow's light
+    cache.count_call(at(14, 14));
+    cache.merge("only", answer, at(14, 14));
+    let next = model::next_refresh(&cache, 1, 10, at(14, 15), &tz);
+    // Today's light is taken from tomorrow's: ten refreshes from 07:30 to
+    // 16:00, every 56 min 40 s; the first after 14:14 is 15:03:20.
+    assert!(
+        next >= at(14, 14) + 1800,
+        "next refresh at +{} s",
+        next - at(14, 14)
+    );
+    assert_eq!(next, at(7, 30) + (at(16, 0) - at(7, 30)) * 8 / 9);
 }

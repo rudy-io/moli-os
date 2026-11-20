@@ -13,7 +13,7 @@
   import EnergyFlow from '../ui/EnergyFlow.svelte';
   import SolarForecast from '../ui/SolarForecast.svelte';
   import { batteryNow } from '../lib/battery.js';
-  import { yearOverYear } from '../lib/year-compare.js';
+  import { yearOverYear, trendTone } from '../lib/year-compare.js';
 
   onMount(useEnergy);
 
@@ -288,7 +288,7 @@
         <div class="row">
           <b class="num">{euros(s.today.total.cost, cur)}</b>
           {#if vsYesterday != null}
-            <span class="chip {vsYesterday > 10 ? 'warm' : vsYesterday < -10 ? 'good' : ''}">
+            <span class="chip {trendTone(vsYesterday)}">
               {t('energie.vs_hier', { n: `${vsYesterday > 0 ? '+' : ''}${vsYesterday}` })}
             </span>
           {/if}
@@ -308,10 +308,10 @@
               {/if}
             </span>
           {/if}
-          {#if monthDelta != null}<span class="chip {monthDelta > 5 ? 'warm' : monthDelta < -5 ? 'good' : ''}">{t('energie.mois.vs', { n: `${monthDelta > 0 ? '+' : ''}${monthDelta}` })}</span>{/if}
+          {#if monthDelta != null}<span class="chip {trendTone(monthDelta)}">{t('energie.mois.vs', { n: `${monthDelta > 0 ? '+' : ''}${monthDelta}` })}</span>{/if}
           {#if yearBought}
             <span
-              class="chip {yearBought.pct > 5 ? 'warm' : yearBought.pct < -5 ? 'good' : ''}"
+              class="chip {trendTone(yearBought.pct)}"
               title={t('energie.mois.vs_an_aide', { jours: yearBought.days, avant: kwh(yearBought.before), maintenant: kwh(yearBought.now) })}
             >{t('energie.mois.vs_an', { n: `${yearBought.pct > 0 ? '+' : ''}${yearBought.pct}`, mois: monthName(yearBought.month) })}</span>
           {/if}

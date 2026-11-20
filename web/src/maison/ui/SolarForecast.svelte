@@ -5,7 +5,7 @@
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import { forecastDevice, parseCurve, forecastHours, producedHours, dayOf, lightWindow, soFar } from '../lib/solar-forecast.js';
-  import { yearOverYear } from '../lib/year-compare.js';
+  import { yearOverYear, trendTone } from '../lib/year-compare.js';
 
   /** Today's solar production against the forecast (the `solcast` driver):
    *  the expected hours dashed with their low–high band, what the panels
@@ -124,7 +124,7 @@
     </div>
 
     {#if yearSolar}
-      <p class="year muted">
+      <p class="year chip {trendTone(yearSolar.pct, 'better')}">
         {t('energie.prevision.mois_vs_an', {
           kwh: kwh(yearSolar.now),
           n: `${yearSolar.pct > 0 ? '+' : ''}${yearSolar.pct}`,
@@ -215,8 +215,9 @@
   }
 
   .year {
+    justify-self: start;
     margin: 0;
-    font-size: 13.5px;
+    white-space: normal;
   }
 
   .verdict {

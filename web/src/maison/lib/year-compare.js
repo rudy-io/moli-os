@@ -69,3 +69,14 @@ export function yearOverYear(series, now, role) {
   if (!old.complete || !cur.complete || old.kwh < 1) return null;
   return { now: cur.kwh, before: old.kwh, pct: Math.round((cur.kwh / old.kwh - 1) * 100), month: s.month, days: s.days };
 }
+
+/** The colour of a change in consumption, the same for every comparison:
+ *  green when less (5 % or more), neutral within ±5 %, orange a little more,
+ *  red from 25 % more. For production, `more` is better: the scale turns. */
+export function trendTone(pct, more = 'worse') {
+  if (pct == null || !Number.isFinite(pct)) return '';
+  const p = more === 'better' ? -pct : pct;
+  if (p <= -5) return 'good';
+  if (p < 5) return '';
+  return p < 25 ? 'warm' : 'alert';
+}

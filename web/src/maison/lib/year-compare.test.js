@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spans, sum, yearOverYear } from './year-compare.js';
+import { spans, sum, yearOverYear, trendTone } from './year-compare.js';
 
 const at = (y, m, d, h = 12) => new Date(y, m, d, h).getTime();
 const day = (y, m, d) => new Date(y, m, d).getTime();
@@ -64,4 +64,17 @@ test('a year ago not fully known: nothing said', () => {
   const none = series(day(2025, 10, 1), day(2026, 10, 21), { pince: () => 10 });
   none.meters = none.meters.filter((m) => m.role !== 'solar');
   assert.equal(yearOverYear(none, at(2026, 10, 20), 'solar'), null);
+});
+
+test('one colour scale for every comparison', () => {
+  assert.equal(trendTone(-12), 'good');
+  assert.equal(trendTone(3), '');
+  assert.equal(trendTone(-4), '');
+  assert.equal(trendTone(22), 'warm');
+  assert.equal(trendTone(115), 'alert');
+  assert.equal(trendTone(35), 'alert');
+  assert.equal(trendTone(null), '');
+  // Production: more is better.
+  assert.equal(trendTone(24, 'better'), 'good');
+  assert.equal(trendTone(-30, 'better'), 'alert');
 });
