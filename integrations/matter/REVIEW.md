@@ -60,8 +60,9 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 - `cargo test -p moli-matter` : **33 tests passent**. `cargo test --workspace
   --locked -q` et `sh scripts/check.sh` comprennent la régression A1, les
   commandes On/Off/brightness et la classification d'issue incertaine.
-- Tests unitaires vendoriés ciblés : **421 controller**, **421 interaction** et
-  **83 commissioning** passent ; un test Matter préexistant est ignoré.
+- Tests unitaires vendoriés ciblés (`--lib`) : **421 controller**, **83
+  interaction** et **310 commissioning** passent ; un test Matter préexistant
+  est ignoré.
 - Clippy ciblé sur `moli-matter`, `moli-runtime` et `moli-api` passe avec
   `-D warnings -A unknown-lints`.
 - Les E2E Matter.js en namespace réseau isolé passent sur les binaires logiciels :

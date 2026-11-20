@@ -60,7 +60,9 @@ Bridged NodeLabel is used as a display name when present and bounded; renaming
 refreshes discovery without changing identity. Missing labels keep the generated name.
 Rediscovery preserves surviving devices and compatible samples; only disappeared
 endpoints are removed. Upsert prunes obsolete or incompatible point readings. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
-and sensor measurements. The exact capability gates and limitations are in
+and sensor measurements. On lights advertising Level Control with OnOff, setting
+`brightness` while the lamp is off turns it on at that level (Matter
+MoveToLevelWithOnOff). The exact capability gates and limitations are in
 [COMPATIBILITY.md](COMPATIBILITY.md). BooleanState is contact only for device
 type 0x0015 (true = closed), leak only for 0x0043 (true = water detected). Unknown or
 contradictory contact/leak types are ignored. Known invalid/null sensor samples publish

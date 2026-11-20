@@ -944,7 +944,7 @@ impl Driver for DropsAcceptedCommand {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_dropped_driver_reply_is_unknown_and_not_retried() {
     let hub = Hub::new(HubOptions {
         command_timeout: Duration::from_millis(200),
@@ -972,12 +972,12 @@ async fn a_dropped_driver_reply_is_unknown_and_not_retried() {
         .await,
         Err(CommandError::OutcomeUnknown)
     );
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(moli_runtime::CONFIRM_WINDOW + Duration::from_secs(1)).await;
     assert_eq!(received.load(Ordering::SeqCst), 1);
     cancel.cancel();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_definite_driver_refusal_is_not_retried() {
     let hub = Hub::new(HubOptions {
         command_timeout: Duration::from_millis(200),
@@ -1007,7 +1007,7 @@ async fn a_definite_driver_refusal_is_not_retried() {
             "explicit Matter status failure".into()
         ))
     );
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(moli_runtime::CONFIRM_WINDOW + Duration::from_secs(1)).await;
     assert_eq!(received.load(Ordering::SeqCst), 1);
     cancel.cancel();
 }
@@ -1074,7 +1074,8 @@ async fn stale_orders_never_run() {
     let late = hub
         .command(&lamp(), Value::Bool(true), Origin::Ui, None)
         .await;
-    assert_eq!(late, Err(CommandError::OutcomeUnknown));
+    // A hub deadline is a plain transient; the follow-up re-sends it later.
+    assert_eq!(late, Err(CommandError::Timeout));
     // The driver wakes up after the hub gave up: the order must not run.
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(

@@ -625,7 +625,11 @@ impl Matter {
                     let Some(mut command) = command else { return Ok(()); };
                     let target = devices.get(&command.device.id);
                     let result = if let Some((node,ep,meta)) = target {
-                        if let Some(plan) = meta.plan(&command.key,&command.value,command.abandoned()) {
+                        if !meta.online() {
+                            // Nothing was sent: a definite refusal would lose
+                            // the follow-up re-send when the device returns.
+                            Err(OrderError::Failed(failure().to_string()))
+                        } else if let Some(plan) = meta.plan(&command.key,&command.value,command.abandoned()) {
                             let node = controller.node(*node);
                             let deadline = command.deadline;
                             tokio::select! {

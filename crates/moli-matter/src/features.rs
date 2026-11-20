@@ -222,6 +222,12 @@ pub(crate) fn color_refresh_paths(
 // None means the node is past the endpoint or path bound: the metadata read
 // cannot be complete, and subscribing on a partial report would make the
 // subscription's first reports look like descriptor changes.
+/// Discovery rejects the whole node when one endpoint is malformed; name the
+/// culprit so a dropped bridge leaves one diagnosable line instead of silence.
+fn rejected(endpoint: u16, reason: &str) {
+    tracing::warn!(endpoint, reason, "Matter discovery rejected");
+}
+
 pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::ReadPath>> {
     let mut paths = BTreeSet::new();
     let mut endpoints = BTreeSet::new();
@@ -234,9 +240,11 @@ pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::
             continue;
         }
         let Tlv::Array(servers) = value else {
+            rejected(path.endpoint, "ServerList is not an array");
             return None;
         };
         if servers.len() > 128 {
+            rejected(path.endpoint, "ServerList exceeds 128 clusters");
             return None;
         }
         // ServerList is required to be a list of ClusterIDs. Do not publish a
@@ -245,10 +253,12 @@ pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::
             .iter()
             .any(|server| uint(server).and_then(|n| u32::try_from(n).ok()).is_none())
         {
+            rejected(path.endpoint, "ServerList holds a non-cluster entry");
             return None;
         }
         endpoints.insert(path.endpoint);
         if endpoints.len() > 128 {
+            rejected(path.endpoint, "more than 128 endpoints on one node");
             return None;
         }
         for cluster in servers
@@ -273,6 +283,7 @@ pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::
                 }
             }
             if paths.len() > 4096 {
+                rejected(path.endpoint, "more than 4096 discovery paths");
                 return None;
             }
         }

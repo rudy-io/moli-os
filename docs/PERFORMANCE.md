@@ -25,6 +25,10 @@ Build x86_64 musl depuis le dépôt Moli seul avec le Dockerfile inchangé.
 
 Les deux images dépassent le budget de 25 000 000 octets. Le strip économise
 6 125 568 octets sur l'image, mais laisse 3 329 905 octets de dépassement.
+Ce saut (+4,17 Mo en neuf jours) n'est pas attribuable à la seule PR de
+stabilisation, beaucoup plus petite : la cause probable est l'évolution de
+l'outillage entre les deux mesures (Rust 1.100 ici contre 1.97 au build
+précédent), à vérifier avec une mesure contrôlée avant tout arbitrage.
 L'épinglage temporaire à Rust 1.97 n'a pas résolu ce dépassement et n'a donc pas
 été conservé dans le Dockerfile. Les hashes et les tests E2E exécutés sur le
 binaire standard sont dans [RESULTS.md](../tools/matter-e2e/RESULTS.md). Aucune

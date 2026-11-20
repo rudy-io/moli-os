@@ -101,8 +101,8 @@ apply directly to upstream main as of 2026-11-15.
   attribute twice is refused before any bytes are sent. A steady-state report
   that sets `SuppressResponse` together with `MoreChunkedMessages` is rejected
   (`InvalidAction`) and its exchange closed, instead of leaving the device
-  waiting on an exchange nothing would ever answer. Moli surfaces the unknown
-  outcome through `pilotes.matter.outcome_unknown`.
+  waiting on an exchange nothing would ever answer. The hub journals the hub-side error text;
+  the outcome itself is surfaced through `CommandError::OutcomeUnknown`.
 - If an action was accepted into the controller queue but its reply channel
   closes before a response arrives, it is also `OutcomeUnknown`; a regression
   covers this shutdown race. A request rejected before queueing remains a

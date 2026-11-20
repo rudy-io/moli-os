@@ -176,7 +176,10 @@ impl Watch {
 fn transient(e: &CommandError) -> bool {
     matches!(
         e,
-        CommandError::DriverUnavailable | CommandError::Busy | CommandError::Driver(_)
+        CommandError::DriverUnavailable
+            | CommandError::Busy
+            | CommandError::Driver(_)
+            | CommandError::Timeout
     )
 }
 
@@ -1730,12 +1733,13 @@ impl Hub {
                 mpsc::error::TrySendError::Closed(_) => CommandError::DriverUnavailable,
             })?;
         match tokio::time::timeout(self.0.opts.command_timeout, answer).await {
-            // The driver accepted this request but did not answer before the
-            // hub deadline. The action may have reached the device already;
-            // never label it a definite failure or automatically retry it.
-            // A deadline or closed reply channel after queueing cannot establish
-            // whether the device acted. Never label it a definite failure.
-            Err(_) | Ok(Err(_)) => Err(CommandError::OutcomeUnknown),
+            // The hub deadline fired: the follow-up re-sends the order later if
+            // the state does not confirm it, as for every driver. Only an
+            // unknown outcome stays ambiguous: a driver may report it
+            // explicitly, or its reply channel closed after queueing, in which
+            // case whether the device acted cannot be established.
+            Err(_) => Err(CommandError::Timeout),
+            Ok(Err(_)) => Err(CommandError::OutcomeUnknown),
             Ok(Ok(crate::driver::CommandReply::OutcomeUnknown)) => {
                 Err(CommandError::OutcomeUnknown)
             }
@@ -2849,10 +2853,12 @@ mod opening_tests {
     #[test]
     fn uncertain_commands_are_not_automatically_retried() {
         assert!(!transient(&CommandError::OutcomeUnknown));
-        assert!(!transient(&CommandError::Timeout));
         assert!(!transient(&CommandError::DriverRefused(
             "status failure".into()
         )));
+        // The hub deadline is a plain transient: the follow-up re-sends the
+        // order when the state does not confirm it, as on main.
+        assert!(transient(&CommandError::Timeout));
     }
 
     fn point(key: &str, semantic: Semantic, kind: Kind) -> PointSpec {
