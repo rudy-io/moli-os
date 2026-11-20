@@ -69,7 +69,9 @@ test('a single clamp below zero is power sent out', () => {
   const html = show();
   // Nothing bought, 400 W out: the house uses 600 W.
   assert.match(summary(html), /consomme 600 W : 0 W du réseau/);
-  assert.match(html, /← 400 W/);
+  // The grid then says one thing: what goes out.
+  assert.match(html, /class="node grid[^"]*sends"/);
+  assert.match(html, />400 W<\/text><text class="small way[^"]*" y="22">injection</);
 });
 
 test('on the home page, a house with only the grid shows no flow', () => {

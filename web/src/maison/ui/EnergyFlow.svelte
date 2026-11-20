@@ -4,6 +4,7 @@
   import { energy, useEnergy, kwh, watts } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import { icon } from '../lib/icons.js';
   import { batteryNow, splitFlows } from '../lib/battery.js';
 
   /** Where the energy goes right now: the grid (bought, sent back), the
@@ -69,33 +70,41 @@
   // A dot's trip: faster with more power, none below a trickle.
   const duration = (w) => `${Math.min(6, Math.max(0.7, 2500 / Math.max(w, 1))).toFixed(2)}s`;
   const flowing = (w) => w != null && w >= 5;
+  // A line that carries power stands out, thicker with more; the others stay faint.
+  const weight = (w) => (flowing(w) ? Math.min(6, 2.5 + w / 900) : 1.5);
+  // The grid says one thing: what is bought, or what goes out.
+  const gridSends = $derived(sent >= 5 && (bought ?? 0) < 5);
+  // The battery's charge as a ring just outside its disc (r = 34.5).
+  const RING = 2 * Math.PI * 34.5;
 
+  // A diamond: the sun on top, the battery below, the grid and the house on
+  // each side; the curves are quarter arcs, the same on every side.
   const PATHS = {
-    solarHouse: 'M 200 92 C 200 170 290 172 302 172',
-    solarGrid: 'M 200 92 C 200 170 110 172 98 172',
-    gridHouse: 'M 98 180 L 302 180',
-    gasHouse: 'M 340 92 L 340 136',
-    solarBattery: 'M 200 92 L 200 238',
-    gridBattery: 'M 98 186 C 170 186 194 200 194 238',
-    batteryGrid: 'M 194 238 C 194 200 170 186 98 186',
-    batteryHouse: 'M 206 238 C 206 200 230 186 302 186',
+    solarHouse: 'M 240 92 C 240 131 278 162 324 162',
+    solarGrid: 'M 240 92 C 240 131 202 162 156 162',
+    gridHouse: 'M 156 170 L 324 170',
+    gasHouse: 'M 360 92 L 360 134',
+    solarBattery: 'M 240 92 L 240 248',
+    gridBattery: 'M 156 178 C 202 178 240 209 240 248',
+    batteryGrid: 'M 240 248 C 240 209 202 178 156 178',
+    batteryHouse: 'M 240 248 C 240 209 278 178 324 178',
   };
 </script>
 
 {#if s && bought != null && shown}
   <section class="card flow" class:home aria-label={t('energie.flux.titre')}>
     <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.flux.titre')}</h2></div>
-    <svg viewBox="0 0 400 {hasBattery ? 324 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
+    <svg viewBox="0 0 480 {hasBattery ? 344 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
       {#if hasSolar}
-        <path class="line solar" d={PATHS.solarHouse} />
-        <path class="line export" d={PATHS.solarGrid} />
+        <path class="line solar" class:on={flowing(toHouse)} stroke-width={weight(toHouse)} d={PATHS.solarHouse} />
+        <path class="line export" class:on={flowing(toGrid)} stroke-width={weight(toGrid)} d={PATHS.solarGrid} />
       {/if}
-      <path class="line grid" d={PATHS.gridHouse} />
+      <path class="line grid" class:on={flowing(split.gridToHouse)} stroke-width={weight(split.gridToHouse)} d={PATHS.gridHouse} />
       {#if hasGas}<path class="line gas" d={PATHS.gasHouse} />{/if}
       {#if hasBattery}
-        {#if hasSolar}<path class="line solar" d={PATHS.solarBattery} />{/if}
-        <path class="line grid" d={PATHS.gridBattery} />
-        <path class="line battery" d={PATHS.batteryHouse} />
+        {#if hasSolar}<path class="line solar" class:on={flowing(split.solarToBattery)} stroke-width={weight(split.solarToBattery)} d={PATHS.solarBattery} />{/if}
+        <path class="line grid" class:on={flowing(split.gridToBattery) || flowing(split.batteryToGrid)} stroke-width={weight(Math.max(split.gridToBattery ?? 0, split.batteryToGrid ?? 0))} d={PATHS.gridBattery} />
+        <path class="line battery" class:on={flowing(split.batteryToHouse)} stroke-width={weight(split.batteryToHouse)} d={PATHS.batteryHouse} />
       {/if}
 
       {#if hasSolar && flowing(toHouse)}
@@ -115,42 +124,59 @@
         {#key duration(split.gridToHouse)}<circle class="dot grid" r="4"><animateMotion dur={duration(split.gridToHouse)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
       {/if}
 
+      <!-- Every node alike: an icon, the value, a word under it; its name outside. -->
       {#if hasSolar}
-        <g class="node solar" transform="translate(200 56)">
-          <circle r="36" />
+        <g class="node solar" transform="translate(240 56)">
+          <circle class="bg" r="34.75" />
+          <path class="ico" d={icon('sun')} transform="translate(-8 -27) scale(0.68)" />
+          <text class="big" y="8">{watts(made ?? 0)}</text>
+          <text class="small" y="22">{kwh(madeToday)} kWh</text>
           <text class="label" y="-46">{t('energie.flux.solaire')}</text>
-          <text class="big" y="2">{watts(made ?? 0)}</text>
-          <text class="small" y="18">{kwh(madeToday)} kWh</text>
         </g>
       {/if}
       {#if hasGas}
-        <g class="node gas" transform="translate(340 56)">
-          <circle r="36" />
+        <g class="node gas" transform="translate(360 56)">
+          <circle class="bg" r="34.75" />
+          <path class="ico" d={icon('fire')} transform="translate(-8 -27) scale(0.68)" />
+          <text class="big" y="8">{kwh(gasToday)}</text>
+          <text class="small" y="22">kWh</text>
           <text class="label" y="-46">{t('energie.flux.gaz')}</text>
-          <text class="big" y="6">{kwh(gasToday)} kWh</text>
         </g>
       {/if}
-      <g class="node grid" transform="translate(60 176)">
-        <circle r="38" />
-        <text class="in" y="-4">→ {watts(bought)}</text>
-        <text class="out" y="13">← {watts(sent)}</text>
-        <text class="label" y="56">{t('energie.flux.reseau')}</text>
+      <g class="node grid" class:sends={gridSends} transform="translate(120 170)">
+        <circle class="bg" r="34.75" />
+        <path class="ico" d={icon('transmission-tower')} transform="translate(-8 -27) scale(0.68)" />
+        <text class="big" y="8">{watts(gridSends ? sent : bought)}</text>
+        <text class="small way" y="22">{gridSends ? t('energie.flux.injection') : t('energie.flux.achat')}</text>
+        <text class="label side left" x="-46" y="0">{t('energie.flux.reseau')}</text>
+      </g>
+      <g class="node house" transform="translate(360 170)">
+        <circle class="bg" r="34.75" />
+        <path class="ico" d={icon('home')} transform="translate(-8 -27) scale(0.68)" />
+        <text class="big" y="8">{watts(house)}</text>
+        <text class="small" y="22">{t('energie.flux.conso')}</text>
+        <text class="label side right" x="46" y="0">{t('energie.flux.maison')}</text>
       </g>
       {#if hasBattery}
-        <g class="node battery" transform="translate(200 268)">
-          <circle r="30" />
-          <text class="label" y="46">{t('energie.flux.batterie')}</text>
-          <text class="big" y="0">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
-          <text class="small" y="15">{batteryW > 0 ? '↓' : batteryW < 0 ? '↑' : ''} {watts(Math.abs(batteryW))}</text>
+        <g class="node battery" transform="translate(240 284)">
+          <circle class="bg" r="33" />
+          <circle class="track" r="34.5" />
+          {#if battery.soc != null}
+            <circle class="ring" r="34.5" stroke-dasharray="{(RING * Math.max(0, Math.min(100, battery.soc))) / 100} {RING}" transform="rotate(-90)" />
+          {/if}
+          <path class="ico" d={icon('battery')} transform="translate(-8 -27) scale(0.68)" />
+          <text class="big" y="8">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
+          <text class="small" y="22">{batteryW > 0 ? '↓ ' : batteryW < 0 ? '↑ ' : ''}{watts(Math.abs(batteryW))}</text>
+          <text class="label" y="56">{t('energie.flux.batterie')}</text>
         </g>
       {/if}
-      <g class="node house" transform="translate(340 176)">
-        <circle r="38" />
-        <text class="big" y="2">{watts(house)}</text>
-        <text class="label" y="56">{t('energie.flux.maison')}</text>
-      </g>
     </svg>
-    <p class="muted small">{t('energie.flux.aujourdhui', { achete: kwh(boughtToday), injecte: kwh(sentToday) })}</p>
+    <div class="today" aria-label={t('energie.flux.aujourdhui', { achete: kwh(boughtToday), injecte: kwh(sentToday) })}>
+      <span class="muted">{t('energie.flux.aujourdhui_court')}</span>
+      {#if hasSolar}<span class="pill solar"><b>{kwh(madeToday)} kWh</b> {t('energie.flux.produits')}</span>{/if}
+      <span class="pill grid"><b>{kwh(boughtToday)} kWh</b> {t('energie.flux.achetes')}</span>
+      {#if hasExport || sentToday}<span class="pill export"><b>{kwh(sentToday)} kWh</b> {t('energie.flux.injectes')}</span>{/if}
+    </div>
   </section>
 {/if}
 
@@ -163,76 +189,132 @@
   .flow svg {
     width: 100%;
     height: auto;
-    max-width: 460px;
+    max-width: 480px;
     display: block;
     margin: 0 auto;
+    font-variant-numeric: tabular-nums;
   }
 
   .line {
     fill: none;
-    stroke-width: 2;
-    opacity: 0.55;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-dasharray: 2 5;
+    opacity: 0.28;
+    transition: stroke-width 0.4s, opacity 0.4s;
   }
 
-  .line.solar,
-  .dot.solar {
+  .line.on {
+    stroke-dasharray: none;
+    opacity: 0.75;
+  }
+
+  .line.solar {
     stroke: var(--warm);
-    fill: var(--warm);
   }
 
   .line.export,
-  .dot.export {
+  .line.battery {
     stroke: var(--good);
-    fill: var(--good);
   }
 
-  .line.grid,
-  .dot.grid {
+  .line.grid {
     stroke: var(--cool);
-    fill: var(--cool);
   }
 
   .line.gas {
     stroke: var(--alert);
   }
 
-  .line.battery,
+  .dot.solar {
+    fill: var(--warm);
+  }
+
+  .dot.export,
   .dot.battery {
-    stroke: var(--good);
     fill: var(--good);
   }
 
-  .line.solar,
-  .line.export,
-  .line.grid,
-  .line.gas,
-  .line.battery {
-    fill: none;
+  .dot.grid {
+    fill: var(--cool);
   }
 
-  .node circle {
-    fill: var(--surface);
-    stroke-width: 3;
+  .dot {
+    stroke: var(--surface);
+    stroke-width: 1.5;
   }
 
-  .node.solar circle {
+  .node .bg {
+    stroke-width: 2.5;
+  }
+
+  .node.solar .bg {
+    fill: var(--warm-soft);
     stroke: var(--warm);
   }
 
-  .node.grid circle {
+  .node.grid .bg {
+    fill: var(--cool-soft);
     stroke: var(--cool);
   }
 
-  .node.house circle {
-    stroke: var(--cool);
+  .node.grid.sends .bg {
+    fill: var(--good-soft);
+    stroke: var(--good);
   }
 
-  .node.gas circle {
+  .node.house .bg {
+    fill: var(--surface-2);
+    stroke: var(--ink);
+  }
+
+  .node.gas .bg {
+    fill: var(--alert-soft);
     stroke: var(--alert);
   }
 
-  .node.battery circle {
+  .node.battery .bg {
+    fill: var(--good-soft);
+    stroke: none;
+  }
+
+  .node .track,
+  .node .ring {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .node .track {
+    stroke: var(--good-soft);
+    filter: brightness(0.92);
+  }
+
+  .node .ring {
     stroke: var(--good);
+    stroke-linecap: round;
+  }
+
+  .ico {
+    fill: var(--ink);
+  }
+
+  .node.solar .ico {
+    fill: var(--warm-ink);
+  }
+
+  .node.grid .ico,
+  .node.grid .way {
+    fill: var(--cool);
+  }
+
+  .node.grid.sends .ico,
+  .node.grid.sends .way,
+  .node.battery .ico {
+    fill: var(--good);
+  }
+
+  .node.gas .ico {
+    fill: var(--alert);
   }
 
   text {
@@ -242,30 +324,68 @@
   }
 
   text.big {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
   }
 
-  text.small,
-  text.label {
-    fill: var(--ink-3);
+  text.small {
+    fill: var(--ink-2);
     font-size: 11px;
+    font-weight: 600;
   }
 
-  text.in {
-    fill: var(--cool);
+  text.label {
+    fill: var(--ink-2);
     font-size: 12px;
     font-weight: 600;
   }
 
-  text.out {
-    fill: var(--good);
-    font-size: 12px;
+  text.label.side {
+    dominant-baseline: central;
+  }
+
+  text.label.left {
+    text-anchor: end;
+  }
+
+  text.label.right {
+    text-anchor: start;
+  }
+
+  .today {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 6px 8px;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+  }
+
+  .pill {
+    padding: 6px 12px;
+    border-radius: 999px;
     font-weight: 600;
   }
 
-  .small {
-    margin: 4px 0 0;
-    text-align: center;
+  .pill b {
+    font-weight: 800;
+  }
+
+  .pill.solar {
+    background: var(--warm-soft);
+    color: var(--warm-ink);
+  }
+
+  .pill.grid {
+    background: var(--cool-soft);
+    color: var(--cool);
+  }
+
+  .pill.export {
+    background: var(--good-soft);
+    color: var(--good);
   }
 </style>
