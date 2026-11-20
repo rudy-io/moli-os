@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The wall tablet (modules/moli-wall): the screen wakes when someone passes
+     in front of the camera, sleeps when nobody is there, and the tablet shows
+     Moli alone. The "home screen" entry is the app's own (plugins/with-wall.js). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.CAMERA" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+  <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+  <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+  <application>
+    <!-- Administrator (screen sleep), and device owner when installed by QR code. -->
+    <receiver
+      android:name="expo.modules.moliwall.WallAdminReceiver"
+      android:exported="true"
+      android:permission="android.permission.BIND_DEVICE_ADMIN">
+      <meta-data android:name="android.app.device_admin" android:resource="@xml/moli_wall_admin" />
+      <intent-filter>
+        <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+        <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+      </intent-filter>
+    </receiver>
+
+    <!-- Asked by the setup wizard during a QR code installation (Android 10+). -->
+    <activity
+      android:name="expo.modules.moliwall.ProvisioningModeActivity"
+      android:exported="true"
+      android:permission="android.permission.BIND_DEVICE_ADMIN"
+      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity>
+    <activity
+      android:name="expo.modules.moliwall.PolicyComplianceActivity"
+      android:exported="true"
+      android:permission="android.permission.BIND_DEVICE_ADMIN"
+      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity>
+
+    <service
+      android:name="expo.modules.moliwall.MotionService"
+      android:exported="false"
+      android:foregroundServiceType="camera" />
+  </application>
+</manifest>
