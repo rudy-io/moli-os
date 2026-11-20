@@ -93,7 +93,7 @@
 <style>
   .energy {
     background: var(--card);
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     padding: 12px 16px;
     margin-bottom: 22px;

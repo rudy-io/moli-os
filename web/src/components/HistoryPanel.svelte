@@ -170,7 +170,7 @@
     max-height: calc(100vh - 32px);
     overflow: auto;
     background: var(--card);
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     padding: 16px 18px;
   }
