@@ -5,7 +5,7 @@
   import { home } from '../lib/home.svelte.js';
   import LiveVideo from './LiveVideo.svelte';
   import CameraTile from './CameraTile.svelte';
-  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, extract, extractName, recordedIn, LEAD } from '../lib/review.js';
+  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, extract, extractName, recordedIn, toField, fromField, LEAD } from '../lib/review.js';
 
   /** A camera with its past (its NVR): the picture (live, or what was
    *  recorded at the chosen moment, or an event's photo) with the zones over
@@ -182,7 +182,16 @@
     } else if (mode.kind === 'image') {
       const item = items.find((i) => i.id === mode.item);
       cut = (item && windowOf(item, nowS())) ?? { start: Math.floor(mode.at - LEAD), end: Math.floor(mode.at) + 30 };
+    } else {
+      // From the live view: the last minute, to be set to any moment.
+      const now = Math.floor(nowS());
+      cut = { start: now - 62, end: now - 2 };
     }
+  }
+
+  function typed(bound, value) {
+    const t = fromField(value);
+    if (t !== null) cut = { ...cut, [bound]: t };
   }
 
   function nudge(bound, seconds) {
@@ -193,14 +202,12 @@
     if (position) cut = { ...cut, [bound]: Math.floor(position) };
   }
 
-  // Back to the live view: nothing left to cut.
-  $effect(() => {
-    if (mode.kind === 'live') cut = null;
-  });
-
   const saved = $derived(cut ? extract(cut.start, cut.end, home.now / 1000) : null);
   const savedName = $derived(saved ? extractName(name, saved.start) : '');
-  const savedHas = $derived(saved ? recordedIn(saved.start, saved.end, recorded) : false);
+  // What is recorded is known for the day shown only: elsewhere, let it try.
+  const savedHas = $derived(
+    !saved || saved.start < span.after || saved.end > span.before || recordedIn(saved.start, saved.end, recorded),
+  );
   function lengthOf(s) {
     const m = Math.floor(s / 60);
     const r = s % 60;
@@ -314,10 +321,10 @@
           <Icon name="map" size={16} />{t('revue.zones')}
         </button>
       {/if}
+      <button class:on={cut} aria-pressed={!!cut} aria-expanded={!!cut} onclick={openCut}>
+        <Icon name="download" size={16} />{t('revue.export.exporter')}
+      </button>
       {#if mode.kind !== 'live'}
-        <button class:on={cut} aria-pressed={!!cut} aria-expanded={!!cut} onclick={openCut}>
-          <Icon name="download" size={16} />{t('revue.export.exporter')}
-        </button>
         <button class="direct" onclick={backToLive}><i></i>{t('revue.direct')}</button>
       {/if}
     </div>
@@ -330,7 +337,14 @@
         <div class="bound">
           <span class="word">{word}</span>
           <button onclick={() => nudge(bound, -10)} aria-label={t('revue.export.reculer', { borne: word })}>−10 s</button>
-          <b class="at">{hms(cut[bound])}</b>
+          <input
+            class="at"
+            type="datetime-local"
+            step="1"
+            value={toField(cut[bound])}
+            onchange={(e) => typed(bound, e.currentTarget.value)}
+            aria-label={word}
+          />
           <button onclick={() => nudge(bound, 10)} aria-label={t('revue.export.avancer', { borne: word })}>+10 s</button>
           {#if mode.kind === 'video' && position}
             <button onclick={() => here(bound)} aria-label={t('revue.export.ici_aide', { borne: word })}>{t('revue.export.ici')}</button>
@@ -637,7 +651,7 @@
   /* Both bounds in the same columns, whatever the word. */
   .bound {
     display: grid;
-    grid-template-columns: 6ch auto 10ch auto auto;
+    grid-template-columns: 6ch auto minmax(0, 15em) auto auto;
     justify-content: start;
     align-items: center;
     gap: 8px;
@@ -649,10 +663,40 @@
   }
 
   .bound .at {
-    min-width: 9ch;
-    text-align: center;
-    font-size: 15px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 10px;
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: 10px;
+    background: rgb(255 255 255 / 6%);
+    color: #eef1f7;
+    color-scheme: dark;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* A phone: the word, the field across, then the buttons. */
+  @media (max-width: 560px) {
+    .bound {
+      display: flex;
+      flex-wrap: wrap;
+    }
+
+    .bound .word {
+      flex-basis: 100%;
+    }
+
+    .bound .at {
+      order: 1;
+      flex-basis: 100%;
+    }
+
+    .bound button {
+      order: 2;
+    }
   }
 
   .bound button,

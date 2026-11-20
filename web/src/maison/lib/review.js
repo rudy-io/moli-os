@@ -136,6 +136,24 @@ export function extract(start, end, now) {
   return to > from + 1 && to - from <= EXTRACT_MAX ? { start: from, end: to } : null;
 }
 
+/** Seconds → the value of a `datetime-local` field, to the second, in
+ *  local time (`2026-11-20T11:21:05`). */
+export function toField(t) {
+  const d = new Date(t * 1000);
+  const two = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
+/** A `datetime-local` value (local time, seconds optional) → seconds;
+ *  null when it is not one. */
+export function fromField(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value ?? '');
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s = '0'] = m;
+  const t = new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime() / 1000;
+  return Number.isFinite(t) ? t : null;
+}
+
 /** Whether something was recorded between `start` and `end`: the NVR
  *  refuses an extract with nothing in it. Recordings not read yet (an
  *  empty list): not known, let it try. */

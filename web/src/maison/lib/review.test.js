@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW, extract, extractName, recordedIn, EXTRACT_MAX } from './review.js';
+import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW, extract, extractName, recordedIn, toField, fromField, EXTRACT_MAX } from './review.js';
 
 test('a day, local, from midnight to midnight', () => {
   const noon = new Date(2026, 10, 15, 12, 30).getTime() / 1000;
@@ -123,4 +123,13 @@ test('an extract needs something recorded in it', () => {
   assert.equal(recordedIn(190, 510, recorded), true);
   assert.equal(recordedIn(250, 400, recorded), false);
   assert.equal(recordedIn(250, 400, []), true);
+});
+
+test('a moment goes to a date-and-time field and back, in local time', () => {
+  const t = new Date(2026, 10, 20, 9, 5, 7).getTime() / 1000;
+  assert.equal(toField(t), '2026-11-20T09:05:07');
+  assert.equal(fromField('2026-11-20T09:05:07'), t);
+  assert.equal(fromField('2026-11-20T09:05'), t - 7);
+  assert.equal(fromField(''), null);
+  assert.equal(fromField('hier'), null);
 });
