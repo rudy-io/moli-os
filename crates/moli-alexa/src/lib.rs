@@ -445,6 +445,9 @@ async fn playing(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
                 }
             }
             Err(Failure::Expired) => anyhow::bail!("{RENEW}"),
+            // Amazon rations: the rest of this round waits for the next one,
+            // what is left of the quota goes to the orders.
+            Err(Failure::Busy) => break,
             Err(Failure::Other(err)) => {
                 if unreadable.insert(e.serial.clone()) {
                     tracing::warn!(speaker = %e.name, error = %format!("{err:#}"), "alexa player state");
@@ -455,22 +458,63 @@ async fn playing(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// One order; a session that expired is renewed once and the order sent again.
+/// Amazon rations the orders (HTTP 429, often when several leave together,
+/// an alarm's sounds on every speaker): the waits before trying again.
+const BUSY_WAITS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
+/// About what an order takes to be answered: a new try must fit before the
+/// hub stops waiting (an order past its deadline never runs).
+const ORDER_TIME: Duration = Duration::from_millis(1500);
+
+/// The wait before trying a refused order again, if it can still be
+/// answered before `deadline`.
+fn busy_wait(
+    tries: usize,
+    now: std::time::Instant,
+    deadline: std::time::Instant,
+) -> Option<Duration> {
+    let wait = *BUSY_WAITS.get(tries)?;
+    (now + wait + ORDER_TIME <= deadline).then_some(wait)
+}
+
+/// One order; a session that expired is renewed once and the order sent
+/// again; an order Amazon rations is tried again while the hub still waits.
 async fn order(
     config: &Config,
     home: &mut Home,
     refresh: &str,
     command: &CommandRequest,
 ) -> Result<(), String> {
+    let mut tries = 0;
+    loop {
+        match attempt(config, home, refresh, command).await {
+            Err(Failure::Busy) => {
+                let Some(wait) = busy_wait(tries, std::time::Instant::now(), command.deadline)
+                else {
+                    return Err(Failure::Busy.to_string());
+                };
+                tries += 1;
+                tokio::time::sleep(wait).await;
+            }
+            other => return other.map_err(|e| e.to_string()),
+        }
+    }
+}
+
+async fn attempt(
+    config: &Config,
+    home: &mut Home,
+    refresh: &str,
+    command: &CommandRequest,
+) -> Result<(), Failure> {
     match send(home, command).await {
         Err(Failure::Expired) => {
             let (locale, _) = config.languages();
             home.session = Session::open(refresh, &config.domain, locale)
                 .await
-                .map_err(|e| format!("{e:#}"))?;
-            send(home, command).await.map_err(|e| e.to_string())
+                .map_err(Failure::Other)?;
+            send(home, command).await
         }
-        other => other.map_err(|e| e.to_string()),
+        other => other,
     }
 }
 
@@ -537,6 +581,19 @@ async fn send(home: &Home, command: &CommandRequest) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rationed_order_is_tried_again_only_in_time() {
+        let now = std::time::Instant::now();
+        let deadline = now + Duration::from_secs(5);
+        assert_eq!(busy_wait(0, now, deadline), Some(Duration::from_secs(1)));
+        assert_eq!(busy_wait(1, now, deadline), Some(Duration::from_secs(2)));
+        assert_eq!(busy_wait(2, now, deadline), None, "two new tries, not more");
+        // Too late for another try: the hub would have given up before the answer.
+        let late = now + Duration::from_secs(4);
+        assert_eq!(busy_wait(1, late, deadline), None);
+        assert_eq!(busy_wait(0, deadline, deadline), None);
+    }
 
     #[test]
     fn the_site_gives_the_languages() {
