@@ -35,6 +35,12 @@ const fr = {
   later: "Plus tard",
   continue: "Continuer",
   phone: "Téléphone",
+  fingerprintKeep: "Retenir le code de la maison",
+  fingerprintUnlock: "Code de la maison",
+  fingerprintOfferTitle: "Utiliser l'empreinte ?",
+  fingerprintOfferText: "La prochaine fois, ton empreinte remplacera le code de la maison sur ce téléphone.",
+  fingerprintNo: "Non merci",
+  fingerprintYes: "Oui",
 };
 
 const en: typeof fr = {
@@ -69,6 +75,12 @@ const en: typeof fr = {
   later: "Later",
   continue: "Continue",
   phone: "Phone",
+  fingerprintKeep: "Remember the house code",
+  fingerprintUnlock: "House code",
+  fingerprintOfferTitle: "Use your fingerprint?",
+  fingerprintOfferText: "Next time, your fingerprint will replace the house code on this phone.",
+  fingerprintNo: "No thanks",
+  fingerprintYes: "Yes",
 };
 
 const lang = getLocales()[0]?.languageCode ?? "fr";
