@@ -35,6 +35,8 @@ const fr = {
   later: "Plus tard",
   continue: "Continuer",
   phone: "Téléphone",
+  fingerprintKeep: "Retenir le code de la maison",
+  fingerprintUnlock: "Code de la maison",
 };
 
 const en: typeof fr = {
@@ -69,6 +71,8 @@ const en: typeof fr = {
   later: "Later",
   continue: "Continue",
   phone: "Phone",
+  fingerprintKeep: "Remember the house code",
+  fingerprintUnlock: "House code",
 };
 
 const lang = getLocales()[0]?.languageCode ?? "fr";

@@ -19,6 +19,7 @@ import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground, unpair } from "./src/moli";
 import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from "./src/house";
+import { fingerprintReady, forgetPin, keepPin, pinKept, unlockPin } from "./src/pinlock";
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
 
@@ -101,6 +102,8 @@ export default function App() {
   const leave = useCallback(async () => {
     setLast(base ?? null);
     await unpair();
+    // The code kept behind the fingerprint belongs to this house only.
+    if (base) await forgetPin(base);
     await forgetHouse();
     // Even a build made for one house lets its owner type another.
     setBase(null);
@@ -156,6 +159,33 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   const canGoBack = useRef(false);
   const pairingAsked = useRef(false);
   const alive = useRef(true);
+  // The house code behind the fingerprint (src/pinlock.ts): what the
+  // dashboard is told, before the page loads and whenever it changes.
+  const [lock, setLock] = useState({ fingerprint: false, kept: false });
+  useEffect(() => {
+    let live = true;
+    Promise.all([fingerprintReady(), pinKept(base)]).then(([fingerprint, kept]) => {
+      if (live) setLock({ fingerprint, kept: fingerprint && kept });
+    });
+    return () => {
+      live = false;
+    };
+  }, [base]);
+  useEffect(() => {
+    webRef.current?.injectJavaScript(
+      `if (window.MoliNative) { window.MoliNative.fingerprint = ${lock.fingerprint}; window.MoliNative.pinSaved = ${lock.kept}; } true;`,
+    );
+  }, [lock]);
+  const bridge = useMemo(
+    () =>
+      `window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, ` +
+      `fingerprint: ${lock.fingerprint}, pinSaved: ${lock.kept}, ` +
+      `changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); }, ` +
+      `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock' })); }, ` +
+      `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin) })); }, ` +
+      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); } }; true;`,
+    [lock],
+  );
 
   // A sleeping app may lose its page: iOS kills the web view's process when
   // memory runs short (onContentProcessDidTerminate reloads it), and the view
@@ -268,7 +298,12 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   }, [base]);
 
   const onMessage = useCallback(async (e: WebViewMessageEvent) => {
-    let msg: { type?: string; status?: number; body?: { id?: string; token?: string; home?: unknown; error?: string } };
+    let msg: {
+      type?: string;
+      status?: number;
+      pin?: string;
+      body?: { id?: string; token?: string; home?: unknown; error?: string };
+    };
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -288,6 +323,30 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     // The dashboard may offer to change house (window.MoliNative.changeHouse).
     if (msg.type === "change-house") {
       askLeave();
+      return;
+    }
+    // The code behind the fingerprint: only for the house's own pages, never
+    // for another page the web view may show (the sign-in page, a redirect).
+    if (msg.type?.startsWith("pin-")) {
+      let fromHouse = false;
+      try {
+        fromHouse = new URL(e.nativeEvent.url).host === new URL(base).host;
+      } catch {
+        fromHouse = false;
+      }
+      if (!fromHouse) return;
+      if (msg.type === "pin-unlock") {
+        const answer = await unlockPin(base);
+        if ("error" in answer && answer.error === "unavailable") setLock((l) => ({ ...l, kept: false }));
+        webRef.current?.injectJavaScript(
+          `window.dispatchEvent(new CustomEvent('moli-native-pin', { detail: ${JSON.stringify(answer)} })); true;`,
+        );
+      } else if (msg.type === "pin-remember" && typeof msg.pin === "string") {
+        if (await keepPin(base, msg.pin)) setLock((l) => ({ ...l, kept: true }));
+      } else if (msg.type === "pin-forget") {
+        await forgetPin(base);
+        setLock((l) => ({ ...l, kept: false }));
+      }
       return;
     }
     if (msg.type !== "paired") return;
@@ -337,7 +396,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             source={{ uri: base }}
             style={styles.web}
             applicationNameForUserAgent="MoliNative"
-            injectedJavaScriptBeforeContentLoaded={`window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); } }; true;`}
+            injectedJavaScriptBeforeContentLoaded={bridge}
             injectedJavaScript={THEME_WATCH}
             allowsBackForwardNavigationGestures
             allowsInlineMediaPlayback

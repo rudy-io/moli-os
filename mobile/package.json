@@ -10,6 +10,7 @@
     "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.21",
     "expo-device": "~57.0.2",
+    "expo-local-authentication": "~57.0.3",
     "expo-localization": "~57.0.2",
     "expo-location": "~57.0.20",
     "expo-notifications": "~57.0.22",
