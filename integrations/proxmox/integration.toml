@@ -1,0 +1,67 @@
+[integration]
+id = "proxmox"
+name = "Proxmox VE : nœud, conteneurs, machines virtuelles, stockages, sauvegardes, disques (lecture seule)"
+brands = ["Proxmox"]
+# Read-only calls checked on a real node; virtual machines, a cluster and real failures not: see the README.
+models = ["Proxmox VE 9.2"]
+transport = "https"
+driver = "proxmox"
+crate = "moli-proxmox"
+
+[discovery]
+# No discovery: the instance gives the server's address (Proxmox answers on 8006).
+mdns = []
+ssdp = []
+ports = [8006]
+
+[needs]
+# `cert` (the pinned fingerprint) is written by the driver itself.
+secrets = ["token_secret"]
+vars = []
+options = ["host", "token_id"]
+
+[origin]
+reused = "aucun code repris : chemins et champs de l'API REST de Proxmox VE (/nodes, /nodes/{node}/status, /lxc, /qemu, /storage, /tasks?typefilter=vzdump, /disks/list, /apt/update, /{kind}/{vmid}/config) et l'en-tête PVEAPIToken, d'après la documentation publique de l'API ; réponses réelles d'un Proxmox VE 9.2 capturées en lecture seule puis anonymisées ; les fixtures `*-faulty` (conteneur arrêté, mémoire pleine, stockage plein, sauvegarde en erreur, disque SMART en échec) sont reconstituées à la main, ce nœud étant sain"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-proxmox/src/model.rs, tests.rs).
+# Real answers, anonymised, except the `-faulty` ones (reconstructed).
+[[fixture]]
+file = "fixtures/nodes.json"
+
+[[fixture]]
+file = "fixtures/status.json"
+
+[[fixture]]
+file = "fixtures/lxc.json"
+
+[[fixture]]
+file = "fixtures/lxc-config.json"
+
+[[fixture]]
+file = "fixtures/storage.json"
+
+[[fixture]]
+file = "fixtures/tasks.json"
+
+[[fixture]]
+file = "fixtures/disks.json"
+
+[[fixture]]
+file = "fixtures/apt.json"
+
+[[fixture]]
+file = "fixtures/version.json"
+
+[[fixture]]
+file = "fixtures/lxc-faulty.json"
+
+[[fixture]]
+file = "fixtures/storage-faulty.json"
+
+[[fixture]]
+file = "fixtures/tasks-faulty.json"
+
+[[fixture]]
+file = "fixtures/disks-faulty.json"
+

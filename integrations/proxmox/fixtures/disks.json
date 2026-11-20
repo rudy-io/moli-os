@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "by_id_link": "/dev/disk/by-id/nvme-TS256GMTE110S_SERIAL0001",
+   "devpath": "/dev/nvme0n1",
+   "gpt": 1,
+   "health": "PASSED",
+   "model": "TS256GMTE110S",
+   "osdid": -1,
+   "osdid-list": null,
+   "rpm": 0,
+   "serial": "SERIAL0001",
+   "size": 256060514304,
+   "type": "nvme",
+   "used": "BIOS boot",
+   "vendor": "unknown",
+   "wearout": 100,
+   "wwn": "eui.0000000000000000"
+  }
+ ]
+}

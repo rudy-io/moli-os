@@ -1,0 +1,11 @@
+{
+ "data": {
+  "arch": "amd64",
+  "cores": 2,
+  "memory": 2560,
+  "onboot": 1,
+  "ostype": "debian",
+  "swap": 512,
+  "hostname": "wifi"
+ }
+}

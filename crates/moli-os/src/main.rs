@@ -1434,6 +1434,7 @@ const KINDS: &[&str] = &[
     "jackery",
     "vicare",
     "synology",
+    "proxmox",
     "philips",
     "androidtv",
     "appletv",
@@ -1711,6 +1712,7 @@ fn build_driver(
         )),
         "synology" => configured_driver(config, moli_synology::Synology::new)?,
         "solcast" => configured_driver(config, moli_solcast::Solcast::new)?,
+        "proxmox" => configured_driver(config, moli_proxmox::Proxmox::new)?,
         "vicare" => Arc::new(moli_vicare::Vicare::new(
             config.options.clone().try_into().with_context(context)?,
         )),

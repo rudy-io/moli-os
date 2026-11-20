@@ -2302,6 +2302,7 @@ dependencies = [
  "moli-phones",
  "moli-presence",
  "moli-profile",
+ "moli-proxmox",
  "moli-recycleapp",
  "moli-reolink",
  "moli-rfxcom2mqtt",
@@ -2439,6 +2440,26 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "moli-proxmox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
  "tracing",
 ]
 

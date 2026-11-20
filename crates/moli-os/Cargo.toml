@@ -55,6 +55,7 @@ moli-solarman.workspace = true
 moli-jackery.workspace = true
 moli-vicare.workspace = true
 moli-synology.workspace = true
+moli-proxmox.workspace = true
 moli-igd.workspace = true
 moli-freebox.workspace = true
 moli-ipp.workspace = true
