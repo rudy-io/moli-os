@@ -89,6 +89,14 @@ function applyEvent(e) {
       if (e.point in hub.pending && hub.pending[e.point] === e.value) delete hub.pending[e.point];
       break;
     }
+    case 'seen': {
+      // The same value, read again (#230): only its age moves. Not a change:
+      // nothing flashes, no command is confirmed.
+      const [id, key] = splitPoint(e.point);
+      const sample = hub.devices[id]?.state?.[key];
+      if (sample && e.ts > (sample.ts ?? 0)) sample.ts = e.ts;
+      break;
+    }
     case 'availability':
       if (hub.devices[e.device]) hub.devices[e.device].online = e.online;
       break;

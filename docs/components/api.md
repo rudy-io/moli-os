@@ -778,6 +778,7 @@ rend sa place.
 | `device_upserted` | `device` : l'appareil (`id`, `instance`, `native_name`, `manufacturer?`, `model?`, `description?`, `native_room?`, `members?`, `points`) | appareil publié ou redéfini par son pilote |
 | `device_removed` | `device` : device_id | appareil retiré |
 | `state` | `point`, `value`, `ts`, `pulse?` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence, alors avec `pulse: true`) ; aussi à la restauration du cache |
+| `seen` | `point`, `ts` | la même valeur, relue (#230) : seule l'heure du relevé avance. Au plus une fois toutes les 5 minutes par point ; rien n'est écrit dans l'historique et aucun automatisme ne part. Le tableau de bord met à jour l'âge affiché ; un client qui ne le connaît pas l'ignore |
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |
 | `driver_status` | `instance`, `status` (`DriverStatus`, § 2.2) | état d'un pilote |
 | `driver_registered` | `instance`, `kind`, `integration` | pilote enregistré ; les surfaces connaissent son type avant les premiers relevés |

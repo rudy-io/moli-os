@@ -174,7 +174,9 @@ impl View {
             return Pass::Event;
         };
         let (device, moved) = match event {
-            Event::State { point, .. } => (point.split().map(|(id, _)| id), false),
+            Event::State { point, .. } | Event::Seen { point, .. } => {
+                (point.split().map(|(id, _)| id), false)
+            }
             Event::Availability { device, .. } => (Some(device.clone()), false),
             Event::ApprovalRequested { request } => {
                 (request.point.split().map(|(id, _)| id), false)
