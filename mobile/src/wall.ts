@@ -26,7 +26,8 @@ export const WALL_WATCH = `
       var now = Date.now();
       if (now - last < 5000) return;
       last = now;
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'wall-activity' }));
+      // Through the bridge: it carries the nonce the app checks (App.tsx).
+      window.MoliNative.wallSend('activity');
     }
     document.addEventListener('pointerdown', seen, true);
     document.addEventListener('keydown', seen, true);

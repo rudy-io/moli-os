@@ -36,7 +36,10 @@ code=$(sed -nE "s/.*versionCode='([0-9]+)'.*/\1/p" <<<"$badging")
 name=$(sed -nE "s/.*versionName='([^']*)'.*/\1/p" <<<"$badging")
 [[ -n $code ]] || { echo "no versionCode in the APK" >&2; exit 1; }
 sum=$(sha256sum "$work/app/moli.apk" | cut -d' ' -f1)
-printf '{\n  "version_code": %s,\n  "version_name": "%s",\n  "sha256": "%s"\n}\n' "$code" "$name" "$sum" >"$work/app/android.json"
+# Written as JSON: the version name escaped (a quote or a backslash in it
+# would break the file the house serves).
+name_json=$(printf '%s' "$name" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037')
+printf '{\n  "version_code": %s,\n  "version_name": "%s",\n  "sha256": "%s"\n}\n' "$code" "$name_json" "$sum" >"$work/app/android.json"
 
 # The APK first, the manifest last: a phone never reads a manifest whose
 # file is not there yet.

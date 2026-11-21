@@ -25,6 +25,7 @@ import { Welcome } from "./src/Welcome";
 import { useWall, WALL_WATCH, wallAvailable, type WallState } from "./src/wall";
 import { useUpdates } from "./src/update";
 import { googleSignIn, handoffAvailable, isGoogleSignIn } from "./src/handoff";
+import { MoliApp } from "./modules/moli-app";
 
 // The shell: Moli's own dashboard, at the house's address, chosen on the
 // first screen (src/house.ts) unless this build is made for one house.
@@ -201,18 +202,27 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   const wall = useWall(tellWall);
   // The app's own updates, from the house (src/update.ts).
   const updates = useUpdates(base);
+  // Known only to the bridge injected in the main frame: on Android every
+  // frame of the page reaches ReactNativeWebView.postMessage, a third-party
+  // iframe of the dashboard included, but it cannot read the main frame's
+  // window.MoliNative. The house's own orders (wall-, pin-) carry it. Drawn
+  // from the platform's secure random (the PKCE verifier), else Math.random.
+  const nonce = useMemo(
+    () => MoliApp?.handoffKeys().verifier ?? `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+    [],
+  );
   const bridge = useMemo(
     () =>
       `window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, ` +
       `fingerprint: ${lock.fingerprint}, pinSaved: ${lock.kept}, ` +
       `changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); }, ` +
-      `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock' })); }, ` +
-      `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin) })); }, ` +
-      `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin) })); }, ` +
-      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); }, ` +
+      `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock', k: ${JSON.stringify(nonce)} })); }, ` +
+      `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin), k: ${JSON.stringify(nonce)} })); }, ` +
+      `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin), k: ${JSON.stringify(nonce)} })); }, ` +
+      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget', k: ${JSON.stringify(nonce)} })); }, ` +
       `wall: ${wallAvailable}, ` +
-      `wallSend: function (type, extra) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: 'wall-' + type }, extra || {}))); } }; true;`,
-    [lock],
+      `wallSend: function (type, extra) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, extra || {}, { type: 'wall-' + type, k: ${JSON.stringify(nonce)} }))); } }; true;`,
+    [lock, nonce],
   );
 
   // A sleeping app may lose its page: iOS kills the web view's process when
@@ -378,7 +388,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       } catch {
         fromHouse = false;
       }
-      if (fromHouse) await wall.onMessage(msg as Parameters<typeof wall.onMessage>[0]);
+      if (fromHouse && (msg as { k?: unknown }).k === nonce) await wall.onMessage(msg as Parameters<typeof wall.onMessage>[0]);
       return;
     }
     if (msg.type === "theme" && typeof (msg as { bg?: unknown }).bg === "string") {
@@ -402,7 +412,9 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       } catch {
         fromHouse = false;
       }
-      if (!fromHouse) return;
+      // The page's address is the main frame's: the nonce tells the bridge
+      // from an iframe of the page.
+      if (!fromHouse || (msg as { k?: unknown }).k !== nonce) return;
       if (msg.type === "pin-unlock") {
         const answer = await unlockPin(base);
         if ("error" in answer && answer.error === "unavailable") setLock((l) => ({ ...l, kept: false }));
@@ -440,7 +452,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       // Not signed in yet, or refused: try again on the next page.
       pairingAsked.current = false;
     }
-  }, [base, askLeave, wall.onMessage]);
+  }, [base, askLeave, wall.onMessage, nonce]);
 
   const startLocation = useCallback(async () => {
     setAskLocation(false);

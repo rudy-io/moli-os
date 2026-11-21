@@ -19,7 +19,23 @@
     return off;
   });
 
-  async function configure(change) {
+  /** A change of settings. Turning the wall tablet off lifts the kiosk and
+   *  the home screen it imposes, for good: behind the house's code, like
+   *  `release()`. */
+  function configure(change) {
+    if (change.enabled === false && state?.enabled) {
+      home.held = {
+        label: t('systeme.tablette.desactiver'),
+        reason: 'code',
+        custom: () => apply(change),
+        onCancel: () => {},
+      };
+      return;
+    }
+    apply(change);
+  }
+
+  async function apply(change) {
     if (!state || busy) return;
     busy = true;
     const next = await wallAsk('configure', {

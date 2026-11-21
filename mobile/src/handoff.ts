@@ -4,7 +4,7 @@
 // (Android's Custom Tab), and its session is brought back:
 // 1. the tab opens the house's `/api/mobile/handoff`, behind Access: the
 //    person signs in with Google there, as in any browser;
-// 2. Moli keeps the Access token a minute under a one-time code and sends
+// 2. Moli keeps the Access token two minutes under a one-time code and sends
 //    the tab back to the app (`moli://handoff?code=…`);
 // 3. the app trades the code, with the secret its challenge was made of,
 //    for the token (`POST /api/phones/handoff`), sets it as the web view's

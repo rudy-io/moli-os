@@ -11,8 +11,9 @@
 //!   web view, so the app opens Cloudflare Access's sign-in in a browser tab
 //!   of its own; the session then lives in that browser, not in the app.
 //!   The tab ends on `GET /api/mobile/handoff?challenge=…` (behind Access:
-//!   the person is known), which keeps the Access token a minute under a
-//!   one-time code and sends the tab back to the app (`moli://handoff?code=…`).
+//!   the person is known), which keeps the Access token two minutes under a
+//!   one-time code and sends the tab back to the app (`moli://handoff?code=…`,
+//!   the only way back accepted).
 //!   The app trades the code, with the secret its challenge was made of,
 //!   for that token (`POST /api/phones/handoff`) and sets it in its web view.
 //!   The token never travels in a link: an app catching the return finds a
@@ -221,21 +222,14 @@ pub(crate) struct Start {
     back: Option<String>,
 }
 
-/// `moli://handoff`, or another app's own scheme: never a web address.
+/// The only ways back to the app, a closed list: the app's own scheme
+/// (`scheme` of `mobile/app.json`, the same whatever the publisher's
+/// `bundleId`). Any other scheme could be an app on the same phone opening
+/// this page itself, with its own challenge, to catch the code.
+const BACKS: [&str; 1] = ["moli://handoff"];
+
 fn back_ok(back: &str) -> bool {
-    let Some(scheme) = back.strip_suffix("://handoff") else {
-        return false;
-    };
-    let mut bytes = scheme.bytes();
-    bytes.next().is_some_and(|b| b.is_ascii_lowercase())
-        && scheme.len() <= 40
-        && scheme
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"+.-".contains(&b))
-        && !matches!(
-            scheme,
-            "http" | "https" | "javascript" | "data" | "file" | "intent"
-        )
+    BACKS.contains(&back)
 }
 
 /// The end of the sign-in in the app's browser tab: back to the app with a
@@ -395,8 +389,10 @@ mod tests {
     #[test]
     fn only_an_apps_scheme_is_a_way_back() {
         assert!(back_ok("moli://handoff"));
-        assert!(back_ok("fr.memslab.moli://handoff"));
         for bad in [
+            // Another app's scheme, even a well-formed one: it could catch the code.
+            "fr.memslab.moli://handoff",
+            "evil://handoff",
             "https://handoff",
             "javascript://handoff",
             "moli://elsewhere",
