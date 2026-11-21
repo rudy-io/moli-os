@@ -150,6 +150,42 @@ async fn command_round_trip_updates_state_and_journal() {
     assert!(matches!(journal[0].action, Action::Command { .. }));
 }
 
+/// The same value read again within five minutes tells nothing (#230):
+/// neither a change nor a `Seen`. Its reading's time still moves, for the API.
+#[tokio::test]
+async fn the_same_value_read_again_soon_tells_nothing() {
+    let (hub, _cancel) = start(false).await;
+    let state = point("state");
+    let order = |on| hub.command(&state, Value::Bool(on), Origin::Api, Some("test".into()));
+    order(true).await.unwrap();
+    let first = hub.state(&point("state")).unwrap().ts;
+    let mut events = hub.subscribe();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    order(true).await.unwrap();
+    assert!(
+        hub.state(&point("state")).unwrap().ts > first,
+        "the reading's time moved"
+    );
+    let mut states = 0;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            Event::State { ref point, .. } if point.as_str() == "fake:plug1/state" => states += 1,
+            Event::Seen { .. } => panic!("no `Seen` within five minutes"),
+            _ => {}
+        }
+    }
+    assert_eq!(states, 0, "the same value is no change");
+    // A new value: a change, as before.
+    let mut events = hub.subscribe();
+    order(false).await.unwrap();
+    let mut changed = false;
+    while let Ok(event) = events.try_recv() {
+        changed |= matches!(event, Event::State { ref point, ref value, .. }
+            if point.as_str() == "fake:plug1/state" && *value == Value::Bool(false));
+    }
+    assert!(changed);
+}
+
 /// The same plug, kept by Moli itself (like the alarm's state).
 struct InsidePlug(Arc<FakePlug>);
 

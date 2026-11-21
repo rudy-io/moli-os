@@ -88,8 +88,8 @@ pub enum SubscriptionEvent {
 
 /// Capacity of the bounded report channel feeding a [`Subscription`].
 ///
-/// Steady-state attribute reports are buffered here. The cap bounds controller
-/// memory: a malicious or compromised device controls how many attribute items
+/// Priming and steady-state attribute reports are buffered here. The cap bounds
+/// controller memory: a malicious or compromised device controls how many attribute items
 /// each `ReportData` carries and how often it sends them (`min_interval` is only
 /// a value we *request* — the device need not honour it), so an unbounded buffer
 /// would let such a device drive controller memory growth without limit
@@ -97,13 +97,13 @@ pub enum SubscriptionEvent {
 /// [`SubscriptionEvent::Lagged`] event signals how many were lost; control
 /// events ([`SubscriptionEvent::Established`] / [`SubscriptionEvent::Resubscribing`])
 /// are never dropped — they travel on a separate, low-volume channel.
-pub(crate) const SUBSCRIPTION_CHANNEL_CAP: usize = 256;
+pub(crate) const SUBSCRIPTION_CHANNEL_CAP: usize = 512;
 
 /// A live attribute subscription. Await events with [`Self::next`]; dropping
 /// the handle cancels the subscription (best-effort).
 ///
-/// Steady-state [`SubscriptionEvent::Report`]s are buffered in a **bounded**
-/// channel (capacity `SUBSCRIPTION_CHANNEL_CAP`, 256) so a device — whose reporting
+/// Attribute [`SubscriptionEvent::Report`]s are buffered in a **bounded**
+/// channel (capacity `SUBSCRIPTION_CHANNEL_CAP`, 512) so a device — whose reporting
 /// cadence and per-report size are attacker-controlled — cannot drive unbounded
 /// controller memory growth. If the consumer does not call [`Self::next`]
 /// promptly and the buffer fills, excess reports are dropped and a

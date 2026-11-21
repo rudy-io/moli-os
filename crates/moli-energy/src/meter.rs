@@ -60,6 +60,19 @@ impl Tracker {
         }
     }
 
+    /// A meter's memory as it was before a restart, suspect reading
+    /// included: a jump seen before the restart is not forgotten by it.
+    #[must_use]
+    pub fn resumed(last: Reading, suspect: Option<(Reading, u32)>) -> Self {
+        Self { last, suspect }
+    }
+
+    /// The suspect reading held for now, and how many readings back it.
+    #[must_use]
+    pub fn suspect(&self) -> Option<(Reading, u32)> {
+        self.suspect
+    }
+
     /// Takes `next` into account; `self.last` follows unless held.
     pub fn observe(&mut self, next: Reading, reset: Reset, max_kw: f64) -> Outcome {
         let last = self.last;
@@ -67,7 +80,17 @@ impl Tracker {
             return Outcome::Hold;
         }
         let delta = next.kwh - last.kwh;
-        if delta >= 0.0 && plausible(delta, last.ts, next.ts, max_kw) {
+        let normal = delta >= 0.0 && plausible(delta, last.ts, next.ts, max_kw);
+        // A reading that follows the pending suspect too is put down to the
+        // one that needs less energy to explain it. Time alone makes any jump
+        // « plausible » from the last accepted reading: a quiet counter after
+        // a jump must not have that jump counted days later.
+        let follows_suspect = self.suspect.is_some_and(|(suspect, _)| {
+            next.kwh >= suspect.kwh
+                && plausible(next.kwh - suspect.kwh, suspect.ts, next.ts, max_kw)
+                && (!normal || next.kwh - suspect.kwh < delta)
+        });
+        if normal && !follows_suspect {
             // Normal (a pending suspect was a glitch).
             self.suspect = None;
             if delta == 0.0 {
@@ -81,17 +104,12 @@ impl Tracker {
                 kwh: delta,
             };
         }
-        // Abnormal: a fall, or more than the home could draw.
-        let Some((suspect, seen)) = self.suspect else {
+        // Abnormal (a fall, or more than the home could draw), or one more
+        // reading after the suspect.
+        let Some((suspect, seen)) = self.suspect.filter(|_| follows_suspect) else {
             self.suspect = Some((next, 1));
             return Outcome::Hold;
         };
-        let consistent = next.kwh >= suspect.kwh
-            && plausible(next.kwh - suspect.kwh, suspect.ts, next.ts, max_kw);
-        if !consistent {
-            self.suspect = Some((next, 1));
-            return Outcome::Hold;
-        }
         // Confirmed restart from zero (daily, monthly counter; reboot).
         if reset == Reset::Auto
             && suspect.kwh < last.kwh / 2.0
@@ -295,6 +313,46 @@ mod tests {
         assert_eq!(out[2], Outcome::Rebase);
         let kwh = counted(&out);
         assert!(kwh.abs() < 1e-9, "kwh={kwh}");
+    }
+
+    #[test]
+    fn a_jump_is_not_counted_once_time_makes_it_plausible() {
+        // A session counter replaced by a lifetime one (2 545 kWh), then a
+        // quiet counter: three days later, 2 545 kWh « fit » in the time
+        // since the last accepted reading, but they follow the jump.
+        let (out, last) = feed(
+            r(0.01, 0),
+            Reset::Never,
+            &[(2_545.57, 2 * H), (2_558.13, 82 * H), (2_558.2, 83 * H)],
+        );
+        assert_eq!(out, vec![Outcome::Hold, Outcome::Hold, Outcome::Rebase]);
+        assert_eq!(last, r(2_558.2, 83 * H));
+        // A low glitch, then the counter back after a long while: the
+        // normal reading is the one that explains it with less energy.
+        let (out, _) = feed(r(300.0, 0), Reset::Never, &[(5.0, H), (300.5, 100 * H)]);
+        assert_eq!(out[1], Outcome::Consumed { from: 0, kwh: 0.5 });
+    }
+
+    #[test]
+    fn a_suspect_survives_a_restart() {
+        let mut before = Tracker::new(r(0.01, 0));
+        assert_eq!(
+            before.observe(r(2_545.57, 2 * H), Reset::Never, KW),
+            Outcome::Hold
+        );
+        assert_eq!(
+            before.observe(r(2_545.58, 3 * H), Reset::Never, KW),
+            Outcome::Hold
+        );
+        // Restarted with what was kept: the third reading rebases.
+        let mut after = Tracker::resumed(before.last, before.suspect());
+        assert_eq!(after.suspect(), Some((r(2_545.58, 3 * H), 2)));
+        assert_eq!(
+            after.observe(r(2_545.58, 80 * H), Reset::Never, KW),
+            Outcome::Rebase
+        );
+        assert_eq!(after.last, r(2_545.58, 80 * H));
+        assert_eq!(after.suspect(), None);
     }
 
     #[test]

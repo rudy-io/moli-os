@@ -77,3 +77,20 @@ test('restoration uses the persisted label even without a previous browser devic
   event({type:'device_restored',device,states:{temperature:sample},label:{}});
   assert.deepEqual(hub.devices[device.id].label,{},'an explicit empty label also remains authoritative');
 });
+
+test('a value read again only moves its age: no flash, no confirmation (#230)',()=>{
+  const point=device.id+'/temperature';
+  hub.devices[device.id]={...device,label:{},online:true,state:{temperature:{value:21,ts:1700000000000}}};
+  hub.pending[point]=21;
+  event({type:'seen',point,ts:1700000300000});
+  assert.deepEqual(hub.devices[device.id].state.temperature,{value:21,ts:1700000300000});
+  assert.equal(hub.changed[point],undefined,'not a change');
+  assert.equal(hub.pending[point],21,'not a confirmation');
+  // An older one (late, or out of order) does not take the age back.
+  event({type:'seen',point,ts:1700000100000});
+  assert.equal(hub.devices[device.id].state.temperature.ts,1700000300000);
+  // A point or device not known: ignored.
+  event({type:'seen',point:device.id+'/unknown',ts:1700000400000});
+  event({type:'seen',point:'other:device/x',ts:1700000400000});
+  assert.equal(hub.devices['other:device'],undefined);
+});
