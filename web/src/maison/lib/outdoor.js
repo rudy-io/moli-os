@@ -24,7 +24,7 @@ export const measuresPool = (d) => (d?.points ?? []).some((p) => p.key === 'ph' 
  *  the page does not draw yet. */
 export function outdoorView({ rooms, layoutRooms, pool = null, pump = null, garden = [], cams = [], on = () => false, shown = [] }) {
   const outside = (rooms ?? []).filter((r) => isOutside(layoutRooms, r.name));
-  const all = (r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.impulses, ...r.climates, ...r.media, ...r.sensors].filter(Boolean);
+  const all = (r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.impulses, ...r.climates, ...r.media, ...(r.helpers ?? []), ...r.sensors].filter(Boolean);
   const found = pool ?? outside.flatMap(all).find(measuresPool)?.id ?? null;
 
   const drawn = new Set(cams.map((c) => c.id));
@@ -55,6 +55,7 @@ export function outdoorView({ rooms, layoutRooms, pool = null, pump = null, gard
         impulses: keep(r.impulses),
         climates: keep(r.climates),
         media: keep(r.media),
+        helpers: keep(r.helpers ?? []),
         sensors: keep(r.sensors),
         lit: lights.filter((d) => on(d.id)).length,
       };

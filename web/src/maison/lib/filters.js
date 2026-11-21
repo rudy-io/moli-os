@@ -13,6 +13,7 @@ export const CATEGORIES = [
   { id: 'alarme', label: 'commun.filtre.alarme', icon: 'shield', kinds: ['alarm'] },
   { id: 'cameras', label: 'commun.filtre.cameras', icon: 'cctv', kinds: ['camera'] },
   { id: 'medias', label: 'commun.filtre.medias', icon: 'tv', kinds: ['tv', 'speaker'] },
+  { id: 'aides', label: 'commun.filtre.aides', icon: 'toggle', kinds: ['helper'] },
 ];
 
 export function categoryOf(d) {
