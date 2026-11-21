@@ -72,6 +72,14 @@ const SCHEMA: &str = "
         meter TEXT PRIMARY KEY,
         point TEXT NOT NULL
     ) STRICT;
+    -- A reading held as suspect (a jump, a fall) and how many readings
+    -- back it: a restart does not forget it (see `Tracker::resumed`).
+    CREATE TABLE IF NOT EXISTS meter_suspect (
+        meter TEXT PRIMARY KEY,
+        kwh   REAL NOT NULL,
+        ts    INTEGER NOT NULL,
+        seen  INTEGER NOT NULL
+    ) STRICT;
     -- Databases from before meter_first: the older of the last reading
     -- and the first recorded hour.
     INSERT OR IGNORE INTO meter_first (meter, ts)
@@ -131,6 +139,40 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Each meter's suspect reading, as it was left before a restart.
+    pub fn suspects(&self) -> Result<HashMap<String, (Reading, u32)>, EnergyError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT meter, kwh, ts, seen FROM meter_suspect")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (
+                    Reading {
+                        kwh: row.get(1)?,
+                        ts: unms(row.get(2)?),
+                    },
+                    u32::try_from(row.get::<_, i64>(3)?).unwrap_or(1),
+                ),
+            ))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Keeps (or forgets, with `None`) a meter's suspect reading.
+    pub fn hold(&self, meter: &str, suspect: Option<(Reading, u32)>) -> Result<(), EnergyError> {
+        let conn = self.conn();
+        match suspect {
+            Some((reading, seen)) => conn.execute(
+                "INSERT INTO meter_suspect (meter, kwh, ts, seen) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (meter) DO UPDATE SET
+                    kwh = excluded.kwh, ts = excluded.ts, seen = excluded.seen",
+                params![meter, reading.kwh, ms(reading.ts), i64::from(seen)],
+            )?,
+            None => conn.execute("DELETE FROM meter_suspect WHERE meter = ?1", params![meter])?,
+        };
+        Ok(())
+    }
+
     /// Notes the point each meter reads. A meter whose point changed since
     /// the last run forgets its last reading: the new device's lifetime
     /// total is not the old one's, and the difference was never used by the
@@ -149,6 +191,7 @@ impl Store {
                 .optional()?;
             if before.as_ref().is_some_and(|b| b != point) {
                 tx.execute("DELETE FROM meter_last WHERE meter = ?1", params![meter])?;
+                tx.execute("DELETE FROM meter_suspect WHERE meter = ?1", params![meter])?;
                 changed.push(meter.clone());
             }
             tx.execute(
@@ -161,7 +204,8 @@ impl Store {
         Ok(changed)
     }
 
-    /// Adds `slices` and sets the meter's last reading, atomically.
+    /// Adds `slices` and sets the meter's last reading, atomically (a
+    /// suspect reading is settled by it).
     pub fn record(
         &self,
         meter: &str,
@@ -191,6 +235,7 @@ impl Store {
              ON CONFLICT (meter) DO UPDATE SET kwh = excluded.kwh, ts = excluded.ts",
             params![meter, last.kwh, ms(last.ts)],
         )?;
+        tx.execute("DELETE FROM meter_suspect WHERE meter = ?1", params![meter])?;
         tx.commit()?;
         Ok(())
     }
@@ -329,6 +374,41 @@ mod tests {
         );
         assert_eq!(store.first_hour().unwrap(), Some(0));
         assert_eq!(Store::memory().first_hour().unwrap(), None);
+    }
+
+    #[test]
+    fn a_suspect_reading_is_kept_until_a_reading_settles_it() {
+        let store = Store::memory();
+        let suspect = (
+            Reading {
+                kwh: 2_545.57,
+                ts: 7,
+            },
+            2,
+        );
+        store.hold("borne", Some(suspect)).unwrap();
+        assert_eq!(store.suspects().unwrap()["borne"], suspect);
+        store.hold("borne", None).unwrap();
+        assert!(store.suspects().unwrap().is_empty());
+        // A filed reading (counted or rebased) settles it.
+        store.hold("borne", Some(suspect)).unwrap();
+        store
+            .record(
+                "borne",
+                Reading {
+                    kwh: 2_545.6,
+                    ts: 9,
+                },
+                &[],
+            )
+            .unwrap();
+        assert!(store.suspects().unwrap().is_empty());
+        // So does another point behind the meter.
+        store.hold("borne", Some(suspect)).unwrap();
+        let sources = |point: &str| vec![("borne".to_owned(), point.to_owned())];
+        store.follow_sources(&sources("a:b/energy")).unwrap();
+        store.follow_sources(&sources("c:b/energy")).unwrap();
+        assert!(store.suspects().unwrap().is_empty());
     }
 
     #[test]
