@@ -65,36 +65,53 @@
   const boughtToday = $derived(kwhOf('grid', today) ?? kwhOf('total', today));
   const sentToday = $derived(kwhOf('export', today));
   const madeToday = $derived(kwhOf('solar', today));
+  const usedToday = $derived(today?.consumption ?? null);
   const gasToday = $derived(today?.gas?.kwh ?? null);
+  const showSent = $derived(hasExport || !!sentToday);
 
   // A dot's trip: faster with more power, none below a trickle.
   const duration = (w) => `${Math.min(6, Math.max(0.7, 2500 / Math.max(w, 1))).toFixed(2)}s`;
   const flowing = (w) => w != null && w >= 5;
   // A line that carries power stands out, thicker with more; the others stay faint.
-  const weight = (w) => (flowing(w) ? Math.min(6, 2.5 + w / 900) : 1.5);
+  const weight = (w) => (flowing(w) ? Math.min(7, 3 + w / 900) : 1.75);
   // The grid says one thing: what is bought, or what goes out.
   const gridSends = $derived(sent >= 5 && (bought ?? 0) < 5);
-  // The battery's charge as a ring just outside its disc (r = 34.5).
-  const RING = 2 * Math.PI * 34.5;
 
   // A diamond: the sun on top, the battery below, the grid and the house on
-  // each side; the curves are quarter arcs, the same on every side.
+  // each side, every name above its disc (the battery's below). Each disc
+  // holds what flows now and what went through it today.
+  const R = 56;
+  const W = 410;
+  const CX = W / 2;
+  const SUN_Y = 84;
+  const MID_Y = SUN_Y + 156;
+  const BAT_Y = MID_Y + 156;
+  const GRID_X = 60;
+  const HOUSE_X = W - GRID_X;
+  const GAP = 10; // the lines meet the side discs a little above and below their middle
+  // The battery's charge as a ring just outside its disc.
+  const RING_R = R - 1.5;
+  const RING = 2 * Math.PI * RING_R;
+  // Quarter arcs, the same on every side: leaving up or down (`vh`), or sideways (`hv`).
+  const vh = (sx, sy, ex, ey) => `M ${sx} ${sy} C ${sx} ${sy + 0.55 * (ey - sy)} ${sx + 0.45 * (ex - sx)} ${ey} ${ex} ${ey}`;
+  const hv = (sx, sy, ex, ey) => `M ${sx} ${sy} C ${sx + 0.55 * (ex - sx)} ${sy} ${ex} ${sy + 0.45 * (ey - sy)} ${ex} ${ey}`;
   const PATHS = {
-    solarHouse: 'M 240 92 C 240 131 278 162 324 162',
-    solarGrid: 'M 240 92 C 240 131 202 162 156 162',
-    gridHouse: 'M 156 170 L 324 170',
-    gasHouse: 'M 360 92 L 360 134',
-    solarBattery: 'M 240 92 L 240 248',
-    gridBattery: 'M 156 178 C 202 178 240 209 240 248',
-    batteryGrid: 'M 240 248 C 240 209 202 178 156 178',
-    batteryHouse: 'M 240 248 C 240 209 278 178 324 178',
+    solarHouse: vh(CX, SUN_Y + R, HOUSE_X - R, MID_Y - GAP),
+    solarGrid: vh(CX, SUN_Y + R, GRID_X + R, MID_Y - GAP),
+    gridHouse: `M ${GRID_X + R} ${MID_Y} L ${HOUSE_X - R} ${MID_Y}`,
+    gasHouse: `M ${HOUSE_X} ${SUN_Y + R} L ${HOUSE_X} ${MID_Y - R}`,
+    solarBattery: `M ${CX} ${SUN_Y + R} L ${CX} ${BAT_Y - R}`,
+    gridBattery: hv(GRID_X + R, MID_Y + GAP, CX, BAT_Y - R),
+    batteryGrid: vh(CX, BAT_Y - R, GRID_X + R, MID_Y + GAP),
+    batteryHouse: vh(CX, BAT_Y - R, HOUSE_X - R, MID_Y + GAP),
   };
+  const height = $derived(hasBattery ? BAT_Y + R + 30 : MID_Y + R + 12);
 </script>
 
 {#if s && bought != null && shown}
   <section class="card flow" class:home aria-label={t('energie.flux.titre')}>
     <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.flux.titre')}</h2></div>
-    <svg viewBox="0 0 480 {hasBattery ? 344 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
+    <svg viewBox="0 0 {W} {height}" role="img" aria-label="{t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}. {t('energie.flux.aujourdhui', { achete: kwh(boughtToday), injecte: kwh(sentToday) })}">
       {#if hasSolar}
         <path class="line solar" class:on={flowing(toHouse)} stroke-width={weight(toHouse)} d={PATHS.solarHouse} />
         <path class="line export" class:on={flowing(toGrid)} stroke-width={weight(toGrid)} d={PATHS.solarGrid} />
@@ -108,75 +125,78 @@
       {/if}
 
       {#if hasSolar && flowing(toHouse)}
-        {#key duration(toHouse)}<circle class="dot solar" r="4"><animateMotion dur={duration(toHouse)} repeatCount="indefinite" path={PATHS.solarHouse} /></circle>{/key}
+        {#key duration(toHouse)}<circle class="dot solar" r="5"><animateMotion dur={duration(toHouse)} repeatCount="indefinite" path={PATHS.solarHouse} /></circle>{/key}
       {/if}
       {#if hasSolar && flowing(toGrid)}
-        {#key duration(toGrid)}<circle class="dot export" r="4"><animateMotion dur={duration(toGrid)} repeatCount="indefinite" path={PATHS.solarGrid} /></circle>{/key}
+        {#key duration(toGrid)}<circle class="dot export" r="5"><animateMotion dur={duration(toGrid)} repeatCount="indefinite" path={PATHS.solarGrid} /></circle>{/key}
       {/if}
       {#if hasBattery}
         {#each [['solar', split.solarToBattery, PATHS.solarBattery], ['grid', split.gridToBattery, PATHS.gridBattery], ['battery', split.batteryToHouse, PATHS.batteryHouse], ['battery', split.batteryToGrid, PATHS.batteryGrid]] as [kind, w, path] (path)}
           {#if flowing(w)}
-            {#key duration(w)}<circle class="dot {kind}" r="4"><animateMotion dur={duration(w)} repeatCount="indefinite" {path} /></circle>{/key}
+            {#key duration(w)}<circle class="dot {kind}" r="5"><animateMotion dur={duration(w)} repeatCount="indefinite" {path} /></circle>{/key}
           {/if}
         {/each}
       {/if}
       {#if flowing(split.gridToHouse)}
-        {#key duration(split.gridToHouse)}<circle class="dot grid" r="4"><animateMotion dur={duration(split.gridToHouse)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
+        {#key duration(split.gridToHouse)}<circle class="dot grid" r="5"><animateMotion dur={duration(split.gridToHouse)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
       {/if}
 
-      <!-- Every node alike: an icon, the value, a word under it; its name outside. -->
+      <!-- Every disc alike: an icon, the power now, today's energy under it; its name above. -->
       {#if hasSolar}
-        <g class="node solar" transform="translate(240 56)">
-          <circle class="bg" r="34.75" />
-          <path class="ico" d={icon('sun')} transform="translate(-8 -27) scale(0.68)" />
-          <text class="big" y="8">{watts(made ?? 0)}</text>
-          <text class="small" y="22">{kwh(madeToday)} kWh</text>
-          <text class="label" y="-46">{t('energie.flux.solaire')}</text>
+        <g class="node solar" transform="translate({CX} {SUN_Y})">
+          <circle class="bg" r={R - 1.25} />
+          <path class="ico" d={icon('sun')} transform="translate(-10 -44) scale(0.85)" />
+          <text class="big" y="-1">{watts(made ?? 0)}</text>
+          <text class="day" y="17">{kwh(madeToday)} kWh</text>
+          <text class="word" y="31">{t('energie.flux.produits')}</text>
+          <text class="label" y={-R - 10}>{t('energie.flux.solaire')}</text>
         </g>
       {/if}
       {#if hasGas}
-        <g class="node gas" transform="translate(360 56)">
-          <circle class="bg" r="34.75" />
-          <path class="ico" d={icon('fire')} transform="translate(-8 -27) scale(0.68)" />
-          <text class="big" y="8">{kwh(gasToday)}</text>
-          <text class="small" y="22">kWh</text>
-          <text class="label" y="-46">{t('energie.flux.gaz')}</text>
+        <g class="node gas" transform="translate({HOUSE_X} {SUN_Y})">
+          <circle class="bg" r={R - 1.25} />
+          <path class="ico" d={icon('fire')} transform="translate(-10 -44) scale(0.85)" />
+          <text class="big" y="-1">{kwh(gasToday)}</text>
+          <text class="word" y="17">kWh</text>
+          <text class="label" y={-R - 10}>{t('energie.flux.gaz')}</text>
         </g>
       {/if}
-      <g class="node grid" class:sends={gridSends} transform="translate(120 170)">
-        <circle class="bg" r="34.75" />
-        <path class="ico" d={icon('transmission-tower')} transform="translate(-8 -27) scale(0.68)" />
-        <text class="big" y="8">{watts(gridSends ? sent : bought)}</text>
-        <text class="small way" y="22">{gridSends ? t('energie.flux.injection') : t('energie.flux.achat')}</text>
-        <text class="label side left" x="-46" y="0">{t('energie.flux.reseau')}</text>
+      <g class="node grid" class:sends={gridSends} transform="translate({GRID_X} {MID_Y})">
+        <circle class="bg" r={R - 1.25} />
+        <path class="ico" d={icon('transmission-tower')} transform="translate(-10 -44) scale(0.85)" />
+        <text class="big" y="-1">{watts(gridSends ? sent : bought)}</text>
+        {#if showSent}
+          <text class="day bought" y="15">{kwh(boughtToday)} kWh <tspan class="word">{t('energie.flux.achetes')}</tspan></text>
+          <text class="day sent" y="29">{kwh(sentToday)} kWh <tspan class="word">{t('energie.flux.injectes')}</tspan></text>
+        {:else}
+          <text class="day bought" y="17">{kwh(boughtToday)} kWh</text>
+          <text class="word" y="31">{t('energie.flux.achetes')}</text>
+        {/if}
+        <text class="label" y={-R - 10}>{t('energie.flux.reseau')} · <tspan class="way">{gridSends ? t('energie.flux.injection') : t('energie.flux.achat')}</tspan></text>
       </g>
-      <g class="node house" transform="translate(360 170)">
-        <circle class="bg" r="34.75" />
-        <path class="ico" d={icon('home')} transform="translate(-8 -27) scale(0.68)" />
-        <text class="big" y="8">{watts(house)}</text>
-        <text class="small" y="22">{t('energie.flux.conso')}</text>
-        <text class="label side right" x="46" y="0">{t('energie.flux.maison')}</text>
+      <g class="node house" transform="translate({HOUSE_X} {MID_Y})">
+        <circle class="bg" r={R - 1.25} />
+        <path class="ico" d={icon('home')} transform="translate(-10 -44) scale(0.85)" />
+        <text class="big" y="-1">{watts(house)}</text>
+        <text class="day" y="17">{kwh(usedToday)} kWh</text>
+        <text class="word" y="31">{t('energie.flux.consommes')}</text>
+        <text class="label" y={-R - 10}>{t('energie.flux.maison')}</text>
       </g>
       {#if hasBattery}
-        <g class="node battery" transform="translate(240 284)">
-          <circle class="bg" r="33" />
-          <circle class="track" r="34.5" />
+        <g class="node battery" transform="translate({CX} {BAT_Y})">
+          <circle class="bg" r={R - 3} />
+          <circle class="track" r={RING_R} />
           {#if battery.soc != null}
-            <circle class="ring" r="34.5" stroke-dasharray="{(RING * Math.max(0, Math.min(100, battery.soc))) / 100} {RING}" transform="rotate(-90)" />
+            <circle class="ring" r={RING_R} stroke-dasharray="{(RING * Math.max(0, Math.min(100, battery.soc))) / 100} {RING}" transform="rotate(-90)" />
           {/if}
-          <path class="ico" d={icon('battery')} transform="translate(-8 -27) scale(0.68)" />
-          <text class="big" y="8">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
-          <text class="small" y="22">{batteryW > 0 ? '↓ ' : batteryW < 0 ? '↑ ' : ''}{watts(Math.abs(batteryW))}</text>
-          <text class="label" y="56">{t('energie.flux.batterie')}</text>
+          <path class="ico" d={icon('battery')} transform="translate(-10 -44) scale(0.85)" />
+          <text class="big" y="-1">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
+          <text class="day" y="17">{batteryW > 0 ? '↓ ' : batteryW < 0 ? '↑ ' : ''}{watts(Math.abs(batteryW))}</text>
+          <text class="word" y="31">{batteryW > 0 ? t('energie.flux.charge') : batteryW < 0 ? t('energie.flux.decharge') : t('energie.flux.repos')}</text>
+          <text class="label" y={R + 22}>{t('energie.flux.batterie')}</text>
         </g>
       {/if}
     </svg>
-    <div class="today" aria-label={t('energie.flux.aujourdhui', { achete: kwh(boughtToday), injecte: kwh(sentToday) })}>
-      <span class="muted">{t('energie.flux.aujourdhui_court')}</span>
-      {#if hasSolar}<span class="pill solar"><b>{kwh(madeToday)} kWh</b> {t('energie.flux.produits')}</span>{/if}
-      <span class="pill grid"><b>{kwh(boughtToday)} kWh</b> {t('energie.flux.achetes')}</span>
-      {#if hasExport || sentToday}<span class="pill export"><b>{kwh(sentToday)} kWh</b> {t('energie.flux.injectes')}</span>{/if}
-    </div>
   </section>
 {/if}
 
@@ -189,7 +209,7 @@
   .flow svg {
     width: 100%;
     height: auto;
-    max-width: 480px;
+    max-width: 520px;
     display: block;
     margin: 0 auto;
     font-variant-numeric: tabular-nums;
@@ -324,68 +344,43 @@
   }
 
   text.big {
-    font-size: 15px;
+    font-size: 20px;
     font-weight: 700;
   }
 
-  text.small {
-    fill: var(--ink-2);
+  /* Today's energy: bold, in the colour of its disc. */
+  text.day {
+    font-size: 12px;
+    font-weight: 700;
+    fill: var(--ink);
+  }
+
+  .node.solar text.day {
+    fill: var(--warm-ink);
+  }
+
+  .node.grid text.day.bought {
+    fill: var(--cool);
+  }
+
+  .node.grid text.day.sent {
+    fill: var(--good);
+  }
+
+  .node.battery text.day {
+    fill: var(--good);
+  }
+
+  text.word,
+  tspan.word {
+    fill: var(--ink-3);
     font-size: 11px;
     font-weight: 600;
   }
 
   text.label {
     fill: var(--ink-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  text.label.side {
-    dominant-baseline: central;
-  }
-
-  text.label.left {
-    text-anchor: end;
-  }
-
-  text.label.right {
-    text-anchor: start;
-  }
-
-  .today {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    gap: 6px 8px;
-    margin-top: 4px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
     font-size: 13px;
-  }
-
-  .pill {
-    padding: 6px 12px;
-    border-radius: 999px;
     font-weight: 600;
-  }
-
-  .pill b {
-    font-weight: 800;
-  }
-
-  .pill.solar {
-    background: var(--warm-soft);
-    color: var(--warm-ink);
-  }
-
-  .pill.grid {
-    background: var(--cool-soft);
-    color: var(--cool);
-  }
-
-  .pill.export {
-    background: var(--good-soft);
-    color: var(--good);
   }
 </style>

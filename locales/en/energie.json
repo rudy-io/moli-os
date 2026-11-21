@@ -377,6 +377,10 @@
   "energie.flux.achetes": "bought",
   "energie.flux.injectes": "sent out",
   "energie.flux.conso": "using",
+  "energie.flux.consommes": "used",
+  "energie.flux.charge": "charging",
+  "energie.flux.decharge": "giving back",
+  "energie.flux.repos": "idle",
   "energie.flux.aujourdhui": "Today: {achete} kWh bought, {injecte} kWh sent out",
   "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels"
 }

@@ -377,6 +377,10 @@
   "energie.flux.achetes": "achetés",
   "energie.flux.injectes": "injectés",
   "energie.flux.conso": "conso",
+  "energie.flux.consommes": "consommés",
+  "energie.flux.charge": "en charge",
+  "energie.flux.decharge": "rend",
+  "energie.flux.repos": "au repos",
   "energie.flux.aujourdhui": "Aujourd'hui : {achete} kWh achetés, {injecte} kWh injectés",
   "energie.flux.resume": "La maison consomme {maison} : {reseau} du réseau, {solaire} des panneaux"
 }
