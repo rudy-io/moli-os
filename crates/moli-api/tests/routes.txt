@@ -101,6 +101,7 @@ GET    /api/home                           foyer   oui
 GET    /api/system                         foyer   oui
 GET    /api/energy                         foyer   oui
 PUT    /api/energy/price                   foyer   oui   # a person (code) or an owner, checked after the body
+PUT    /api/energy/prices                  foyer   oui   # a person (code) or an owner, checked after the body
 GET    /api/energy/series                  foyer   oui
 GET    /api/automations                    foyer   oui
 POST   /api/automations                    foyer   oui
