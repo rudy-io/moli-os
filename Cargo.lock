@@ -2290,6 +2290,7 @@ dependencies = [
  "moli-scenes",
  "moli-shelly",
  "moli-solarman",
+ "moli-solcast",
  "moli-sonos",
  "moli-synology",
  "moli-tapo",
@@ -2530,6 +2531,23 @@ name = "moli-solarman"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "jiff",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-solcast"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
  "jiff",
  "moli-core",
  "moli-i18n",

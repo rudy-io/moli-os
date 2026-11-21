@@ -327,8 +327,10 @@ impl Energy {
             );
         }
         let last = store.last_readings()?;
+        let suspects = store.suspects()?;
         let prices = HousePrices::new(store.house_prices()?);
         let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store))
+            .with_suspects(&suspects)
             .with_prices(prices.clone());
         let task = tokio::spawn(recorder.run(events, cancel));
         let energy = Self {
@@ -837,6 +839,16 @@ impl Recorder {
         }
     }
 
+    /// Suspect readings kept from before a restart.
+    fn with_suspects(mut self, suspects: &HashMap<String, (Reading, u32)>) -> Self {
+        for (meter, tracker) in &mut self.trackers {
+            if let Some(&suspect) = suspects.get(meter) {
+                *tracker = Tracker::resumed(tracker.last, Some(suspect));
+            }
+        }
+        self
+    }
+
     fn with_prices(mut self, prices: HousePrices) -> Self {
         self.prices = prices;
         self
@@ -1117,7 +1129,15 @@ impl Recorder {
         let mut tracker = tracker;
         match tracker.observe(next, meter.reset, self.config.max_power_kw) {
             Outcome::Hold => {
-                // Remember a suspect reading (memory only).
+                // A new suspect reading, or one more behind it, is kept on
+                // disk too: a restart must not forget a jump already seen.
+                let suspect = tracker.suspect();
+                if suspect != self.trackers.get(&meter.id).and_then(Tracker::suspect) {
+                    let (store, id) = (Arc::clone(&self.store), meter.id.clone());
+                    if let Err(e) = blocking(move || store.hold(&id, suspect)).await {
+                        tracing::warn!(error = %e, meter = meter.id, "suspect energy reading not kept");
+                    }
+                }
                 self.trackers.insert(meter.id.clone(), tracker);
             }
             Outcome::Rebase => {

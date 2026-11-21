@@ -116,8 +116,11 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
   Sonos, commande d'automatisme au journal) ;
   `telegram` = une commande (titre, ou nom de l'automatisme, puis le message) sur chaque
   point `notify` inscriptible, c'est-à-dire l'appareil du pilote Telegram
-  (`integrations/telegram/`), journalisée au nom de l'automatisme ; sans aucun point
-  `notify`, le message part dans la maison.
+  (`integrations/telegram/`), journalisée au nom de l'automatisme ;
+  `telephone` = la même commande sur chaque point `push` inscriptible (l'appli Moli).
+  Un canal demandé qui ne joint personne (aucun point `notify`, aucun téléphone appairé,
+  aucune enceinte) envoie le message dans la maison, pour ne jamais le perdre ; un message
+  arrivé sur le téléphone n'y est pas affiché en plus.
 - Persistance : `data/automations.json` écrit à part, `fsync`, puis renommé ; version
   précédente en `.bak` ; un fichier abîmé est mis de côté et Moli repart sur le `.bak`.
 

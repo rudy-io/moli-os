@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, alarmDevices, act, pending } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, alarmDevices, act, pending, roomOf, protectedRoom } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
   import { isValve } from '../lib/capabilities.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
@@ -13,6 +13,7 @@
   import EnergyFlow from '../ui/EnergyFlow.svelte';
   import HistoryChart from '../ui/HistoryChart.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
+  import LiveVideo from '../ui/LiveVideo.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import ScenePicker from '../ui/ScenePicker.svelte';
   import Routines from '../ui/Routines.svelte';
@@ -144,6 +145,55 @@
               : t('maison.air.mauvais'),
   );
   const bell = $derived((cfg.favorites?.cameras ?? [])[0]);
+  // The door plays live (WebRTC, straight from the camera) where this
+  // browser reaches it: at home, or away too where the house opened its
+  // cameras' WebRTC port (home.json `live_outside`); never for a protected
+  // room (its live view needs a person). Elsewhere, or when the live view
+  // fails, its images every 15 s.
+  const atHome = $derived(!['access', 'outside'].includes(hub.session?.via));
+  const liveHere = $derived(atHome || cfg.live_outside === true);
+  let noLive = $state(null);
+  // Live only while someone looks: the page shown, and a touch, a click, a
+  // key or a scroll in the last 2 minutes (a wall tablet left alone, a
+  // forgotten tab, decode nothing). Back to images then; any gesture, or the
+  // screen waking, plays it again.
+  const LIVE_IDLE = 2 * 60_000;
+  let pageShown = $state(typeof document === 'undefined' || document.visibilityState === 'visible');
+  let idle = $state(false);
+  let idleTimer;
+  let lastGesture = 0;
+  function gesture() {
+    const now = Date.now();
+    if (!idle && now - lastGesture < 2000) return; // pointer moves come by the dozen
+    lastGesture = now;
+    idle = false;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => (idle = true), LIVE_IDLE);
+  }
+  onMount(() => {
+    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll'];
+    const onVisibility = () => {
+      pageShown = document.visibilityState === 'visible';
+      if (pageShown) gesture();
+    };
+    for (const e of events) window.addEventListener(e, gesture, { passive: true, capture: true });
+    document.addEventListener('visibilitychange', onVisibility);
+    gesture();
+    return () => {
+      clearTimeout(idleTimer);
+      for (const e of events) window.removeEventListener(e, gesture, { capture: true });
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  });
+  const liveShown = $derived(
+    !!bell &&
+      liveHere &&
+      pageShown &&
+      !idle &&
+      !!hub.devices[bell.id]?.live &&
+      !protectedRoom(roomOf(hub.devices[bell.id]) ?? '') &&
+      noLive !== bell.id,
+  );
 
   // The last real passage at the door (the history knows; the live value
   // is refreshed every few seconds whatever happens).
@@ -246,7 +296,11 @@
           <h2><Icon name="bell" size={18} />{t('maison.accueil.devant_porte')}</h2>
           <a class="more" href="#/cameras" aria-label={t('maison.accueil.toutes_cameras')}><Icon name="arrow-top-right" size={18} /></a>
         </div>
-        <CameraTile id={bell.id} name={bell.name} refresh={15} />
+        {#if liveShown}
+          <div class="cam-live"><LiveVideo id={bell.id} onfail={() => (noLive = bell.id)} /></div>
+        {:else}
+          <CameraTile id={bell.id} name={bell.name} refresh={15} />
+        {/if}
         <p class="muted small">{passage ? t('maison.accueil.dernier_passage', { when: relative(passage, home.now) }) : t('maison.accueil.personne')}</p>
       </section>
     {/if}
@@ -278,6 +332,13 @@
 </div>
 
 <style>
+  .cam-live {
+    border-radius: var(--r-md, 14px);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    background: #000;
+  }
+
   .accueil {
     display: grid;
     gap: 22px;

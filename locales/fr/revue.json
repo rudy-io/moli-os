@@ -39,5 +39,17 @@
   "revue.chargement": "Chargement des événements…",
   "revue.depuis": "{n} dernières heures",
   "revue.rien_24h": "Rien de signalé depuis 24 h.",
-  "revue.revoir_camera": "Revoir {camera} à {heure}"
+  "revue.revoir_camera": "Revoir {camera} à {heure}",
+  "revue.export.exporter": "Exporter",
+  "revue.export.titre": "Exporter un extrait",
+  "revue.export.debut": "Début",
+  "revue.export.fin": "Fin",
+  "revue.export.ici": "Ici",
+  "revue.export.ici_aide": "{borne} au moment affiché",
+  "revue.export.reculer": "{borne} 10 secondes plus tôt",
+  "revue.export.avancer": "{borne} 10 secondes plus tard",
+  "revue.export.telecharger": "Télécharger",
+  "revue.export.duree": "{duree} de vidéo",
+  "revue.export.invalide": "La fin doit venir après le début, et l’extrait durer une heure au plus.",
+  "revue.export.rien": "Rien d’enregistré sur ce moment : déplace le début ou la fin."
 }

@@ -26,6 +26,10 @@
   // outside) it cannot, so the images show at once. At home, a live view that
   // fails falls back to them too, never a black screen.
   const atHome = $derived(!['access', 'outside'].includes(hub.session?.via));
+  // Live video away from home too, where the house opened its cameras' WebRTC
+  // port to the Internet (home.json `live_outside`); else only at home, where
+  // the browser reaches the cameras. The past stays home-only (its routes).
+  const liveHere = $derived(atHome || home.config?.live_outside === true);
   let noLive = $state(null);
 
   // Cameras whose NVR tells their past: their newest events, above the
@@ -127,7 +131,7 @@
         {#if pastOf(current.id)}
           <!-- Its past from the NVR: frieze, events, recordings, zones. -->
           <CameraReview id={current.id} name={current.name} start={startWith} live={hub.devices[current.id]?.live && !current.locked && atHome} battery={current.battery} />
-        {:else if hub.devices[current.id]?.live && !current.locked && atHome && noLive !== current.id}
+        {:else if hub.devices[current.id]?.live && !current.locked && liveHere && noLive !== current.id}
           <!-- Live video, played by this browser straight from the camera. -->
           <div class="live-slot"><LiveVideo id={current.id} onfail={() => (noLive = current.id)} /></div>
         {:else}
@@ -226,6 +230,11 @@
     display: grid;
     gap: 14px;
     color: #eef1f7;
+    /* A thin, dim scrollbar on the dark, kept clear of the picture. */
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 22%) transparent;
+    scrollbar-gutter: stable;
+    padding-right: 6px;
   }
 
   .bar {

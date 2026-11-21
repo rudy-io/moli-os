@@ -19,9 +19,11 @@ const MAX_BODY: usize = 4 * 1024 * 1024;
 const ROUTINES_VERSION: &str = "3.0.264101";
 
 /// An answer that says the session is over: refresh it, then try again.
+/// Or that Amazon rations the orders (HTTP 429): try again a little later.
 #[derive(Debug)]
 pub(crate) enum Failure {
     Expired,
+    Busy,
     Other(anyhow::Error),
 }
 
@@ -35,6 +37,7 @@ impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Expired => f.write_str("the Alexa session expired"),
+            Self::Busy => f.write_str("Amazon refuses, too many requests (HTTP 429)"),
             Self::Other(e) => write!(f, "{e:#}"),
         }
     }
@@ -112,16 +115,8 @@ impl Session {
             .map_err(|e| Failure::Other(e.into()))?;
         let (status, answer) =
             moli_net::web(&self.host, 443, true, request, LIMIT, MAX_BODY).await?;
-        if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-            return Err(Failure::Expired);
-        }
-        if !status.is_success() {
-            let text = String::from_utf8_lossy(&answer[..answer.len().min(200)]).into_owned();
-            return Err(Failure::Other(anyhow::anyhow!(
-                "{}{path}: HTTP {} {text}",
-                self.host,
-                status.as_u16()
-            )));
+        if let Some(failure) = failure(&self.host, path, status, &answer) {
+            return Err(failure);
         }
         // Many orders answer 200 with no body.
         Ok(serde_json::from_slice(&answer).unwrap_or(Json::Null))
@@ -485,9 +480,56 @@ pub(crate) fn sayable(text: &str) -> anyhow::Result<String> {
     Ok(text.to_owned())
 }
 
+/// What an answer's status says: nothing (it worked), the session is over,
+/// Amazon rations the orders, or another refusal with the start of its body.
+fn failure(host: &str, path: &str, status: StatusCode, answer: &[u8]) -> Option<Failure> {
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        return Some(Failure::Expired);
+    }
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return Some(Failure::Busy);
+    }
+    if status.is_success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&answer[..answer.len().min(200)]).into_owned();
+    Some(Failure::Other(anyhow::anyhow!(
+        "{host}{path}: HTTP {} {text}",
+        status.as_u16()
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_says_what_failed() {
+        let ok = failure("alexa.amazon.fr", "/api/x", StatusCode::OK, b"");
+        assert!(ok.is_none());
+        assert!(matches!(
+            failure("alexa.amazon.fr", "/api/x", StatusCode::UNAUTHORIZED, b""),
+            Some(Failure::Expired)
+        ));
+        assert!(matches!(
+            failure(
+                "alexa.amazon.fr",
+                "/api/behaviors/preview",
+                StatusCode::TOO_MANY_REQUESTS,
+                b"Rate exceeded"
+            ),
+            Some(Failure::Busy)
+        ));
+        let other = failure(
+            "alexa.amazon.fr",
+            "/api/x",
+            StatusCode::BAD_REQUEST,
+            b"nope",
+        )
+        .unwrap();
+        assert!(matches!(other, Failure::Other(_)));
+        assert_eq!(other.to_string(), "alexa.amazon.fr/api/x: HTTP 400 nope");
+    }
 
     fn echo(serial: &str) -> Echo {
         Echo {

@@ -40,7 +40,14 @@
       pc = peer;
       peer.addTransceiver('video', { direction: 'recvonly' });
       peer.ontrack = (e) => {
-        if (video) video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+        if (video) {
+          video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+          // Without a click first (a page opened as is, a wall tablet), the
+          // browser plays by itself only a video it knows is silent: say it
+          // (the attribute alone is not always read in time), then play.
+          video.muted = true;
+          video.play().catch(() => {});
+        }
       };
       const unreachable = () => {
         if (pc !== peer || status === 'playing') return;

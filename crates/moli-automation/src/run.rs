@@ -675,7 +675,15 @@ async fn notify(
     channels: &[Channel],
 ) -> anyhow::Result<()> {
     let messengers = autos.messengers();
-    if channels.contains(&Channel::Maison) || messengers.is_empty() {
+    let phones = autos.phones();
+    // The house sees it when asked, or when a channel asked has nobody to
+    // reach (no Telegram bot, no paired phone, no speaker): a message is
+    // never lost. A message that reaches the phone is not shown twice.
+    let nobody = channels.is_empty()
+        || (channels.contains(&Channel::Telegram) && messengers.is_empty())
+        || (channels.contains(&Channel::Telephone) && phones.is_empty())
+        || (channels.contains(&Channel::Voix) && autos.speakers().is_empty());
+    if channels.contains(&Channel::Maison) || nobody {
         autos.0.hub.notice(Notice {
             to: None,
             title: title.clone(),
@@ -717,7 +725,7 @@ async fn notify(
     }
     if channels.contains(&Channel::Telephone) {
         say(
-            autos.phones(),
+            phones,
             format!("{heading}\n{message}"),
             &tr!("moteur.canal.telephone"),
         )

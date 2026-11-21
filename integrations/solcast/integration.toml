@@ -1,0 +1,34 @@
+[integration]
+id = "solcast"
+name = "Solcast : prévision de production solaire des toitures (lecture seule)"
+brands = ["Solcast"]
+# Checked against the API's documented answers; a real account's answers not yet: see the README.
+models = ["Solcast Home User (rooftop sites)"]
+transport = "https"
+driver = "solcast"
+crate = "moli-solcast"
+
+[discovery]
+# No discovery: a cloud service, the person's own account.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+secrets = ["api_key"]
+vars = []
+options = ["sites"]
+
+[origin]
+reused = "aucun code repris : chemins et champs de l'API publique de Solcast (/rooftop_sites/{id}/forecasts, pv_estimate, pv_estimate10, pv_estimate90, period_end, period) d'après sa documentation ; l'intégration Home Assistant BJReplay/ha-solcast-solar (Apache-2.0) lue comme référence pour le quota et la répartition des appels ; fixtures reconstituées à la main (deux toitures est et ouest, une journée de novembre, réponse 429)"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-solcast/src/tests.rs). Reconstructed, not captured.
+[[fixture]]
+file = "fixtures/forecasts-east.json"
+
+[[fixture]]
+file = "fixtures/forecasts-west.json"
+
+[[fixture]]
+file = "fixtures/too-many-requests.json"
