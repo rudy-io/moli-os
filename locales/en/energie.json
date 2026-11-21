@@ -370,6 +370,15 @@
   "energie.batterie.repos": "Idle",
   "energie.batterie.stocke": "{kwh} kWh of {total}",
   "energie.batterie.aujourdhui": "Today: {entre} kWh in, {sorti} kWh given back",
+  "energie.flux.achat": "buying",
+  "energie.flux.injection": "sending out",
+  "energie.flux.produits": "made",
+  "energie.flux.achetes": "bought",
+  "energie.flux.injectes": "sent out",
+  "energie.flux.consommes": "used",
+  "energie.flux.charge": "charging",
+  "energie.flux.decharge": "giving back",
+  "energie.flux.repos": "idle",
   "energie.flux.aujourdhui": "Today: {achete} kWh bought, {injecte} kWh sent out",
   "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels"
 }

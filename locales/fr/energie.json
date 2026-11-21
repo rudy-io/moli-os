@@ -370,6 +370,15 @@
   "energie.batterie.repos": "Au repos",
   "energie.batterie.stocke": "{kwh} kWh sur {total}",
   "energie.batterie.aujourdhui": "Aujourd'hui : {entre} kWh entrés, {sorti} kWh rendus",
+  "energie.flux.achat": "achat",
+  "energie.flux.injection": "injection",
+  "energie.flux.produits": "produits",
+  "energie.flux.achetes": "achetés",
+  "energie.flux.injectes": "injectés",
+  "energie.flux.consommes": "consommés",
+  "energie.flux.charge": "en charge",
+  "energie.flux.decharge": "rend",
+  "energie.flux.repos": "au repos",
   "energie.flux.aujourdhui": "Aujourd'hui : {achete} kWh achetés, {injecte} kWh injectés",
   "energie.flux.resume": "La maison consomme {maison} : {reseau} du réseau, {solaire} des panneaux"
 }
