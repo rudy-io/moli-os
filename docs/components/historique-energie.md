@@ -60,6 +60,14 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     heures qui suivent**, sans redémarrage ; une heure déjà comptée garde le prix de son
     époque (rien n'est recalculé). Un prix au-dessus de 5 par kWh est refusé : c'est un prix
     tapé en centimes.
+  - **Historique des prix de la maison** : toute la liste se modifie d'un coup (bouton
+    « Modifier l'historique » de la carte « Prix du kWh », ou `PUT /api/energy/prices`) : un
+    tarif ajouté avec sa date passée, un prix corrigé, un tarif retiré. Chaque prix vaut de sa
+    date jusqu'au suivant. Les heures déjà comptées **à partir du premier changement** sont
+    alors recalculées (une heure prend le prix en vigueur en son milieu, aucun avant le premier
+    prix), pour les compteurs que ce prix chiffre : ceux qui consomment, sans `price` ni
+    `price_point`, dans une maison sans `[energy.tariff]` (dont les périodes passées ne sont pas
+    gardées : rien n'est recalculé). Journalisé (`setting`, `energy.prices`).
   - **Prix d'un fournisseur** (`price_point`, `price_extra`, par compteur) : `price_point` = le
     point qui donne le prix du kWh du fournisseur (le pilote `engie` :
     `engie:contract-…/electricity_offtake_peak`), suivi quand il change ; `price_extra` = ce que
