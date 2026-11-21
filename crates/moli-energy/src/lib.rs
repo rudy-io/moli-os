@@ -370,6 +370,11 @@ impl Energy {
     /// meters the house's price prices (see [`Self::house_priced`]).
     /// Returns how many hours were priced again.
     pub async fn set_house_prices(&self, prices: Vec<HousePrice>) -> Result<usize, EnergyError> {
+        if prices.is_empty() {
+            return Err(EnergyError::Invalid(
+                "keep at least one price: without any, every hour would lose its cost".into(),
+            ));
+        }
         let mut new = prices;
         new.sort_by_key(|p| p.since);
         for p in &new {

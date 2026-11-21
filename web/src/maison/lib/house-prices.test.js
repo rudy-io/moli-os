@@ -32,7 +32,7 @@ test('the list is sent as the API takes it, only when every row makes sense', ()
     { since: new Date(2023, 7, 1).getTime(), price: 0.2276 },
     { since: new Date(2024, 1, 1).getTime(), price: 0.2516 },
   ]);
-  assert.ok(rowsOk([]), 'an empty list: no house price');
+  assert.ok(!rowsOk([]), 'an empty list: refused, every cost would go');
   assert.ok(!rowsOk([...rows, { day: '2024-02-01', since: null, typed: '0,25' }]), 'two prices the same day');
   assert.ok(!rowsOk([{ day: '', since: null, typed: '0,2' }]));
   assert.equal(isoDay(new Date(2024, 0, 5, 23, 30).getTime()), '2024-01-05');

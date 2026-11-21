@@ -2735,7 +2735,7 @@ async fn only_a_person_edits_the_list_of_prices_and_it_is_kept_in_order() {
     let summary: Json = serde_json::from_str(&body).unwrap();
     assert_eq!(summary["house_price"], json!(0.2516));
 
-    // An empty list: no house price any more.
+    // An empty list would take every cost away: refused, nothing changes.
     let (status, body) = request_with(
         &addr,
         "PUT",
@@ -2744,15 +2744,41 @@ async fn only_a_person_edits_the_list_of_prices_and_it_is_kept_in_order() {
         &pin,
     )
     .await;
-    assert_eq!(status, 200, "{body}");
-    assert!(energy.house_prices().is_empty());
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(energy.house_prices().len(), 2);
+    // A field the list does not have: refused.
+    let odd = json!({ "prices": [{ "since": 1_690_840_800_000_u64, "price": 0.2276, "tva": 20 }] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&odd), &pin).await;
+    assert_eq!(status, 422, "{body}");
 
-    let edits = hub
+    // One price taken out: the journal keeps the list as it was.
+    let one = json!({ "prices": [{ "since": 1_690_840_800_000_u64, "price": 0.2276 }] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&one), &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let edits: Vec<(Option<moli_core::Value>, moli_core::Value)> = hub
         .journal(50)
         .iter()
-        .filter(|e| matches!(&e.action, moli_core::Action::Setting { name, .. } if name == "energy.prices"))
-        .count();
-    assert_eq!(edits, 2);
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } if name == "energy.prices" => {
+                Some((from.clone(), to.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits.len(), 2);
+    let text = |v: &moli_core::Value| match v {
+        moli_core::Value::Text(t) => serde_json::from_str::<Json>(t).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    let removal = edits
+        .iter()
+        .find(|(_, to)| text(to).as_array().unwrap().len() == 1)
+        .unwrap();
+    assert_eq!(
+        text(removal.0.as_ref().unwrap()).as_array().unwrap().len(),
+        2,
+        "the list before"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

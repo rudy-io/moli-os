@@ -138,6 +138,7 @@
   "serveur.energie.point.over_budget": "Estimated bill over budget",
   "serveur.energie.prix_humain": "only a person (with the code) or an owner can change the price of a kWh",
   "serveur.energie.prix_invalide": "invalid price of a kWh: a positive number, in {currency} per kWh (0.2319, not 23.19)",
+  "serveur.energie.prix_liste_vide": "Keep at least one price: without any, every hour would lose its cost.",
   "serveur.energie.absente": "no [energy] section in the configuration",
   "serveur.energie.charge.modele": "Driven load",
   "serveur.energie.charge.mode": "Mode",

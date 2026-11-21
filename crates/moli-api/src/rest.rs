@@ -1031,12 +1031,14 @@ pub(crate) async fn set_energy_price(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PricesBody {
     /// Every price of the house, each from its `since` (ms, UTC) on.
     prices: Vec<PriceFrom>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PriceFrom {
     since: u64,
     price: f64,
@@ -1071,6 +1073,13 @@ pub(crate) async fn set_energy_prices(
             &moli_i18n::tr!("serveur.energie.prix_humain"),
         );
     }
+    // Without any price, every hour priced by the house would lose its cost.
+    if body.prices.is_empty() {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!("serveur.energie.prix_liste_vide"),
+        );
+    }
     let currency = energy.config().currency.as_str();
     if body.prices.len() > MAX_HOUSE_PRICES
         || body
@@ -1091,6 +1100,12 @@ pub(crate) async fn set_energy_prices(
             price: p.price,
         })
         .collect();
+    // The list as it was, in the journal: a wrong edit can be put back.
+    let as_text = |list: &[moli_energy::HousePrice]| {
+        Value::Text(serde_json::to_string(list).unwrap_or_default().into())
+    };
+    let before = as_text(&energy.house_prices());
+    let after = as_text(&prices);
     let count = prices.len();
     match energy.set_house_prices(prices).await {
         Ok(repriced) => {
@@ -1103,8 +1118,8 @@ pub(crate) async fn set_energy_prices(
                 origin,
                 Some(caller.describe()),
                 "energy.prices",
-                None,
-                Value::from(f64::from(u32::try_from(count).unwrap_or(u32::MAX))),
+                Some(before),
+                after,
             );
             tracing::info!(client = %caller.describe(), count, repriced, "house prices edited");
             Json(json!({ "prices": energy.house_prices(), "repriced": repriced })).into_response()

@@ -29,8 +29,10 @@ export function startOf(row) {
 }
 
 /** Every row has a day and a price, and no two begin the same day. */
+// At least one price: the house refuses an empty list (every cost would go).
 export const rowsOk = (rows) =>
   Array.isArray(rows) &&
+  rows.length > 0 &&
   rows.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day) && priceOk(r.typed)) &&
   new Set(rows.map((r) => r.day)).size === rows.length;
 
