@@ -26,6 +26,7 @@ Décidé dans #136. La suite se fait par petites PR, chacune validée au vu du c
 | Ancien membre ou invité | séjour fini, accès gardé |
 | Appareil compromis du réseau | prise, caméra, télé |
 | Agent manipulé | injection de prompt, MCP appelé de l'extérieur |
+| Page web ouverte par quelqu'un de la maison | DNS rebinding, formulaire ou script qui écrit vers Moli depuis un autre site |
 | Fournisseur d'identité ou de tunnel compromis | impact total, probabilité faible |
 
 La menace la plus probable est la mauvaise configuration : la conception la rend **difficile,
@@ -53,7 +54,7 @@ qu'un intermédiaire lui passe en clair.
 | I6 | **Sûr par défaut** : l'accès distant est coupé tant qu'aucune entrée n'est déclarée ; les combinaisons dangereuses sont refusées au démarrage. | `check-config` : étape 2. |
 | I7 | **Indépendance locale** : rien de la maison ne dépend de l'accès distant ni d'un compteur ; un bouton coupe tout le distant. | Étape 3. |
 | I8 | **Traçabilité** : chaque événement distant est journalisé avec la vraie IP, sans secret ; les propriétaires sont avertis d'un nouvel appareil. | Avis d'appairage d'un téléphone (existant) ; journal d'authentification : étape 5. |
-| I9 | **Surface minimale** : Moli n'écoute jamais Internet directement ; garde `Host` sur toutes les routes. | Garde `Host` : `foreign_host_is_rejected_everywhere` ; écoute publique refusée : étape 2. |
+| I9 | **Surface minimale** : Moli n'écoute jamais Internet directement ; garde `Host` sur toutes les routes (un nom que la maison n'a pas déclaré est refusé : le DNS rebinding passe par un nom, jamais par une IP) ; une écriture qu'un navigateur envoie depuis un autre site (`Origin`, `Sec-Fetch-Site`) est refusée. Le réseau de la maison fait confiance au tableau de bord, pas à toute page que ses navigateurs ouvrent (`crates/moli-api/src/guard.rs`, [api.md § 1.2](components/api.md)). | Garde `Host` : `foreign_host_is_rejected_everywhere` et tests de `guard.rs` ; écoute publique refusée : étape 2. |
 | I10 | **Révocable et limité dans le temps** : chaque session et chaque appareil, seul ou tous ensemble. | Sessions PIN de 30 jours (existant) ; par appareil : étape 3. |
 
 ### TaHoma cloud : observation privée et déconnexion
