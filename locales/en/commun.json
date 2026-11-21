@@ -109,6 +109,7 @@
   "commun.filtre.alarme": "Alarm",
   "commun.filtre.cameras": "Cameras",
   "commun.filtre.medias": "TV & sound",
+  "commun.filtre.aides": "Helpers",
 
   "commun.meteo.indisponible": "Weather unavailable",
   "commun.meteo.degage": "Clear sky",

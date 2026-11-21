@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home, isSwitchHelper } from '../lib/home.svelte.js';
   import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -82,6 +82,14 @@
   const PRESS_FRESH_MS = 10 * 60_000;
 
   function chips(d) {
+    // A helper that is no switch: its value, said with its name.
+    if (deviceKind(d) === 'helper') {
+      const key = d.points?.[0]?.key;
+      const v = key == null ? null : value(d.id, key);
+      if (v == null || v === '') return every ? [{ tone: '', icon: 'tag', text: '', title: nameOf(d.id) }] : [];
+      const shown = typeof v === 'number' ? num(v) : String(v);
+      return [{ tone: '', icon: 'tag', text: shown, title: said(d.id, shown) }];
+    }
     // An appliance that is no button: what it draws, nothing when unplugged.
     if (quiet(d.id)) {
       if (d.online === false) return every ? [{ tone: '', icon: 'offline', text: t('commun.piece.hors_ligne', { name: nameOf(d.id) }) }] : [];
@@ -152,7 +160,7 @@
     return out;
   }
 
-  const sensorChips = $derived(room.sensors.flatMap(chips));
+  const sensorChips = $derived([...room.sensors, ...(room.helpers ?? []).filter((d) => !isSwitchHelper(d))].flatMap(chips));
   const lamps = $derived(lampsOf(room));
   let showLooks = $state(false);
 
@@ -200,6 +208,7 @@
     if (kind === 'cover') return (coverPosition(d.id) ?? 0) > 0 ? 'shutter-open' : 'shutter';
     if (kind === 'tv') return 'tv';
     if (kind === 'speaker') return 'speaker';
+    if (kind === 'helper') return 'toggle';
     if (kind === 'plug') return /vmc|ventil|\bfan\b|exhaust/.test(name) ? 'fan' : 'socket';
     if (hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan))) return 'ceiling-fan-light';
     if (/spot/.test(name)) return 'spotlight';
@@ -246,6 +255,8 @@
     ...room.plugs.flatMap(plugPads),
     ...room.covers.map((d) => ({ d, point: null, isCover: true })),
     ...room.impulses.filter(lonePulse).map((d) => ({ d, point: impulsePoints(d)[0].key, isPulse: true })),
+    // A helper switch: a pad, Oui / Non (« Lave-linge en cours »).
+    ...(room.helpers ?? []).filter(isSwitchHelper).map((d) => ({ d, point: 'on' })),
   ]);
 
   // ---- single-relay triggers: no state to show, only an order and its outcome ----------
@@ -290,6 +301,7 @@
     if (!reachable(d.id)) return t('commun.piece.injoignable');
     if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
     if (deviceKind(d) === 'speaker') return value(d.id, 'playing') === true ? t('commun.piece.lecture_en_cours') : t('commun.piece.a_l_arret');
+    if (deviceKind(d) === 'helper') return t(isOn(d.id, point) ? 'commun.oui' : 'commun.non');
     if (!isOn(d.id, point)) return t('commun.piece.eteinte');
     const draw = point ? null : drawOf(d);
     if (draw != null) return t('commun.piece.allumee_conso', { watts: watts(draw) });

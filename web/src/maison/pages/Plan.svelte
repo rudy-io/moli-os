@@ -143,7 +143,7 @@
 
   // ---- what a token shows -------------------------------------------------------
 
-  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter', plant: 'sprout' };
+  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter', plant: 'sprout', helper: 'toggle' };
   const has = (d, key) => d.points.some((p) => p.key === key);
 
   function iconOf(d) {
@@ -197,6 +197,10 @@
     const kind = deviceKind(d);
     if (['light', 'group', 'plug'].includes(kind)) {
       if (!switchOf(d)) toggle(d.id);
+      return;
+    }
+    if (kind === 'helper' && d.points.some((p) => p.key === 'on')) {
+      toggle(d.id, null, 'on');
       return;
     }
     if (kind === 'camera') location.hash = '#/cameras';

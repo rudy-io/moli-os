@@ -8,6 +8,8 @@ import {
   mdiLamp,
   mdiSpotlightBeam,
   mdiPowerSocketEu,
+  mdiToggleSwitchOutline,
+  mdiTagOutline,
   mdiWallSconceFlat,
   mdiLedStripVariant,
   mdiPalmTree,
@@ -174,6 +176,9 @@ export const icons = {
   lamp: mdiLamp,
   spotlight: mdiSpotlightBeam,
   socket: mdiPowerSocketEu,
+  // A helper: a switch Moli keeps (« Lave-linge en cours »), or a value.
+  toggle: mdiToggleSwitchOutline,
+  tag: mdiTagOutline,
   'tv-light': mdiTelevisionAmbientLight,
   sconce: mdiWallSconceFlat,
   'led-strip': mdiLedStripVariant,

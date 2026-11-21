@@ -1353,3 +1353,21 @@ test('each sensor chip says which device tells it: « <name> : <value> »', () =
   assert.match(room, /title="Fenêtre bureau : ouverte"/);
 });
 
+
+test('a helper is no plug: a switch is a pad saying Oui / Non, a value a chip with its name', () => {
+  const helper = { manufacturer: 'Moli', model: 'Aide' };
+  const html = showRoom([
+    { id: 'maison:lave_linge_en_cours', native_name: 'Lave-linge en cours', points: [point('on', { type: 'binary' }, true, 'on_off')], values: { on: true }, ...helper },
+    { id: 'maison:mode', native_name: 'Mode maison', points: [point('state', enumeration('Normal', 'Nuit'))], values: { state: 'Nuit' }, ...helper },
+    { id: 'z2m:plug', native_name: 'Prise', points: [point('state', { type: 'binary' }, true, 'on_off')], values: { state: false } },
+  ]);
+  assert.equal(home.deviceKind(hub.devices['maison:lave_linge_en_cours']), 'helper');
+  assert.equal(home.deviceKind(hub.devices['z2m:plug']), 'plug');
+  const room = home.roomList()[0];
+  assert.deepEqual(room.helpers.map((d) => d.id).sort(), ['maison:lave_linge_en_cours', 'maison:mode']);
+  assert.ok(!room.plugs.some((d) => d.id.startsWith('maison:')), 'no helper among the plugs');
+  const text = html.replace(/<!--[\s\S]*?-->/g, '');
+  assert.match(text, /<b[^>]*>Lave-linge en cours<\/b><small[^>]*>Oui<\/small>/);
+  assert.doesNotMatch(text, /Lave-linge en cours<\/b><small[^>]*>Allumée/);
+  assert.match(text, /title="Mode maison : Nuit"/);
+});
