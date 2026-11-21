@@ -69,7 +69,10 @@ test('a single clamp below zero is power sent out', () => {
   const html = show();
   // Nothing bought, 400 W out: the house uses 600 W.
   assert.match(summary(html), /consomme 600 W : 0 W du réseau/);
-  assert.match(html, /← 400 W/);
+  // The grid then says one thing: what goes out.
+  assert.match(html, /class="node grid[^"]*sends"/);
+  assert.match(html, /<text class="big[^"]*" y="-1">400 W<\/text>/);
+  assert.match(html, /Réseau · <tspan class="way[^"]*">injection<\/tspan>/);
 });
 
 test('on the home page, a house with only the grid shows no flow', () => {
@@ -77,4 +80,22 @@ test('on the home page, a house with only the grid shows no flow', () => {
   at({ 'p1/import': 500 });
   assert.equal(summary(show({ home: true })), null, 'home page, no panels: no card');
   assert.ok(summary(show()), 'the energy page still has it');
+});
+
+test("today's energy sits in the discs: made, bought and sent out, used by the house", () => {
+  energy.summary = {
+    meters: [
+      { id: 'buy', role: 'grid', power: 'p1/import' },
+      { id: 'out', role: 'export', power: 'p1/export' },
+      { id: 'pv', role: 'solar', power: 'pv/power' },
+    ],
+    today: { meters: { buy: { kwh: 5.2 }, out: { kwh: 1.4 }, pv: { kwh: 3.1 } }, consumption: 6.9 },
+  };
+  at({ 'p1/import': 300, 'p1/export': 0, 'pv/power': 800 });
+  const html = show();
+  assert.match(html, /class="day[^"]*" y="17">3,1 kWh<\/text><text class="word[^"]*" y="31">produits</);
+  assert.match(html, /class="day bought[^"]*" y="15">5,2 kWh <tspan class="word[^"]*">achetés</);
+  assert.match(html, /class="day sent[^"]*" y="29">1,4 kWh <tspan class="word[^"]*">injectés</);
+  assert.match(html, /class="day[^"]*" y="17">6,9 kWh<\/text><text class="word[^"]*" y="31">consommés</);
+  assert.doesNotMatch(html, /class="pill/);
 });
