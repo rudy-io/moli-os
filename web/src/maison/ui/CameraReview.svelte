@@ -5,7 +5,7 @@
   import { home } from '../lib/home.svelte.js';
   import LiveVideo from './LiveVideo.svelte';
   import CameraTile from './CameraTile.svelte';
-  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable } from '../lib/review.js';
+  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, extract, extractName, recordedIn, toField, fromField, LEAD } from '../lib/review.js';
 
   /** A camera with its past (its NVR): the picture (live, or what was
    *  recorded at the chosen moment, or an event's photo) with the zones over
@@ -166,6 +166,54 @@
     if (start) playItem(start);
   });
 
+  // ── An extract to save ────────────────────────────────────────
+  // Offered on what is shown: the event played (its window), else a minute
+  // from the moment playing; each bound moves by 10 s or to that moment.
+  let cut = $state(null); // { start, end } while the panel is open
+
+  function openCut() {
+    if (cut) {
+      cut = null;
+      return;
+    }
+    if (mode.kind === 'video') {
+      const from = Math.floor(position ?? mode.start);
+      cut = mode.item ? { start: mode.start, end: mode.end } : { start: from, end: from + 60 };
+    } else if (mode.kind === 'image') {
+      const item = items.find((i) => i.id === mode.item);
+      cut = (item && windowOf(item, nowS())) ?? { start: Math.floor(mode.at - LEAD), end: Math.floor(mode.at) + 30 };
+    } else {
+      // From the live view: the last minute, to be set to any moment.
+      const now = Math.floor(nowS());
+      cut = { start: now - 62, end: now - 2 };
+    }
+  }
+
+  function typed(bound, value) {
+    const t = fromField(value);
+    if (t !== null) cut = { ...cut, [bound]: t };
+  }
+
+  function nudge(bound, seconds) {
+    cut = { ...cut, [bound]: cut[bound] + seconds };
+  }
+
+  function here(bound) {
+    if (position) cut = { ...cut, [bound]: Math.floor(position) };
+  }
+
+  const saved = $derived(cut ? extract(cut.start, cut.end, home.now / 1000) : null);
+  const savedName = $derived(saved ? extractName(name, saved.start) : '');
+  // What is recorded is known for the day shown only: elsewhere, let it try.
+  const savedHas = $derived(
+    !saved || saved.start < span.after || saved.end > span.before || recordedIn(saved.start, saved.end, recorded),
+  );
+  function lengthOf(s) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m ? (r ? `${m} min ${r} s` : `${m} min`) : `${r} s`;
+  }
+
   // ── The frieze ────────────────────────────────────────────────
   let frieze = $state(null);
   let hover = $state(null); // fraction under the pointer
@@ -273,11 +321,50 @@
           <Icon name="map" size={16} />{t('revue.zones')}
         </button>
       {/if}
+      <button class:on={cut} aria-pressed={!!cut} aria-expanded={!!cut} onclick={openCut}>
+        <Icon name="download" size={16} />{t('revue.export.exporter')}
+      </button>
       {#if mode.kind !== 'live'}
         <button class="direct" onclick={backToLive}><i></i>{t('revue.direct')}</button>
       {/if}
     </div>
   </div>
+
+  {#if cut}
+    <div class="extract" role="group" aria-label={t('revue.export.titre')}>
+      <b class="extract-title">{t('revue.export.titre')}</b>
+      {#each [['start', t('revue.export.debut')], ['end', t('revue.export.fin')]] as [bound, word] (bound)}
+        <div class="bound">
+          <span class="word">{word}</span>
+          <button onclick={() => nudge(bound, -10)} aria-label={t('revue.export.reculer', { borne: word })}>−10 s</button>
+          <input
+            class="at"
+            type="datetime-local"
+            step="1"
+            value={toField(cut[bound])}
+            onchange={(e) => typed(bound, e.currentTarget.value)}
+            aria-label={word}
+          />
+          <button onclick={() => nudge(bound, 10)} aria-label={t('revue.export.avancer', { borne: word })}>+10 s</button>
+          {#if mode.kind === 'video' && position}
+            <button onclick={() => here(bound)} aria-label={t('revue.export.ici_aide', { borne: word })}>{t('revue.export.ici')}</button>
+          {/if}
+        </div>
+      {/each}
+      <div class="go">
+        {#if saved && !savedHas}
+          <span class="bad">{t('revue.export.rien')}</span>
+        {:else if saved}
+          <span class="length">{t('revue.export.duree', { duree: lengthOf(saved.end - saved.start) })}</span>
+          <a class="save" href="{base}/recording?start={saved.start}&end={saved.end}&download={savedName}" download={savedName}>
+            <Icon name="download" size={16} />{t('revue.export.telecharger')}
+          </a>
+        {:else}
+          <span class="bad">{t('revue.export.invalide')}</span>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   <div class="frieze-wrap">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -547,6 +634,111 @@
   .actions button.on {
     background: #8cc4ff;
     color: #0b1220;
+  }
+
+  .extract {
+    display: grid;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #1c2230;
+  }
+
+  .extract-title {
+    font-size: 14px;
+  }
+
+  /* Both bounds in the same columns, whatever the word. */
+  .bound {
+    display: grid;
+    grid-template-columns: 6ch auto minmax(0, 15em) auto auto;
+    justify-content: start;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bound .word {
+    color: #b7bfcd;
+    font-size: 13px;
+  }
+
+  .bound .at {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 10px;
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: 10px;
+    background: rgb(255 255 255 / 6%);
+    color: #eef1f7;
+    color-scheme: dark;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A phone: the word, the field across, then the buttons. */
+  @media (max-width: 560px) {
+    .bound {
+      display: flex;
+      flex-wrap: wrap;
+    }
+
+    .bound .word {
+      flex-basis: 100%;
+    }
+
+    .bound .at {
+      order: 1;
+      flex-basis: 100%;
+    }
+
+    .bound button {
+      order: 2;
+    }
+  }
+
+  .bound button,
+  .save {
+    border: 0;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 11%);
+    color: #eef1f7;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 12px;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .go {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .length {
+    color: #b7bfcd;
+    font-size: 13px;
+  }
+
+  .save {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 16px;
+    background: #8cc4ff;
+    color: #0b1220;
+    text-decoration: none;
+  }
+
+  .bad {
+    color: #f5b14c;
+    font-size: 13px;
   }
 
   .direct i {
