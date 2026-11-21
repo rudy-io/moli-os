@@ -7,7 +7,9 @@ use moli_automation::{
     Actor, Author, Automation, AutomationError, Automations, Config, Graph, Mode, RunStatus, Step,
     Writer,
 };
-use moli_core::{Access, Device, InstanceId, Kind, Origin, PointId, PointSpec, Semantic, Value};
+use moli_core::{
+    Access, Device, Event, InstanceId, Kind, Origin, PointId, PointSpec, Semantic, Value,
+};
 use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub, HubOptions, spawn_driver};
 use tokio_util::sync::CancellationToken;
 
@@ -1040,6 +1042,118 @@ async fn said_aloud_through_every_speaker() {
         hub.state(&said).map(|s| s.value),
         Some(Value::Text("Quelqu'un est à la porte".into()))
     );
+}
+
+/// A phone of the Moli app: a write-only `push` point.
+#[derive(Debug)]
+struct Phone;
+
+impl Driver for Phone {
+    fn kind(&self) -> &'static str {
+        "phone-test"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            ctx.upsert_device(Device {
+                id: ctx.device_id("mine"),
+                instance: ctx.instance().clone(),
+                native_name: "mine".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![PointSpec {
+                    key: "push".into(),
+                    label: "Notification".into(),
+                    kind: Kind::Text,
+                    access: Access {
+                        read: false,
+                        write: true,
+                    },
+                    unit: None,
+                    semantic: Semantic::Other,
+                }],
+            });
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// A notify step for the phone, run by flipping the switch: what the house
+/// was shown (its notices) while the run lasted.
+async fn notify_the_phone(hub: &Hub, autos: &Automations) -> Vec<String> {
+    let graph = serde_json::json!({
+        "nodes": [
+            { "id": "t", "type": "when_state", "point": "fake:switch/on", "to": true },
+            { "id": "n", "type": "notify", "title": "Alarme", "message": "Alarme armée", "channels": ["telephone"] },
+            { "id": "s", "type": "set", "point": "fake:lamp/on", "value": true }
+        ],
+        "edges": [{ "from": "t", "to": "n" }, { "from": "n", "to": "s" }]
+    });
+    let mut events = hub.subscribe();
+    let a = autos.save(automation(graph), HUMAN).await.unwrap();
+    autos.approve(&a.id, &a.fingerprint(), HUMAN).await.unwrap();
+    flip_switch(hub, true).await;
+    // The lamp, after the notify step: the run went past it.
+    let lamp = PointId::from("fake:lamp/on");
+    for _ in 0..200 {
+        if hub.state(&lamp).map(|s| s.value) == Some(Value::Bool(true)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(hub.state(&lamp).map(|s| s.value), Some(Value::Bool(true)));
+    let mut shown = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if let Event::Notice { notice } = e {
+            shown.push(notice.message);
+        }
+    }
+    shown
+}
+
+#[tokio::test]
+async fn a_message_for_the_phone_is_not_also_shown_in_the_house() {
+    let (hub, autos, cancel) = setup().await;
+    spawn_driver(
+        &hub,
+        InstanceId::from("phone"),
+        Arc::new(Phone),
+        cancel.clone(),
+    );
+    for _ in 0..200 {
+        if autos.abilities().phone {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(autos.abilities().phone, "the fake phone is paired");
+    let shown = notify_the_phone(&hub, &autos).await;
+    assert_eq!(
+        hub.state(&PointId::from("phone:mine/push"))
+            .map(|s| s.value),
+        Some(Value::Text("Alarme\nAlarme armée".into())),
+        "the phone got it"
+    );
+    assert!(
+        shown.is_empty(),
+        "no Telegram bot, but the phone got it: not shown twice ({shown:?})"
+    );
+}
+
+#[tokio::test]
+async fn without_any_phone_a_message_for_the_phone_is_shown_in_the_house() {
+    let (hub, autos, _c) = setup().await;
+    assert!(!autos.abilities().phone);
+    let shown = notify_the_phone(&hub, &autos).await;
+    assert_eq!(shown, vec!["Alarme armée".to_owned()], "never lost");
 }
 
 /// The house, its automations kept in `dir`, with or without a rule that
