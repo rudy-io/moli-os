@@ -175,10 +175,15 @@ impl Driver for Helpers {
                     members: Vec::new(),
                     points: vec![spec.clone()],
                 });
-                // Kept across restarts by the state cache; set only once.
-                if ctx.current(&id, &spec.key).is_none() {
-                    ctx.set_state(&id, &spec.key, h.initial_value()?);
-                }
+                // Kept across restarts by the state cache. Published again
+                // even so: a value restored from the cache waits for its
+                // driver to confirm it, and until then reads as unknown to
+                // automations (a condition on it is never true).
+                let value = match ctx.current(&id, &spec.key) {
+                    Some(kept) => kept,
+                    None => h.initial_value()?,
+                };
+                ctx.set_state(&id, &spec.key, value);
                 ctx.set_availability(&id, true);
             }
             ctx.ready();
@@ -284,5 +289,72 @@ mod tests {
             .await;
         assert!(refused.is_err(), "only the listed options");
         cancel.cancel();
+    }
+
+    /// A helper set, Moli restarted: the value comes back from the state
+    /// cache, and the hub serves it as current (to automations too), not
+    /// as a value still waiting for its driver.
+    #[tokio::test]
+    async fn a_helper_kept_across_a_restart_is_current_again() {
+        let dir = std::env::temp_dir().join(format!(
+            "moli-helpers-restart-{}-{}",
+            std::process::id(),
+            moli_core::now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let options = || HubOptions {
+            state_path: Some(dir.join("state.json")),
+            ..HubOptions::default()
+        };
+        let alarm = PointId::from("maison:alarme_active/on".to_owned());
+        let settled = |hub: Hub, want: Value| {
+            let alarm = alarm.clone();
+            async move {
+                for _ in 0..200 {
+                    if hub.current_state(&alarm).is_some_and(|s| s.value == want) {
+                        return true;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                false
+            }
+        };
+
+        let hub = Hub::new(options()).unwrap();
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(
+            &hub,
+            InstanceId::from("maison"),
+            Arc::new(Helpers::new(config()).unwrap()),
+            cancel.clone(),
+        );
+        assert!(
+            settled(hub.clone(), Value::Bool(true)).await,
+            "initial value"
+        );
+        hub.command(&alarm, Value::Bool(false), Origin::Ui, None)
+            .await
+            .unwrap();
+        hub.persist_state().await.unwrap();
+        cancel.cancel();
+        task.await.unwrap();
+
+        // The restart: a new hub on the same cache.
+        let hub = Hub::new(options()).unwrap();
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(
+            &hub,
+            InstanceId::from("maison"),
+            Arc::new(Helpers::new(config()).unwrap()),
+            cancel.clone(),
+        );
+        assert!(
+            settled(hub.clone(), Value::Bool(false)).await,
+            "the value set before the restart, current again: {:?}",
+            hub.current_state(&alarm)
+        );
+        cancel.cancel();
+        task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
