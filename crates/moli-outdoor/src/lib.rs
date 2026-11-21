@@ -58,10 +58,6 @@ use tokio::sync::broadcast::error::RecvError;
 pub const INSTANCE: &str = "dehors";
 /// The device, inside the instance.
 pub const NATIVE: &str = "meteo";
-/// When only a reading's time moved (a station repeating 0 mm), the value is
-/// published again at most this often: its age stays right within five
-/// minutes, and the history does not take a line per repetition.
-pub const AGE_EVERY: Duration = Duration::from_secs(5 * 60);
 /// A source with no `stale_after` is fresh for half an hour.
 pub const DEFAULT_FRESH: Duration = Duration::from_secs(30 * 60);
 /// Freshness is the only thing that changes without a source speaking.
@@ -327,8 +323,7 @@ pub fn choose(candidates: &[Candidate], now: u64) -> Option<&Candidate> {
         .or_else(|| candidates.iter().max_by_key(|c| c.ts))
 }
 
-/// What to publish for a meaning, against what was published last (and
-/// when, by the clock).
+/// What to publish for a meaning, against what was published last.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Publish {
     /// The value, with its reading's time.
@@ -338,21 +333,20 @@ pub struct Publish {
     pub source: bool,
 }
 
-/// A new value or a new source is published at once; a newer reading of the
-/// same value only once `AGE_EVERY` has passed since the last publication.
+/// A new value, a new source or another reading is published; the hub tells
+/// a newer reading of the same value only as a `Seen`, every five minutes at
+/// most (#230), so a station repeating 0 mm writes nothing in the history.
 #[must_use]
-pub fn publish(last: Option<&(Candidate, u64)>, chosen: &Candidate, now: u64) -> Publish {
-    let Some((shown, at)) = last else {
+pub fn publish(last: Option<&Candidate>, chosen: &Candidate) -> Publish {
+    let Some(shown) = last else {
         return Publish {
             value: true,
             source: true,
         };
     };
     let source = shown.source != chosen.source;
-    let older = chosen.ts > shown.ts
-        && now.saturating_sub(*at) >= u64::try_from(AGE_EVERY.as_millis()).unwrap_or(u64::MAX);
     Publish {
-        value: source || shown.value != chosen.value || older,
+        value: source || shown.value != chosen.value || shown.ts != chosen.ts,
         source,
     }
 }
@@ -622,7 +616,7 @@ impl Outdoor {
 struct Published {
     device: Option<Device>,
     /// Per meaning: what was published, and when by the clock.
-    values: HashMap<&'static str, (Candidate, u64)>,
+    values: HashMap<&'static str, Candidate>,
     online: Option<bool>,
     /// Notes already logged: each once.
     noted: HashSet<String>,
@@ -737,7 +731,7 @@ impl Outdoor {
             let Some(chosen) = choose(&candidates, now) else {
                 continue;
             };
-            let what = publish(published.values.get(slot.key), chosen, now);
+            let what = publish(published.values.get(slot.key), chosen);
             if what.source {
                 ctx.set_state(
                     &id,
@@ -747,7 +741,7 @@ impl Outdoor {
             }
             if what.value {
                 ctx.set_state_at(&id, slot.key, chosen.value.clone(), chosen.ts);
-                published.values.insert(slot.key, (chosen.clone(), now));
+                published.values.insert(slot.key, chosen.clone());
             }
         }
         self.extremes(ctx, &id, &layout, published).await;
@@ -1097,60 +1091,51 @@ mod tests {
         assert_eq!(choose(&[], now), None);
     }
 
-    /// A station repeating the same value does not write a line per
-    /// repetition: a new value or source at once, a newer reading of the
-    /// same value every five minutes at most.
+    /// Another reading is handed to the hub, which tells a repeated value
+    /// only as a `Seen` (#230); the same reading again is nothing.
     #[test]
-    fn a_repeated_reading_is_published_every_five_minutes_at_most() {
+    fn a_new_reading_value_or_source_is_published() {
         let min = 60_000;
         let now = 1_000 * min;
         let first = candidate("z2m:0x1", 0.0, now - min, 15);
         assert_eq!(
-            publish(None, &first, now),
+            publish(None, &first),
             Publish {
                 value: true,
                 source: true
             }
         );
-        let last = (first.clone(), now);
         // The same reading again: nothing.
         assert_eq!(
-            publish(Some(&last), &first, now + min),
+            publish(Some(&first), &first),
             Publish {
                 value: false,
                 source: false
             }
         );
-        // Read again a minute later, same value: not yet.
+        // Read again a minute later, same value: to the hub, which keeps
+        // its age without a line in the history.
         let again = candidate("z2m:0x1", 0.0, now, 15);
         assert_eq!(
-            publish(Some(&last), &again, now + min),
-            Publish {
-                value: false,
-                source: false
-            }
-        );
-        // Five minutes after the last publication: its age is refreshed.
-        assert_eq!(
-            publish(Some(&last), &again, now + 5 * min),
+            publish(Some(&first), &again),
             Publish {
                 value: true,
                 source: false
             }
         );
-        // A new value: at once.
+        // A new value.
         let wetter = candidate("z2m:0x1", 0.2, now, 15);
         assert_eq!(
-            publish(Some(&last), &wetter, now + min),
+            publish(Some(&first), &wetter),
             Publish {
                 value: true,
                 source: false
             }
         );
-        // Another source: at once, and its source too.
+        // Another source, and its source too.
         let forecast = candidate("meteo:api", 0.0, now, 30);
         assert_eq!(
-            publish(Some(&last), &forecast, now + min),
+            publish(Some(&first), &forecast),
             Publish {
                 value: true,
                 source: true

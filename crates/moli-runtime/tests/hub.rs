@@ -2257,6 +2257,9 @@ impl Driver for Copier {
             ctx.set_state_at(&id, "copied", Value::Int(12), 1_000);
             ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
             ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
+            // An older reading of the same value (another source's, kept as
+            // the last known): its age goes back.
+            ctx.set_state_at(&id, "copied", Value::Int(12), 1_500);
             // set_state as before: now, and no event when nothing changed.
             ctx.set_state(&id, "own", Value::Int(7));
             ctx.set_state(&id, "own", Value::Int(7));
@@ -2285,12 +2288,14 @@ async fn a_copied_value_keeps_the_time_it_was_read_at() {
 
     let copied = hub.state(&PointId::from("copier:copy/copied")).unwrap();
     assert_eq!(copied.value, Value::Int(12));
-    assert_eq!(copied.ts, 2_000, "the time given is kept, not now");
+    assert_eq!(copied.ts, 1_500, "the time given is kept, not now");
     let own = hub.state(&PointId::from("copier:copy/own")).unwrap();
     assert!(own.ts >= before, "set_state still records now");
 
-    // A newer reading of the same value is told (its age changed); the same
-    // reading twice, or set_state with the same value, is not.
+    // A newer reading of the same value is no change (#230): its age moves
+    // through `Seen`, at most every five minutes, so not seconds later. The
+    // same reading twice, or set_state with the same value, is nothing. An
+    // older reading is a change: the age shown must go back.
     let mut copied_events = 0;
     let mut own_events = 0;
     while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
