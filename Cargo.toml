@@ -57,6 +57,7 @@ moli-jackery = { path = "crates/moli-jackery" }
 moli-vicare = { path = "crates/moli-vicare" }
 moli-synology = { path = "crates/moli-synology" }
 moli-igd = { path = "crates/moli-igd" }
+moli-freebox = { path = "crates/moli-freebox" }
 moli-ipp = { path = "crates/moli-ipp" }
 moli-assistant = { path = "crates/moli-assistant" }
 moli-automation = { path = "crates/moli-automation" }

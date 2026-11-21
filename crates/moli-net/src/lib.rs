@@ -322,8 +322,13 @@ impl PinnedTls {
 pub struct PinnedHttps {
     host: String,
     port: u16,
+    /// The name the certificate must bear: `host`, unless the appliance is
+    /// reached at a local address under a certificate for a public name
+    /// (`with_roots`).
+    name: String,
     tls: TlsConnector,
-    pinned: PinnedTls,
+    /// The pin (trust on first use); `None` with an authority of its own.
+    pinned: Option<PinnedTls>,
     conn: tokio::sync::Mutex<Option<SendRequest<Full<Bytes>>>>,
     /// Long requests (camera images) keep their own connection between
     /// calls: a new TLS handshake for every image was most of their cost.
@@ -347,8 +352,41 @@ impl PinnedHttps {
         Ok(Self {
             host: host.to_owned(),
             port,
+            name: host.to_owned(),
             tls: TlsConnector::from(Arc::clone(&pinned.config)),
-            pinned,
+            pinned: Some(pinned),
+            conn: tokio::sync::Mutex::new(None),
+            slow: tokio::sync::Mutex::new(None),
+        })
+    }
+
+    /// An appliance whose certificate its maker signs with an authority of
+    /// its own (`roots_pem`, published by the maker): checked in full (chain,
+    /// dates, `name`), nothing pinned, so a certificate renewed every few
+    /// months is taken as it comes. Reached at `host`, while the certificate
+    /// bears `name` (a Freebox answers on its local address under its public
+    /// domain).
+    pub fn with_roots(host: &str, port: u16, name: &str, roots_pem: &str) -> anyhow::Result<Self> {
+        use rustls::pki_types::pem::PemObject as _;
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in CertificateDer::pem_slice_iter(roots_pem.as_bytes()) {
+            roots.add(cert.context("authority certificate (PEM)")?)?;
+        }
+        if roots.is_empty() {
+            bail!("no authority certificate in the PEM");
+        }
+        ServerName::try_from(name.to_owned()).context("certificate name")?;
+        let config =
+            ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()?
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+        Ok(Self {
+            host: host.to_owned(),
+            port,
+            name: name.to_owned(),
+            tls: TlsConnector::from(Arc::new(config)),
+            pinned: None,
             conn: tokio::sync::Mutex::new(None),
             slow: tokio::sync::Mutex::new(None),
         })
@@ -361,12 +399,12 @@ impl PinnedHttps {
 
     /// Fingerprint of the certificate presented during the last handshake.
     pub fn seen_fingerprint(&self) -> Option<String> {
-        self.pinned.seen_fingerprint()
+        self.pinned.as_ref().and_then(PinnedTls::seen_fingerprint)
     }
 
     /// Fingerprint enforced: the one given, or the first one seen.
     pub fn pinned_fingerprint(&self) -> Option<String> {
-        self.pinned.pinned_fingerprint()
+        self.pinned.as_ref().and_then(PinnedTls::pinned_fingerprint)
     }
 
     /// A request builder with the `host` header set.
@@ -398,7 +436,7 @@ impl PinnedHttps {
                 .with_time(Duration::from_secs(60))
                 .with_interval(Duration::from_secs(15)),
         )?;
-        let name = ServerName::try_from(self.host.clone()).context("host name")?;
+        let name = ServerName::try_from(self.name.clone()).context("host name")?;
         let tls = tokio::time::timeout(TIMEOUT, self.tls.connect(name, tcp))
             .await
             .context("tls handshake timeout")?
@@ -1080,5 +1118,76 @@ mod dispatch_tests {
             assert!(!error.is::<RequestNotDispatched>());
             server.abort();
         }
+    }
+
+    /// A certificate signed by the maker's own authority: taken with that
+    /// authority and the name it bears (reached at another address), refused
+    /// with another name or another authority. Nothing is pinned.
+    #[tokio::test]
+    async fn an_authority_of_its_own_checks_the_chain_and_the_name() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let authority = |name: &str| {
+            let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+            params
+                .distinguished_name
+                .push(rcgen::DnType::CommonName, name);
+            params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+            rcgen::CertifiedIssuer::self_signed(params, rcgen::KeyPair::generate().unwrap())
+                .unwrap()
+        };
+        let maker = authority("Maker Root CA");
+        let stranger = authority("Another Root CA");
+        let box_key = rcgen::KeyPair::generate().unwrap();
+        let leaf = rcgen::CertificateParams::new(vec!["box.example".to_owned()])
+            .unwrap()
+            .signed_by(&box_key, &maker)
+            .unwrap();
+        let server = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![leaf.der().clone()],
+            rustls::pki_types::PrivatePkcs8KeyDer::from(box_key.serialize_der()).into(),
+        )
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
+            while let Ok((socket, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut stream) = acceptor.accept(socket).await else {
+                        return;
+                    };
+                    let mut buf = vec![0; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = stream
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        let get = |https: &PinnedHttps| empty(https.request(http::Method::GET, "/")).unwrap();
+
+        let good = PinnedHttps::with_roots("127.0.0.1", port, "box.example", &maker.pem()).unwrap();
+        let (status, body) = good.send(get(&good)).await.unwrap();
+        assert_eq!((status.as_u16(), &body[..]), (200, &b"ok"[..]));
+        assert_eq!(good.seen_fingerprint(), None, "nothing pinned");
+
+        let name =
+            PinnedHttps::with_roots("127.0.0.1", port, "other.example", &maker.pem()).unwrap();
+        assert!(name.send(get(&name)).await.is_err(), "another name");
+        let stranger =
+            PinnedHttps::with_roots("127.0.0.1", port, "box.example", &stranger.pem()).unwrap();
+        assert!(
+            stranger.send(get(&stranger)).await.is_err(),
+            "another authority"
+        );
+        assert!(PinnedHttps::with_roots("127.0.0.1", port, "box.example", "").is_err());
     }
 }

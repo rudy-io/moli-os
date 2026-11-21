@@ -1360,6 +1360,7 @@ const KINDS: &[&str] = &[
     "linky-tic",
     "homeassistant",
     "igd",
+    "freebox",
     "melcloud",
     "kasa",
     "recycleapp",
@@ -1623,6 +1624,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "freebox" => Arc::new(moli_freebox::Freebox::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "melcloud" => Arc::new(moli_melcloud::Melcloud::new(
