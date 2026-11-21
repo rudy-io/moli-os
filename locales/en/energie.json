@@ -102,6 +102,7 @@
   "energie.prix.enregistrer": "Save",
   "energie.prix.aide": "Your code is asked. The new price counts from now on: the hours already counted keep the price of their time. A price written in moli.toml comes first.",
   "energie.prix.depuis": "Since {since}",
+  "energie.prix.voir_tous": "See the {n} prices (since {since})",
   "energie.prix.enregistre": "New price: {price} {cur} per kWh, from now on.",
   "energie.prix.erreur": "Price not saved: {message}",
   "energie.prix.historique": "Edit the history",

@@ -142,11 +142,15 @@
         <small class="muted">{t('energie.prix.historique_aide')}</small>
       </form>
     {:else if prices.length > 1}
-      <ol class="past">
-        {#each prices as p (p.since)}
-          <li><span>{t('energie.prix.depuis', { since: day(p.since) })}</span><b class="num">{amount(p.price)} {cur}/kWh</b></li>
-        {/each}
-      </ol>
+      <!-- The current price is in the sentence above: the list only when asked. -->
+      <details class="past">
+        <summary>{t('energie.prix.voir_tous', { n: prices.length, since: day(prices[prices.length - 1].since) })}</summary>
+        <ol>
+          {#each prices as p (p.since)}
+            <li><span>{t('energie.prix.depuis', { since: day(p.since) })}</span><b class="num">{amount(p.price)} {cur}/kWh</b></li>
+          {/each}
+        </ol>
+      </details>
     {/if}
   </section>
 {/if}
@@ -279,12 +283,22 @@
   }
 
   .past {
+    font-size: 13px;
+  }
+
+  .past summary {
+    cursor: pointer;
+    color: var(--ink-3);
+    font-weight: 600;
+    width: fit-content;
+  }
+
+  .past ol {
     list-style: none;
-    margin: 0;
+    margin: 10px 0 0;
     padding: 0;
     display: grid;
     gap: 6px;
-    font-size: 13px;
   }
 
   .past li {
