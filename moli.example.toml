@@ -301,6 +301,17 @@ base_topic = "zigbee2mqtt"
 # port = 5001                  # DSM's HTTPS port, if changed
 # mac = "aa:bb:cc:dd:ee:ff"    # to wake it (Wake-on-LAN); learned by itself on a local network
 
+# Solcast (solar forecast of the house's roofs), read only. Needs one secret (api_key, from solcast.com)
+# and the master key to keep the forecasts across restarts; see integrations/solcast/onboarding.md.
+# [[driver]]
+# id = "solcast"
+# kind = "solcast"
+#
+# [driver.options]
+# sites = ["abcd-1234-ef56-7890", "1234-abcd-7890-ef56"]   # rooftop sites, summed
+# calls_per_day = 10            # a free home user account
+# timezone = "Europe/Paris"
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
