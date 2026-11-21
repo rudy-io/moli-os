@@ -447,6 +447,7 @@ mod tests {
             (Method::DELETE, "/api/assistant/rules/3"),
             (Method::PUT, "/api/session/pin"),
             (Method::PUT, "/api/energy/price"),
+            (Method::PUT, "/api/energy/prices"),
             (Method::POST, "/api/session/setup"),
             (Method::POST, "/api/machines/pc/remote"),
             (Method::POST, "/api/automations/soir/run/again"),

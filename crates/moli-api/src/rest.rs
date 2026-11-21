@@ -1032,6 +1032,104 @@ pub(crate) async fn set_energy_price(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PricesBody {
+    /// Every price of the house, each from its `since` (ms, UTC) on.
+    prices: Vec<PriceFrom>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PriceFrom {
+    since: u64,
+    price: f64,
+}
+
+/// More prices than this is not a house's history.
+const MAX_HOUSE_PRICES: usize = 200;
+
+/// `PUT /api/energy/prices`: the house's whole list of prices, edited from
+/// the dashboard (a past price corrected, one added with its date, one
+/// removed). The hours already filed take the new prices from the first
+/// change on. A person's gesture, like a new price.
+pub(crate) async fn set_energy_prices(
+    State(hub): State<Hub>,
+    Extension(Metered(energy)): Extension<Metered>,
+    Extension(humans): Humans,
+    Extension(persons): Extension<Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(body): Json<PricesBody>,
+) -> Response {
+    let Some(energy) = energy else {
+        return error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.energie.absente"),
+        );
+    };
+    let human = humans.is_human(&headers, &caller.key);
+    if !human && !crate::people_api::is_owner(&caller, &humans, &persons, &headers) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.energie.prix_humain"),
+        );
+    }
+    // Without any price, every hour priced by the house would lose its cost.
+    if body.prices.is_empty() {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!("serveur.energie.prix_liste_vide"),
+        );
+    }
+    let currency = energy.config().currency.as_str();
+    if body.prices.len() > MAX_HOUSE_PRICES
+        || body
+            .prices
+            .iter()
+            .any(|p| !(p.price.is_finite() && p.price > 0.0 && p.price <= MAX_HOUSE_PRICE))
+    {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!("serveur.energie.prix_invalide", currency = currency),
+        );
+    }
+    let prices: Vec<moli_energy::HousePrice> = body
+        .prices
+        .iter()
+        .map(|p| moli_energy::HousePrice {
+            since: p.since,
+            price: p.price,
+        })
+        .collect();
+    // The list as it was, in the journal: a wrong edit can be put back.
+    let as_text = |list: &[moli_energy::HousePrice]| {
+        Value::Text(serde_json::to_string(list).unwrap_or_default().into())
+    };
+    let before = as_text(&energy.house_prices());
+    let after = as_text(&prices);
+    let count = prices.len();
+    match energy.set_house_prices(prices).await {
+        Ok(repriced) => {
+            let origin = if human {
+                Origin::Ui
+            } else {
+                origin(&hub, &headers, &humans, &caller)
+            };
+            hub.record_setting(
+                origin,
+                Some(caller.describe()),
+                "energy.prices",
+                Some(before),
+                after,
+            );
+            tracing::info!(client = %caller.describe(), count, repriced, "house prices edited");
+            Json(json!({ "prices": energy.house_prices(), "repriced": repriced })).into_response()
+        }
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
 pub(crate) struct SeriesQuery {
     step: moli_energy::Step,
     /// How many buckets back, the current one included.

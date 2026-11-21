@@ -2674,6 +2674,114 @@ async fn only_a_person_changes_the_price_of_a_kwh_and_it_is_journaled() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The house's list of prices, edited at once (a past price, one corrected,
+/// one removed): by a person only, never in cents, kept in order, journaled.
+#[tokio::test]
+async fn only_a_person_edits_the_list_of_prices_and_it_is_kept_in_order() {
+    let dir = std::env::temp_dir().join(format!("moli-http-prices-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let hub = lamp_hub().await;
+    let config: moli_energy::Config = serde_json::from_value(json!({
+        "meter": [{ "id": "plug", "name": "Plug", "point": "fake:lamp/power", "role": "appliance", "integrate": true }]
+    }))
+    .unwrap();
+    let (energy, _task) = moli_energy::Energy::start(
+        &hub,
+        &dir.join("energy.db"),
+        config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        energy: Some(energy.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    // 1 Aug 2023 and 1 Feb 2024, given newest first.
+    let list = json!({ "prices": [
+        { "since": 1_706_742_000_000_u64, "price": 0.2516 },
+        { "since": 1_690_840_800_000_u64, "price": 0.2276 },
+    ] });
+
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&list), ui).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(energy.house_prices().is_empty());
+
+    let pin = pin_session(&addr, "482915").await;
+    let cents = json!({ "prices": [{ "since": 1_690_840_800_000_u64, "price": 22.76 }] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&cents), &pin).await;
+    assert_eq!(status, 422, "{body}");
+    let twice = json!({ "prices": [
+        { "since": 1_690_840_800_000_u64, "price": 0.2276 },
+        { "since": 1_690_840_800_000_u64, "price": 0.2516 },
+    ] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&twice), &pin).await;
+    assert_eq!(status, 422, "{body}");
+
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&list), &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        answer["prices"],
+        json!([
+            { "since": 1_690_840_800_000_u64, "price": 0.2276 },
+            { "since": 1_706_742_000_000_u64, "price": 0.2516 },
+        ]),
+        "oldest first"
+    );
+    let (_, body) = request(&addr, "GET", "/api/energy", None).await;
+    let summary: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(summary["house_price"], json!(0.2516));
+
+    // An empty list would take every cost away: refused, nothing changes.
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/prices",
+        Some(&json!({ "prices": [] })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(energy.house_prices().len(), 2);
+    // A field the list does not have: refused.
+    let odd = json!({ "prices": [{ "since": 1_690_840_800_000_u64, "price": 0.2276, "tva": 20 }] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&odd), &pin).await;
+    assert_eq!(status, 422, "{body}");
+
+    // One price taken out: the journal keeps the list as it was.
+    let one = json!({ "prices": [{ "since": 1_690_840_800_000_u64, "price": 0.2276 }] });
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/prices", Some(&one), &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let edits: Vec<(Option<moli_core::Value>, moli_core::Value)> = hub
+        .journal(50)
+        .iter()
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } if name == "energy.prices" => {
+                Some((from.clone(), to.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits.len(), 2);
+    let text = |v: &moli_core::Value| match v {
+        moli_core::Value::Text(t) => serde_json::from_str::<Json>(t).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    let removal = edits
+        .iter()
+        .find(|(_, to)| text(to).as_array().unwrap().len() == 1)
+        .unwrap();
+    assert_eq!(
+        text(removal.0.as_ref().unwrap()).as_array().unwrap().len(),
+        2,
+        "the list before"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
     let (addr, hub) = server().await;
