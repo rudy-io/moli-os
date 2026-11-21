@@ -677,11 +677,11 @@
     align-content: center;
   }
 
-  /* A helper is no device: a value Moli keeps. Dashed, like a draft. */
+  /* A helper is no device: a value Moli keeps. A thin dashed line in the
+     theme's warm accent, like a draft. */
   .pad.helper,
   .chip.helper {
-    border-style: dashed;
-    outline: 1px dashed color-mix(in srgb, var(--muted, #888) 55%, transparent);
+    outline: 1px dashed color-mix(in srgb, var(--warm) 70%, transparent);
     outline-offset: -1px;
   }
 
