@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, act, pending, roomOf, protectedRoom } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, alarmDevices, act, pending, roomOf, protectedRoom } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
   import { isValve } from '../lib/capabilities.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
@@ -19,8 +19,10 @@
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
   import { readOutside } from '../lib/outside.js';
+  import AlarmCard from '../ui/AlarmCard.svelte';
 
   const cfg = $derived(home.config ?? {});
+  const alarms = $derived(alarmDevices());
   const out = $derived(cfg.outdoor ?? {});
   // A robot goes through every room: it belongs to none.
   const robots = $derived(Object.values(hub.devices).filter((d) => deviceKind(d) === 'vacuum' && !hidden(d.id)));
@@ -232,6 +234,10 @@
       <span class="chip good"><Icon name="leaf" size={16} />{t('maison.accueil.calme')}</span>
     {/each}
   </section>
+
+  {#each alarms as a (a.id)}
+    <AlarmCard id={a.id} />
+  {/each}
 
   <div class="grid">
     <section class="card lights">

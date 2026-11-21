@@ -1,8 +1,9 @@
 <script>
   import { untrack } from 'svelte';
-  import { hub, home, device, value, since, nameOf, roomOf, hidden, doorOpen, isOn, clock, relative } from '../lib/home.svelte.js';
+  import { hub, home, device, value, since, nameOf, roomOf, hidden, doorOpen, isOn, alarmDevices, clock, relative } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import AlarmCard from './AlarmCard.svelte';
 
   /** The house's safety at a glance: the doors, what moves, the alarm. A
    *  sensor gone silent says so: a dead battery, an unknown state or a
@@ -117,6 +118,10 @@
       .map((d) => ({ id: d.id, name: nameOf(d.id), on: d.online === false ? null : isOn(d.id), ringing: /en cours/i.test(nameOf(d.id)) })),
   );
 
+  // The house's security panels, wherever they are: their own card carries
+  // the arm mode, while a « Sécurité » room keeps its switches above.
+  const panels = $derived(alarmDevices().map((d) => ({ id: d.id, name: nameOf(d.id) })));
+
   const summary = $derived.by(() => {
     const open = doors.filter((d) => d.open === true);
     const unknown = doors.filter((d) => d.silent);
@@ -189,6 +194,10 @@
       {/each}
     </div>
   {/if}
+
+  {#each panels as a (a.id)}
+    <AlarmCard id={a.id} name={a.name} compact />
+  {/each}
 </section>
 
 <style>

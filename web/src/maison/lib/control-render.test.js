@@ -24,7 +24,7 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'WeekSchedule']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'WeekSchedule', 'AlarmCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
@@ -898,6 +898,27 @@ test('the security panel lists a presence radar beside the motion sensors', () =
   assert.doesNotMatch(html, /Le foyer/);
 });
 
+test('the security panel keeps the « Sécurité » room switches beside the panel card', () => {
+  const at = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }]));
+  const roomDevice = (id, name, value) => ({
+    id, native_name: name, model: null, label: { room: 'Sécurité' }, online: true, members: [],
+    points: [point('value', { type: 'binary' }, true, 'on_off')], state: at({ value }),
+  });
+  hub.devices = {
+    'maison:alarme_active': roomDevice('maison:alarme_active', 'Alarme', false),
+    'maison:alarme_en_cours': roomDevice('maison:alarme_en_cours', 'Alarme en cours', true),
+    'fixture:panel': { id: 'fixture:panel', native_name: "Centrale d'alarme", model: null, label: { room: 'Entrée' }, online: true, members: [], points: [point('system_arm_type', enumeration('disarmed', 'armed', 'home'))], state: at({ system_arm_type: 'armed' }) },
+  };
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  // The room's switches, as before, and the ringing line first.
+  assert.match(html, /Alarme : non/);
+  assert.match(html, /Alarme en cours : oui/);
+  assert.match(html, /Alarme en cours !/);
+  // The panel keeps its own card, with its mode.
+  assert.match(html, /Centrale d'alarme/);
+  assert.match(html, />Armée</);
+});
+
 test('a plant sensor shows its soil, and its pot stays out of the room readings (#163)', () => {
   const celsius = (key) => ({ ...point(key, number(), false, 'temperature'), unit: '°C' });
   const percent = (key, semantic) => ({ ...point(key, number(0, 100), false, semantic), unit: '%' });
@@ -1178,6 +1199,89 @@ test('beside the week, the card leaves the schedule out and the editor opens the
   assert.doesNotMatch(show('ValveCard', schedulePoints(), valveValues, {}, { schedule: false }), /Table horaire/);
   const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_wednesday: '00:00/17 07:00/20' }, {}, { day: 'wednesday' });
   assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 2);
+});
+
+test('an alarm panel shows its arm mode, health and its settings', () => {
+  const html = show('AlarmCard', [
+    point('system_arm_type', enumeration('disarmed', 'armed', 'home')),
+    point('bat_status', number(0, 100, 1), false),
+    point('gsm_status', enumeration('Normal'), false),
+    point('dc_status', enumeration('normal'), false),
+    point('inside_siren_en', { type: 'binary' }),
+    point('arm_delay', number(0, 300, 1)),
+    point('inside_siren_sound', enumeration('ON', 'OFF')),
+  ], {
+    system_arm_type: 'disarmed',
+    bat_status: 92,
+    gsm_status: 'Normal',
+    dc_status: 'normal',
+    inside_siren_en: true,
+    arm_delay: 30,
+    inside_siren_sound: 'ON',
+  });
+  // The three arm modes, the current one pressed.
+  assert.match(html, /role="group"/);
+  assert.match(html, /aria-pressed="true"/);
+  assert.match(html, />Désarmée</);
+  assert.match(html, />Armée</);
+  assert.match(html, />Maison</);
+  // Health and the settings the panel takes, in the house's words.
+  assert.match(html, /92 %/);
+  assert.match(html, /GSM OK/);
+  // A delay is a setting, never a countdown: it lives in the settings only.
+  assert.doesNotMatch(html, /Armement dans|Alarme dans/);
+  assert.match(html, /Réglages/);
+  assert.match(html, /Délai d'armement/);
+  // Settings are grouped, numbers are sliders with a step-by-step value,
+  // and the siren's on/off is a two-word choice.
+  assert.match(html, />Délais</);
+  assert.match(html, />Sirène</);
+  assert.match(html, /type="range"/);
+  assert.match(html, /aria-label="Diminuer : Délai d'armement"/);
+  assert.match(html, /aria-label="Augmenter : Délai d'armement"/);
+  const segments = buttons(html).filter((tag) => /class="segment\b/.test(tag));
+  assert.equal(segments.length, 5, 'three arm modes, two siren sounds');
+  assert.equal(segments.filter((tag) => /aria-pressed="true"/.test(tag)).length, 2, 'the current mode and Fort');
+  assert.match(html, />Fort</);
+  assert.match(html, />Muet</);
+  assert.equal(buttons(html).filter((tag) => /role="switch"/.test(tag)).length, 1);
+});
+
+test('an alarm panel reaches the house and its room, not the sensors', () => {
+  const panel = {
+    id: 'fixture:panel', native_name: 'Panel', model: null, label: { room: 'Hall' }, online: true, members: [],
+    points: [point('system_arm_type', enumeration('disarmed', 'armed', 'home'))],
+    state: { system_arm_type: { value: 'disarmed' } },
+  };
+  hub.devices = { [panel.id]: panel };
+  assert.equal(home.deviceKind(panel), 'alarm');
+  assert.deepEqual(home.alarmDevices().map((d) => d.id), [panel.id]);
+  const room = home.roomList()[0];
+  assert.deepEqual(room.alarms.map((d) => d.id), [panel.id]);
+  assert.equal(room.sensors.length, 0);
+});
+
+test('the villa demo shows its alarm panel in the cameras safety panel', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../../../demo/villa/devices/tuya.json', import.meta.url), 'utf8')).devices;
+  const panel = fixture.find((d) => d.points.some((p) => p.key === 'system_arm_type'));
+  assert.ok(panel, 'the villa has an alarm panel');
+  hub.devices = {
+    [panel.id]: {
+      ...panel,
+      label: {},
+      online: true,
+      members: [],
+      state: Object.fromEntries(Object.entries(panel.state).map(([key, value]) => [key, { value }])),
+    },
+  };
+  assert.equal(home.deviceKind(hub.devices[panel.id]), 'alarm');
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  // Its arm mode, health and the settings it takes, inside the safety panel.
+  assert.match(html, /Centrale d'alarme/);
+  assert.match(html, />Armée</);
+  assert.match(html, />Maison</);
+  assert.match(html, /96 %/);
+  assert.match(html, /Secteur OK/);
 });
 
 test('the outside page shows the sun: its height and way, its arc by day, the façades it is on (#258)', () => {

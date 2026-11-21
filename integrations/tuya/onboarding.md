@@ -28,3 +28,19 @@ Il faut la clé locale du robot, que l'application Rowenta ne donne pas.
 4. Déclarer `kind = "tuya"` ; `moli-os check-config`, redémarrer. Sur un réseau isolé (sans les annonces UDP), ajouter `ip` et `version = "3.3"` dans `tuya.json`.
 5. Tester sans démarrer le robot : `state` et `battery` se lisent, `locate` le fait sonner. Puis, robot
    surveillé et pièce dégagée : `clean`, `pause`, `dock`.
+
+## Centrales d'alarme : Daewoo SA501
+
+1. Obtenir la clé locale par l'import cloud (`moli-os tuya import --cloud`) ou par l'export Home
+   Assistant, comme les autres appareils Tuya. La centrale est en catégorie `mal`.
+2. Écrire dans `tuya.json` (`id`, `name`, `category = "mal"`, `product = "Daewoo SA501"`, `ip`,
+   `version = "3.3"`, `room` si on veut la voir dans une pièce (ou la régler ensuite dans
+   l'Atelier, sans redémarrer), et les `dps` 101 à 121 — voir
+   [docs/components/alarme.md](../../docs/components/alarme.md)). Ranger la clé par un tube :
+   `moli-os secrets set tuya key-<id>`.
+3. `moli-os check-config`, redémarrer. La centrale doit apparaître dans Atelier avec
+   `system_arm_type`.
+4. Tester **sans armer la maison** : lire le mode, régler un délai, vérifier la batterie et le GSM.
+   Puis, un humain présent et aucune pièce protégée occupée : essayer `armed` et `disarmed`.
+5. Ne pas reprendre dans `tuya.json` le mot de passe, les numéros de téléphone, l'IMEI ni les codes
+   bruts : ils ne servent pas à Moli.
