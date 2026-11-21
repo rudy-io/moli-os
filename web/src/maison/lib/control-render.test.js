@@ -703,6 +703,39 @@ test('a room lists its valve as a climate and opens the valve card, not the air-
   assert.doesNotMatch(html, /class="dial/);
 });
 
+test('a valve is drawn as its radiator: warming while open, a tick once closed, frost guard when off', () => {
+  const heating = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 20, local_temperature: 19, system_mode: 'heat', running_state: 'heat' });
+  assert.match(heating, /class="hero heating/);
+  assert.match(heating, /Vanne ouverte|Valve open/);
+  const closed = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18, local_temperature: 19, system_mode: 'heat', running_state: 'idle' });
+  assert.match(closed, /class="hero reached/);
+  assert.match(closed, /class="badge tick/);
+  assert.match(show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18, local_temperature: 19, system_mode: 'off' }), /class="hero off/);
+});
+
+const heatOnlyPoints = () => [
+  point('temperature', { type: 'numeric', step: 0.01 }, false, 'temperature'),
+  point('target_temperature', number(5, 30, 0.01), true, 'temperature'),
+  point('mode', enumeration('off', 'heat')),
+];
+
+test('a room thermostat says whether its valve is open, and the valve that only heats gets the radiator, not the dial', () => {
+  hub.devices = {
+    'room:bureau': { id: 'room:bureau', native_name: 'Bureau', model: null, label: {}, online: true, points: valvePoints(), members: ['matter:valve'],
+      state: { occupied_heating_setpoint: { value: 20 }, local_temperature: { value: 19.2 }, system_mode: { value: 'heat' } } },
+    'matter:valve': { id: 'matter:valve', native_name: 'Vanne', model: null, label: {}, online: true, points: heatOnlyPoints(), members: [],
+      state: { temperature: { value: 22.6 }, target_temperature: { value: 18 }, mode: { value: 'heat' } } },
+  };
+  const room = render(components.ValveCard, { props: { id: 'room:bureau', name: 'Bureau' } }).body;
+  assert.match(room, /class="hero heating/);
+  assert.match(room, /Chauffe la pièce|Heating the room/);
+  assert.match(room, /Vanne fermée[^<]*radiateur 22,6|Valve closed[^<]*radiator 22.6/);
+  const valve = show('ValveCard', heatOnlyPoints(), { temperature: 17, target_temperature: 18, mode: 'heat' });
+  assert.match(valve, /class="hero heating/);
+  assert.match(valve, /aria-pressed="true"[^>]*>(Marche|On)</);
+  assert.doesNotMatch(valve, /class="dial/);
+});
+
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const schedulePoints = (write = true, groups = false) => [
   ...valvePoints(),
