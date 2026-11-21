@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="moli_wall_channel">Wall tablet</string>
+  <string name="moli_wall_watching">The screen wakes when someone passes</string>
+  <string name="moli_wall_admin_why">Moli switches the screen off when nobody is there, and on again when someone passes.</string>
+</resources>

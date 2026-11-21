@@ -32,6 +32,7 @@ mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
+mod appli;
 mod outside;
 mod phones;
 mod plan;
@@ -213,6 +214,11 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .route("/api/plan/images/{name}", get(plan::image))
         .route("/api/mobile/register", post(phones::register))
         .route("/api/phones/{id}/report", post(phones::report))
+        // The app's own update, and its Google sign-in handoff (appli.rs).
+        .route("/api/phones/{id}/app", get(appli::latest))
+        .route("/api/phones/{id}/app.apk", get(appli::apk))
+        .route("/api/phones/handoff", post(appli::trade))
+        .route("/api/mobile/handoff", get(appli::start))
         // Under /api/mobile: behind Cloudflare Access like the dashboard
         // (/api/phones is the phones' own way in, Access lets it through).
         .route("/api/mobile/phones", get(phones::list))
@@ -381,6 +387,12 @@ fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Rou
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
+    // The house's data folder, next to home.json.
+    let data_dir = options
+        .home_path
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf);
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
     // Moli adds people through the same household the screens use.
@@ -449,17 +461,13 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
         .layer(Extension(system::HouseZone(options.timezone.clone())))
         .layer(Extension(rest::HomeFile(options.home_path.clone())))
-        .layer(Extension(plan::PlanDir(
-            options
-                .home_path
-                .as_deref()
-                .and_then(std::path::Path::parent)
-                .map(std::path::Path::to_path_buf),
-        )))
+        .layer(Extension(plan::PlanDir(data_dir.clone())))
         .layer(Extension(rest::Metered(options.energy.clone())))
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
+        .layer(Extension(appli::AppDir(data_dir)))
+        .layer(Extension(Arc::new(appli::Handoffs::default())))
         .layer(Extension(humans))
         .layer(Extension(persons))
         .layer(DefaultBodyLimit::max(BODY))

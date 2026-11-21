@@ -23,6 +23,13 @@
   "serveur.telephone.notice_titre": "Nouveau téléphone",
   "serveur.telephone.notice_appaire": "Un téléphone ({id}) vient d'être appairé depuis {by} : il recevra les notifications de la maison. Nom donné : {name}",
 
+  "serveur.appli.aucune": "aucune version de l'appli déposée sur la maison",
+  "serveur.appli.connexion_access": "ce passage de connexion se fait après Cloudflare Access, par une personne de la maison",
+  "serveur.appli.lien_invalide": "lien de connexion invalide : relancer la connexion depuis l'appli",
+  "serveur.appli.code_refuse": "code de connexion inconnu, déjà utilisé ou expiré : relancer la connexion",
+  "serveur.appli.connexion_faite": "Connexion faite. Retour dans l'appli Moli…",
+  "serveur.appli.revenir": "Revenir dans Moli",
+
   "serveur.plan.fichier_illisible": "plan.json : {error}",
   "serveur.plan.humain_arrange": "seule une personne (code) arrange le plan",
   "serveur.plan.humain_ajoute": "seule une personne (code) ajoute un plan",

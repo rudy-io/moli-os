@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app itself (modules/moli-app): its updates, installed from the house
+     (a wall tablet run by Moli without asking, a phone with Android's
+     confirmation), and the session brought back from a Google sign-in. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+  <application>
+    <!-- How an installation went: Android's confirmation shown when needed. -->
+    <receiver
+      android:name="expo.modules.moliapp.InstallStatusReceiver"
+      android:exported="false" />
+
+    <!-- Updated: a wall tablet run by Moli opens Moli again by itself. -->
+    <receiver
+      android:name="expo.modules.moliapp.UpdatedReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>
