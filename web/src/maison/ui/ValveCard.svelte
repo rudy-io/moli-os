@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { device, value, reachable, num, act, home } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, home, clock } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import ScheduleEditor from './ScheduleEditor.svelte';
@@ -84,6 +84,14 @@
   });
   // SVG ids: a device id carries colons.
   const svgId = $derived(id.replace(/[^\w-]/g, '_'));
+  // A room thermostat of Moli: a valve turned by hand is left as it is for a while.
+  const override = $derived(pointOf(d, 'valve_override') ? value(id, 'valve_override') : null);
+  const overrideEnd = $derived.by(() => {
+    const at = Date.parse(value(id, 'valve_override_until') ?? '');
+    return Number.isFinite(at) ? clock(at) : null;
+  });
+  const resume = () =>
+    reachable(id) && act(`${id}/valve_override`, 'none', t('commun.vanne.reglage.action', { name }));
   let editing = $state(false);
   let charting = $state(false);
 
@@ -205,6 +213,14 @@
     {:else}
       <p class="muted">{t('commun.clim.consigne_val', { temp: num(shown, shown % 1 ? 1 : 0), unit: unit ?? '' })}</p>
     {/if}
+  {/if}
+  {#if override === 'manual' || override === 'airing'}
+    <div class="override" role="status">
+      <span>{t(`commun.vanne.reglage.${override === 'airing' ? 'aeration' : 'main'}`, { heure: overrideEnd ?? '—' })}</span>
+      <button class="pill" onclick={resume}>{t(mode === 'auto' ? 'commun.vanne.reglage.reprendre' : 'commun.vanne.reglage.reprendre_consigne')}</button>
+    </div>
+  {:else if override === 'none' && mode === 'auto'}
+    <p class="muted">{t('commun.vanne.reglage.programme')}</p>
   {/if}
   {#if modes.length}
     <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
@@ -591,6 +607,28 @@
     font: inherit;
     font-size: 12.5px;
     text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .override {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    font-size: 13px;
+  }
+
+  .override .pill {
+    border: none;
+    border-radius: 999px;
+    padding: 5px 12px;
+    background: var(--ink);
+    color: var(--surface);
+    font: inherit;
+    font-size: 12.5px;
     cursor: pointer;
   }
 

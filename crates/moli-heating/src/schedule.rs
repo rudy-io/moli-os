@@ -85,6 +85,18 @@ pub fn step_at(steps: &[Step], minute: u16) -> Option<(usize, f64)> {
         .map(|(i, s)| (i, s.temp))
 }
 
+/// Minutes from `minute` to the next step of the day, or to midnight (where
+/// the next day's first step takes over).
+#[must_use]
+pub fn to_next_step(steps: &[Step], minute: u16) -> u16 {
+    steps
+        .iter()
+        .map(|s| s.minute)
+        .find(|m| *m > minute)
+        .unwrap_or(24 * 60)
+        .saturating_sub(minute)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +109,9 @@ mod tests {
         assert_eq!(step_at(&steps, 389), Some((0, 17.0)));
         assert_eq!(step_at(&steps, 390), Some((1, 20.5)));
         assert_eq!(step_at(&steps, 23 * 60 + 59), Some((2, 17.0)));
+        assert_eq!(to_next_step(&steps, 0), 390);
+        assert_eq!(to_next_step(&steps, 390), 22 * 60 - 390);
+        assert_eq!(to_next_step(&steps, 23 * 60), 60);
         assert_eq!(
             parse_day("  00:00/19  ", 5.0, 25.0),
             Some(vec![Step {

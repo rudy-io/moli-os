@@ -142,7 +142,24 @@ async fn until(hub: &Hub, at: &str, value: f64) {
     );
 }
 
+async fn until_text(hub: &Hub, at: &str, value: &str) {
+    for _ in 0..300 {
+        if hub.state(&point(at)).map(|s| s.value) == Some(Value::from(value)) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "{at}: {:?}, {value:?} expected",
+        hub.state(&point(at)).map(|s| s.value)
+    );
+}
+
 async fn house() -> (Hub, CancellationToken) {
+    house_with(|_| {}).await
+}
+
+async fn house_with(tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken) {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let cancel = CancellationToken::new();
     spawn_driver(
@@ -162,6 +179,7 @@ async fn house() -> (Hub, CancellationToken) {
     let mut heating = Heating::new(hub.clone(), rooms(), jiff::tz::TimeZone::UTC);
     heating.settle = Duration::ZERO;
     heating.floor = Duration::ZERO;
+    tune(&mut heating);
     spawn_driver(
         &hub,
         InstanceId::from(INSTANCE),
@@ -232,6 +250,87 @@ async fn the_valve_holds_the_room_by_the_room_sensor() {
         Value::from("00:00/17 06:30/20.5 22:00/17")
     );
     assert!(order("system_mode", Value::from("cool")).await.is_err());
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_valve_turned_by_hand_is_left_as_it_is_for_a_while() {
+    // Looked at often, and written again as soon as it differs: without a
+    // hold, Moli would put its own setpoint back at once.
+    let (hub, cancel) = house_with(|h| {
+        h.tick = Duration::from_millis(20);
+        h.interval = Duration::ZERO;
+        h.airing_hold = Duration::from_millis(400);
+    })
+    .await;
+    let room = "chauffage:parents";
+    let state = |key: &str| format!("{room}/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &state("valve_override"), "none").await;
+    let turn = |value: f64| {
+        let hub = hub.clone();
+        async move {
+            hub.command(&point("vannes:v/sp"), Value::Float(value), Origin::Ui, None)
+                .await
+                .unwrap();
+        }
+    };
+    let order = |key: &str, value: Value| {
+        let hub = hub.clone();
+        let at = point(&format!("{room}/{key}"));
+        async move { hub.command(&at, value, Origin::Ui, None).await.unwrap() }
+    };
+
+    // Turned to 22 by hand: kept, the room says so and until when (2 h).
+    turn(22.0).await;
+    until_text(&hub, &state("valve_override"), "manual").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    let Some(Value::Text(end)) = hub
+        .state(&point(&state("valve_override_until")))
+        .map(|s| s.value)
+    else {
+        panic!("an end expected");
+    };
+    let end: jiff::Timestamp = end.parse().unwrap();
+    let left = end.duration_since(jiff::Timestamp::now()).as_secs();
+    assert!((7100..=7200).contains(&left), "{left} s left");
+
+    // « Resume the schedule »: the room's setpoint again.
+    order("valve_override", Value::from("none")).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &state("valve_override"), "none").await;
+    assert!(
+        hub.command(
+            &point(&state("valve_override")),
+            Value::from("manual"),
+            Origin::Ui,
+            None
+        )
+        .await
+        .is_err()
+    );
+
+    // Turned down to its lowest: airing. Turned up again: the room's setpoint.
+    turn(5.0).await;
+    until_text(&hub, &state("valve_override"), "airing").await;
+    turn(21.0).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &state("valve_override"), "none").await;
+
+    // Airing over on its own.
+    turn(5.0).await;
+    until_text(&hub, &state("valve_override"), "airing").await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &state("valve_override"), "none").await;
+
+    // A change of the room's own setpoint ends a hold.
+    turn(23.0).await;
+    until_text(&hub, &state("valve_override"), "manual").await;
+    order("system_mode", Value::from("heat")).await;
+    order("occupied_heating_setpoint", Value::Float(21.0)).await;
+    until(&hub, "vannes:v/sp", 21.0).await;
+    until_text(&hub, &state("valve_override"), "none").await;
     cancel.cancel();
 }
 

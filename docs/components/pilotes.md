@@ -268,6 +268,16 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   le nom du `[[heating]]` diffère. Un ordre que le hub a déjà donné pour échoué n'est pas appliqué.
 - **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
   vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
+- **Une vanne tournée à la main** (sur sa molette, ou depuis le tableau de bord) : sa consigne a
+  changé depuis le dernier coup d'œil et n'est pas celle que Moli a écrite. Moli la laisse telle
+  quelle au lieu de remettre la sienne (`crates/moli-heating/src/hand.rs`) : **2 h au plus**, et
+  seulement jusqu'au créneau suivant du programme. Tournée à son minimum (à un demi-degré près) ou
+  3 °C ou plus sous la température de la pièce, c'est une **aération** : 30 min au plus, finie dès
+  que la vanne est remontée (la pièce reprend alors sa consigne). La pièce le dit par
+  `valve_override` (`none`, `manual`, `airing` ; écrire `none` reprend le programme) et
+  `valve_override_until` (RFC 3339). Changer la consigne, le mode ou le programme de la pièce
+  met fin aux réglages à la main ; la correction n'apprend pas pendant ce temps. Un redémarrage
+  de Moli les oublie : les vannes reçoivent de nouveau la consigne de la pièce.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
   mal écrite, une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne

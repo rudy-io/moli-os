@@ -253,7 +253,9 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   La page **Chauffage** (`pages/Chauffage.svelte`) réunit, au-dessus de la pompe à chaleur, chaque
   thermostat qui a une table horaire (thermostats de pièce de Moli, `crates/moli-heating`, et vannes
   Zigbee2MQTT) : la carte de la vanne sans son repli de table horaire, la correction appliquée aux
-  vannes (`valve_correction`), **la semaine** (`ui/WeekSchedule.svelte`, calcul pur dans
+  vannes (`valve_correction`), le réglage fait à la main sur une vanne (`valve_override` : « Réglée
+  sur la vanne · programme repris à 14:30 » ou « Aération », avec **Reprendre le programme** ; sinon
+  « Suit le programme »), **la semaine** (`ui/WeekSchedule.svelte`, calcul pur dans
   `lib/week.js`) en sept bandes de 24 h colorées par consigne sur une même échelle pour toutes les
   pièces (15 °C froid → 23 °C chaud, `color-mix` entre `--cool` et `--warm`), avec l'heure actuelle
   sur la ligne du jour, puis l'éditeur du jour choisi. Une limite entre deux créneaux se fait glisser

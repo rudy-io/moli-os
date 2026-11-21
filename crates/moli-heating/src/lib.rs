@@ -17,6 +17,10 @@
 //! - `valve_correction`: the shift applied to the valves (°C), learned from
 //!   the room's error ([`regulation`]); kept across restarts. 0 with
 //!   `correction = false`.
+//! - `valve_override` (writable): `none`, or a valve turned by hand that Moli
+//!   leaves as it is for a while (`manual`, `airing`: [`hand`]); writing
+//!   `none` gives the valves the room's setpoint again.
+//! - `valve_override_until`: when that ends (RFC 3339), empty without one.
 //!
 //! ```toml
 //! [[heating]]
@@ -42,6 +46,7 @@
 //! the room changed, and never in the first minutes after a start, while
 //! the drivers come back.
 
+pub mod hand;
 pub mod regulation;
 pub mod schedule;
 
@@ -56,7 +61,7 @@ use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, Hub};
 use serde::Deserialize;
 
 use regulation::{Shift, valve_heats, valve_setpoint, worth_sending};
-use schedule::{DAYS, Step, format_day, parse_day, step_at};
+use schedule::{DAYS, Step, format_day, parse_day, step_at, to_next_step};
 
 /// The instance that runs the rooms.
 pub const INSTANCE: &str = "chauffage";
@@ -69,6 +74,7 @@ const FRESH_MS: u64 = 30 * 60 * 1000;
 /// and the sensors are read again first.
 const SETTLE: Duration = Duration::from_secs(3 * 60);
 const MODES: [&str; 3] = ["off", "heat", "auto"];
+const OVERRIDES: [&str; 3] = ["none", "manual", "airing"];
 const MAX_ROOMS: usize = 32;
 const MAX_VALVES: usize = 8;
 
@@ -181,8 +187,13 @@ pub struct Heating {
     rooms: Vec<Room>,
     zone: jiff::tz::TimeZone,
     settle: Duration,
-    /// [`regulation::URGENT_FLOOR`], shorter in the tests.
+    /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
+    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`]: shorter in the tests.
     floor: Duration,
+    interval: Duration,
+    tick: Duration,
+    hand_hold: Duration,
+    airing_hold: Duration,
 }
 
 impl Heating {
@@ -195,6 +206,10 @@ impl Heating {
             zone,
             settle: SETTLE,
             floor: regulation::URGENT_FLOOR,
+            interval: regulation::MIN_INTERVAL,
+            tick: TICK,
+            hand_hold: hand::HAND_HOLD,
+            airing_hold: hand::AIRING_HOLD,
         }
     }
 }
@@ -237,6 +252,12 @@ struct ValveRun {
     urgent: bool,
     /// Its point said once not to be a valve's setpoint.
     refused: bool,
+    /// Its setpoint at the last look, and the last one Moli wrote (and was
+    /// told was taken): a change that is neither was made by hand.
+    seen: Option<f64>,
+    written: Option<f64>,
+    /// Turned by hand: left as it is until then.
+    hold: Option<hand::Hold>,
 }
 
 struct RoomRun {
@@ -253,11 +274,25 @@ struct RoomRun {
 }
 
 impl RoomRun {
-    /// The setpoint or mode changed: each valve has it soon.
+    /// The setpoint or mode changed: each valve has it soon, whatever was
+    /// turned on it by hand.
     fn changed(&mut self) {
         for valve in &mut self.valves {
             valve.urgent = true;
+            valve.hold = None;
         }
+    }
+
+    /// The hold the room shows: airing first, then by hand; and its end (the
+    /// latest of its kind).
+    fn hold(&self) -> Option<hand::Hold> {
+        let holds = self.valves.iter().filter_map(|v| v.hold);
+        let kind = holds
+            .clone()
+            .map(|h| h.kind)
+            .min_by_key(|k| *k != hand::Kind::Airing)?;
+        let until_ms = holds.filter(|h| h.kind == kind).map(|h| h.until_ms).max()?;
+        Some(hand::Hold { kind, until_ms })
     }
 }
 
@@ -350,6 +385,30 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
             semantic: Semantic::Config,
         });
     }
+    points.push(PointSpec {
+        key: "valve_override".into(),
+        label: moli_i18n::tr!("pilotes.chauffage.reglage_vanne").into(),
+        kind: Kind::Enum {
+            values: OVERRIDES.iter().map(|m| (*m).into()).collect(),
+        },
+        access: Access {
+            read: true,
+            write: true,
+        },
+        unit: None,
+        semantic: Semantic::Other,
+    });
+    points.push(PointSpec {
+        key: "valve_override_until".into(),
+        label: moli_i18n::tr!("pilotes.chauffage.reglage_vanne_fin").into(),
+        kind: Kind::Text,
+        access: Access {
+            read: true,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Other,
+    });
     points.push(numeric(
         "valve_correction",
         moli_i18n::tr!("pilotes.chauffage.correction"),
@@ -414,6 +473,8 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         Shift::default()
     };
     ctx.set_state(&id, "valve_correction", Value::Float(shift.get()));
+    // A hold is not kept across a restart: the valves get the room's again.
+    show_hold(ctx, &id, None);
     ctx.set_availability(&id, true);
     RoomRun {
         id,
@@ -428,6 +489,9 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
                 sent: None,
                 urgent: false,
                 refused: false,
+                seen: None,
+                written: None,
+                hold: None,
             })
             .collect(),
         shift,
@@ -440,6 +504,16 @@ fn text(value: &Value) -> Option<&str> {
         Value::Text(t) => Some(t),
         _ => None,
     }
+}
+
+/// The room's `valve_override` and `valve_override_until`.
+fn show_hold(ctx: &DriverCtx, id: &DeviceId, hold: Option<hand::Hold>) {
+    let kind = hold.map_or("none", |h| h.kind.name());
+    let until = hold
+        .and_then(|h| jiff::Timestamp::from_millisecond(i64::try_from(h.until_ms).ok()?).ok())
+        .map_or(Value::Null, |t| Value::from(t.to_string().as_str()));
+    ctx.set_state(id, "valve_override", Value::from(kind));
+    ctx.set_state(id, "valve_override_until", until);
 }
 
 fn mode_name(mode: Mode) -> &'static str {
@@ -551,6 +625,40 @@ impl Heating {
         }
     }
 
+    /// How long before the next step of the schedule, when the room follows it.
+    fn to_next_step(&self, run: &RoomRun) -> Option<Duration> {
+        if run.mode != Mode::Auto {
+            return None;
+        }
+        let now = jiff::Timestamp::now().to_zoned(self.zone.clone());
+        let (day, minute) = local(&self.zone);
+        let minutes = u64::from(to_next_step(&run.week[day], minute));
+        let seconds = u64::from(now.second().unsigned_abs());
+        Some(Duration::from_secs((minutes * 60).saturating_sub(seconds)))
+    }
+
+    /// A valve's setpoint moved by someone else than Moli: held as it is
+    /// ([`hand`]), or the room's again when it is turned up after airing.
+    fn turned_by_hand(
+        &self,
+        room: &Room,
+        run_next: Option<Duration>,
+        state: &mut ValveRun,
+        (value, valve_min): (f64, f64),
+        temperature: Option<f64>,
+    ) {
+        let airing = hand::airing(value, valve_min, temperature);
+        if let Some(kind) = hand::after_turn(state.hold.map(|h| h.kind), airing) {
+            let until_ms = hand::until(kind, now_ms(), run_next, self.hand_hold, self.airing_hold);
+            state.hold = Some(hand::Hold { kind, until_ms });
+            tracing::info!(room = %room.id, value, kind = kind.name(), "heating: valve turned by hand, left as it is for a while");
+        } else {
+            state.hold = None;
+            state.urgent = true;
+            tracing::info!(room = %room.id, value, "heating: valve turned up after airing, the room's setpoint again");
+        }
+    }
+
     /// Reads the room and its valves, and writes the valves that need it.
     async fn regulate(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, settled: bool) {
         let temperature = self.fresh(&room.sensor);
@@ -559,10 +667,37 @@ impl Heating {
             "local_temperature",
             temperature.map_or(Value::Null, Value::Float),
         );
-        // The room's error moves the shift, while heating and the room known.
+        let next_step = self.to_next_step(run);
+        // Each valve's hold: one turned by hand since the last look, one over.
+        for (valve, state) in room.valves.iter().zip(&mut run.valves) {
+            if state.hold.is_some_and(|h| now_ms() >= h.until_ms) {
+                state.hold = None;
+                state.urgent = true;
+            }
+            let Valve::Writable((min, _)) = self.bounds(valve) else {
+                continue;
+            };
+            let Some(current) = self
+                .hub
+                .state(&PointId::from(valve.as_str()))
+                .and_then(|s| s.value.as_f64())
+                .filter(|v| v.is_finite())
+            else {
+                continue;
+            };
+            if settled && hand::turned(state.seen, current, state.written) {
+                self.turned_by_hand(room, next_step, state, (current, min), temperature);
+            }
+            state.seen = Some(current);
+        }
+        let hold = run.hold();
+        show_hold(ctx, &run.id, hold);
+        // The room's error moves the shift, while heating and the room known,
+        // and no valve held by hand (the room is not at its setpoint then).
         if let Some(room_t) = temperature
             && room.correction
             && run.mode != Mode::Off
+            && hold.is_none()
         {
             let now = Instant::now();
             let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
@@ -576,7 +711,7 @@ impl Heating {
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
             // Kept until the valve may be written: a change made while Moli
             // starts, or before its valve is known, is not lost.
-            if !settled {
+            if !settled || state.hold.is_some() {
                 continue;
             }
             let bounds = match self.bounds(valve) {
@@ -601,7 +736,7 @@ impl Heating {
             let point = PointId::from(valve.as_str());
             let current = self.hub.state(&point).and_then(|s| s.value.as_f64());
             let since = state.sent.map(|t| t.elapsed());
-            if !worth_sending(current, next, since, urgent, self.floor) {
+            if !worth_sending(current, next, since, urgent, (self.floor, self.interval)) {
                 // Nothing to change: done. Too soon after the last write:
                 // kept for the next look.
                 if !regulation::too_soon(since, self.floor) {
@@ -612,12 +747,16 @@ impl Heating {
             state.urgent = false;
             state.sent = Some(Instant::now());
             let actor = moli_i18n::tr!("pilotes.chauffage.acteur", piece = room.name);
-            if let Err(e) = self
+            match self
                 .hub
                 .command(&point, Value::Float(next), Origin::System, Some(actor))
                 .await
             {
-                tracing::warn!(room = %room.id, error = %e, "heating: valve setpoint refused");
+                // Its report coming back is Moli's, not a hand's.
+                Ok(()) => state.written = Some(next),
+                Err(e) => {
+                    tracing::warn!(room = %room.id, error = %e, "heating: valve setpoint refused");
+                }
             }
         }
         ctx.set_state(
@@ -657,6 +796,15 @@ impl Heating {
                 }
                 None => Err(moli_i18n::tr!("pilotes.chauffage.mode_refuse")),
             }
+        } else if key == "valve_override" {
+            // Only « none »: the valves get the room's setpoint again.
+            if text(&command.value) == Some("none") {
+                run.changed();
+                show_hold(ctx, &run.id, None);
+                Ok(())
+            } else {
+                Err(moli_i18n::tr!("pilotes.chauffage.reglage_vanne_refuse"))
+            }
         } else if let Some(day) = key
             .strip_prefix("weekly_schedule_")
             .and_then(|d| DAYS.iter().position(|x| *x == d))
@@ -693,7 +841,7 @@ impl Driver for Heating {
             }
             ctx.ready();
             let started = Instant::now();
-            let mut tick = tokio::time::interval(TICK);
+            let mut tick = tokio::time::interval(self.tick);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {

@@ -682,6 +682,20 @@ test('a Zigbee valve is a climate shown with its measured temperature, setpoint 
   assert.doesNotMatch(html, /class="dial/);
 });
 
+test('a room thermostat says when a valve was turned by hand, and offers to resume the schedule', () => {
+  const points = [...valvePoints(), point('valve_override', enumeration('none', 'manual', 'airing')), point('valve_override_until', { type: 'text' }, false)];
+  const at = (state) => show('ValveCard', points, { ...valveValues, ...state });
+  assert.match(at({ valve_override: 'none' }), /Suit le programme/);
+  assert.doesNotMatch(at({ valve_override: 'none', system_mode: 'heat' }), /Suit le programme|Reprendre/);
+  const hand = at({ valve_override: 'manual', valve_override_until: '2026-11-21T13:30:00Z' });
+  assert.match(hand, /Réglée sur la vanne · programme repris à \d\d:\d\d/);
+  assert.match(hand, />Reprendre le programme</);
+  assert.match(at({ valve_override: 'airing', valve_override_until: 'pas une date' }), /Aération · chauffage repris à —/);
+  assert.match(at({ valve_override: 'manual', system_mode: 'heat' }), />Reprendre la consigne</);
+  // A Zigbee valve, without the point: nothing about it.
+  assert.doesNotMatch(show('ValveCard', valvePoints(), valveValues), /Suit le programme/);
+});
+
 test('a valve setpoint stops at the bounds its own contract states', () => {
   const atMin = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 4, local_temperature: 19, system_mode: 'heat' });
   assert.match(atMin, /aria-label="[^"]*"\s+disabled/);
