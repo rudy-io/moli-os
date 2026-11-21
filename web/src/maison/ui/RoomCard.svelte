@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home, isSwitchHelper } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home, isSwitchHelper, helperIcon } from '../lib/home.svelte.js';
   import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -86,9 +86,11 @@
     if (deviceKind(d) === 'helper') {
       const key = d.points?.[0]?.key;
       const v = key == null ? null : value(d.id, key);
-      if (v == null || v === '') return every ? [{ tone: '', icon: 'tag', text: '', title: nameOf(d.id) }] : [];
+      const icon = helperIcon(d);
+      const helper = t('commun.piece.aide');
+      if (v == null || v === '') return every ? [{ tone: '', icon, text: '', title: `${nameOf(d.id)} · ${helper}`, helper: true }] : [];
       const shown = typeof v === 'number' ? num(v) : String(v);
-      return [{ tone: '', icon: 'tag', text: shown, title: said(d.id, shown) }];
+      return [{ tone: '', icon, text: shown, title: `${said(d.id, shown)} · ${helper}`, helper: true }];
     }
     // An appliance that is no button: what it draws, nothing when unplugged.
     if (quiet(d.id)) {
@@ -208,7 +210,7 @@
     if (kind === 'cover') return (coverPosition(d.id) ?? 0) > 0 ? 'shutter-open' : 'shutter';
     if (kind === 'tv') return 'tv';
     if (kind === 'speaker') return 'speaker';
-    if (kind === 'helper') return 'toggle';
+    if (kind === 'helper') return helperIcon(d);
     if (kind === 'plug') return /vmc|ventil|\bfan\b|exhaust/.test(name) ? 'fan' : 'socket';
     if (hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan))) return 'ceiling-fan-light';
     if (/spot/.test(name)) return 'spotlight';
@@ -401,7 +403,7 @@
               {#if !icons}<b>{label}</b><small>{said}</small>{/if}
             </button>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover || (lit && !outlets && !point && drawOf(d) != null) ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
+            <button class="pad" class:on={lit} class:cut class:helper={deviceKind(d) === 'helper'} class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={deviceKind(d) === 'helper' ? `${label} · ${t('commun.piece.aide')}` : isCover || (lit && !outlets && !point && drawOf(d) != null) ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
             </button>
@@ -457,7 +459,7 @@
         {#if c.href}
           <a class="chip {c.tone}" href={c.href} title={c.title ?? c.text}><Icon name={c.icon} size={15} />{c.text}</a>
         {:else}
-          <span class="chip {c.tone}" title={c.title ?? c.text}><Icon name={c.icon} size={c.text ? 15 : 18} label={c.text ? null : c.title} />{c.text}</span>
+          <span class="chip {c.tone}" class:helper={c.helper} title={c.title ?? c.text}><Icon name={c.icon} size={c.text ? 15 : 18} label={c.text ? null : c.title} />{c.text}</span>
         {/if}
       {/each}
     </div>
@@ -673,6 +675,14 @@
     padding: 0;
     place-items: center;
     align-content: center;
+  }
+
+  /* A helper is no device: a value Moli keeps. Dashed, like a draft. */
+  .pad.helper,
+  .chip.helper {
+    border-style: dashed;
+    outline: 1px dashed color-mix(in srgb, var(--muted, #888) 55%, transparent);
+    outline-offset: -1px;
   }
 
   .pad.on {

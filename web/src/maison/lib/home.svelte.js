@@ -293,6 +293,15 @@ const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!w
 /** A helper: a value Moli keeps for itself (`helpers` driver), never a plug. */
 export const isHelper = (d) => d?.manufacturer === 'Moli' && d?.model === 'Aide';
 
+/** A helper's icon, by its kind: a switch, a choice, a number or a text. */
+export function helperIcon(d) {
+  const kind = d?.points?.[0]?.kind?.type;
+  if (kind === 'binary') return 'toggle';
+  if (kind === 'enum') return 'helper-select';
+  if (kind === 'numeric') return 'helper-number';
+  return 'helper-text';
+}
+
 /** A helper that is a switch: a pad, Oui / Non. The others are chips. */
 export const isSwitchHelper = (d) => isHelper(d) && d.points?.some((p) => p.key === 'on');
 

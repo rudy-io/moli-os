@@ -1369,5 +1369,12 @@ test('a helper is no plug: a switch is a pad saying Oui / Non, a value a chip wi
   const text = html.replace(/<!--[\s\S]*?-->/g, '');
   assert.match(text, /<b[^>]*>Lave-linge en cours<\/b><small[^>]*>Oui<\/small>/);
   assert.doesNotMatch(text, /Lave-linge en cours<\/b><small[^>]*>Allumée/);
-  assert.match(text, /title="Mode maison : Nuit"/);
+  assert.match(text, /title="Mode maison : Nuit · Aide"/);
+  // An icon per kind, never the plug's, and the dashed mark of a helper.
+  assert.equal(home.helperIcon(hub.devices['maison:lave_linge_en_cours']), 'toggle');
+  assert.equal(home.helperIcon(hub.devices['maison:mode']), 'helper-select');
+  assert.ok(text.includes(icons.toggle) && text.includes(icons['helper-select']));
+  assert.match(text, /class="pad[^"]*helper[^"]*"[^>]*title="Lave-linge en cours · Aide"/);
+  assert.match(text, /class="chip[^"]*helper[^"]*"/);
+  assert.doesNotMatch(text.split('Lave-linge en cours')[0].split('<button').pop(), new RegExp(icons.socket.slice(0, 20)));
 });

@@ -202,6 +202,7 @@
   "commun.piece.lecture_en_cours": "Playing",
   "commun.piece.a_l_arret": "Stopped",
   "commun.piece.eteinte": "Off",
+  "commun.piece.aide": "Helper",
   "commun.piece.allumee": "On",
   "commun.piece.allumee_conso": "On · {watts}",
   "commun.piece.en_marche": "Running",

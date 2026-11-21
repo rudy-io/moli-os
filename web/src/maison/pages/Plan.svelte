@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
-  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered, plantNeeds } from '../lib/home.svelte.js';
+  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered, plantNeeds, helperIcon } from '../lib/home.svelte.js';
   import { asHuman, CANCELLED } from '../lib/auto.svelte.js';
   import Drawing from '../plan/Drawing.svelte';
   import House3D from '../plan/House3D.svelte';
@@ -143,11 +143,12 @@
 
   // ---- what a token shows -------------------------------------------------------
 
-  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter', plant: 'sprout', helper: 'toggle' };
+  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter', plant: 'sprout' };
   const has = (d, key) => d.points.some((p) => p.key === key);
 
   function iconOf(d) {
     const kind = deviceKind(d);
+    if (kind === 'helper') return helperIcon(d);
     if (ICON[kind]) return ICON[kind];
     if (has(d, 'smoke')) return 'fire';
     if (has(d, 'water_leak') || has(d, 'watersensor_state')) return 'water';

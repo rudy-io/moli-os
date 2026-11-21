@@ -193,6 +193,7 @@
   "commun.piece.lecture_en_cours": "Lecture",
   "commun.piece.a_l_arret": "À l’arrêt",
   "commun.piece.eteinte": "Éteinte",
+  "commun.piece.aide": "Aide",
   "commun.piece.allumee": "Allumée",
   "commun.piece.allumee_conso": "Allumée · {watts}",
   "commun.piece.en_marche": "En marche",
