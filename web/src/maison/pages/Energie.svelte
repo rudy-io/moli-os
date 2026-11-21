@@ -460,7 +460,8 @@
       </section>
     </div>
 
-    <TariffPie {windows} />
+    <!-- Peak and off-peak only for a house with such a tariff ([energy.tariff]). -->
+    {#if s?.period_point}<TariffPie {windows} />{/if}
 
     <section class="card">
       <div class="card-head">
