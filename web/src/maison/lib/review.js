@@ -124,3 +124,55 @@ export function latest(byCamera, n = 20) {
   for (const { camera, items } of byCamera) for (const item of items) out.push({ camera, item });
   return out.sort((a, b) => b.item.start - a.item.start).slice(0, n);
 }
+
+/** The longest extract saved at once (seconds): what the NVR cuts in one go. */
+export const EXTRACT_MAX = 3600;
+
+/** An extract to save, in whole seconds, never past what is recorded yet
+ *  (`now` less two seconds); null when it is empty or too long. */
+export function extract(start, end, now) {
+  const from = Math.floor(start);
+  const to = Math.min(Math.ceil(end), Math.floor(now) - 2);
+  return to > from + 1 && to - from <= EXTRACT_MAX ? { start: from, end: to } : null;
+}
+
+/** Seconds → the value of a `datetime-local` field, to the second, in
+ *  local time (`2026-11-20T11:21:05`). */
+export function toField(t) {
+  const d = new Date(t * 1000);
+  const two = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
+/** A `datetime-local` value (local time, seconds optional) → seconds;
+ *  null when it is not one. */
+export function fromField(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value ?? '');
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s = '0'] = m;
+  const t = new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime() / 1000;
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Whether something was recorded between `start` and `end`: the NVR
+ *  refuses an extract with nothing in it. Recordings not read yet (an
+ *  empty list): not known, let it try. */
+export function recordedIn(start, end, recorded) {
+  return !recorded.length || recorded.some((r) => r.start < end && start < r.end);
+}
+
+/** The file an extract is saved as: the camera, then its local date and
+ *  time (`entree-2026-11-20-11h21m05.mp4`). */
+export function extractName(camera, start) {
+  const slug =
+    String(camera ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'camera';
+  const d = new Date(start * 1000);
+  const two = (n) => String(n).padStart(2, '0');
+  return `${slug}-${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}-${two(d.getHours())}h${two(d.getMinutes())}m${two(d.getSeconds())}.mp4`;
+}

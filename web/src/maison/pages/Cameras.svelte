@@ -230,6 +230,11 @@
     display: grid;
     gap: 14px;
     color: #eef1f7;
+    /* A thin, dim scrollbar on the dark, kept clear of the picture. */
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 22%) transparent;
+    scrollbar-gutter: stable;
+    padding-right: 6px;
   }
 
   .bar {

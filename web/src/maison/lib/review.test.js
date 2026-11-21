@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW } from './review.js';
+import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW, extract, extractName, recordedIn, toField, fromField, EXTRACT_MAX } from './review.js';
 
 test('a day, local, from midnight to midnight', () => {
   const noon = new Date(2026, 10, 15, 12, 30).getTime() / 1000;
@@ -99,4 +99,37 @@ test('the newest items of every camera, mixed', () => {
     ['a2', 'b3', 'a1'],
   );
   assert.equal(latest(byCamera, 2).length, 2);
+});
+
+test('an extract is whole seconds, recorded already, never empty nor over an hour', () => {
+  assert.deepEqual(extract(100.4, 160.2, 1000), { start: 100, end: 161 });
+  assert.deepEqual(extract(990, 1100, 1000), { start: 990, end: 998 });
+  assert.equal(extract(200, 200.5, 1000), null);
+  assert.equal(extract(300, 200, 1000), null);
+  assert.equal(extract(0, EXTRACT_MAX + 1, 1e9), null);
+  assert.deepEqual(extract(0, EXTRACT_MAX, 1e9), { start: 0, end: EXTRACT_MAX });
+});
+
+test('an extract is named after its camera and its local time', () => {
+  const t = new Date(2026, 10, 20, 11, 21, 5).getTime() / 1000;
+  assert.equal(extractName('Entrée', t), 'entree-2026-11-20-11h21m05.mp4');
+  assert.equal(extractName('Allée du portail !', t), 'allee-du-portail-2026-11-20-11h21m05.mp4');
+  assert.equal(extractName('', t), 'camera-2026-11-20-11h21m05.mp4');
+});
+
+test('an extract needs something recorded in it', () => {
+  const recorded = [{ start: 100, end: 200 }, { start: 500, end: 600 }];
+  assert.equal(recordedIn(150, 170, recorded), true);
+  assert.equal(recordedIn(190, 510, recorded), true);
+  assert.equal(recordedIn(250, 400, recorded), false);
+  assert.equal(recordedIn(250, 400, []), true);
+});
+
+test('a moment goes to a date-and-time field and back, in local time', () => {
+  const t = new Date(2026, 10, 20, 9, 5, 7).getTime() / 1000;
+  assert.equal(toField(t), '2026-11-20T09:05:07');
+  assert.equal(fromField('2026-11-20T09:05:07'), t);
+  assert.equal(fromField('2026-11-20T09:05'), t - 7);
+  assert.equal(fromField(''), null);
+  assert.equal(fromField('hier'), null);
 });
