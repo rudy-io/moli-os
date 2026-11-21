@@ -24,7 +24,7 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'WeekSchedule', 'AlarmCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'RadiatorTile', 'ScheduleEditor', 'ValveChart', 'WeekSchedule', 'AlarmCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
@@ -690,10 +690,42 @@ test('a room thermostat says when a valve was turned by hand, and offers to resu
   const hand = at({ valve_override: 'manual', valve_override_until: '2026-11-21T13:30:00Z' });
   assert.match(hand, /Réglée sur la vanne · programme repris à \d\d:\d\d/);
   assert.match(hand, />Reprendre le programme</);
-  assert.match(at({ valve_override: 'airing', valve_override_until: 'pas une date' }), /Aération · chauffage repris à —/);
+  const airing = at({ valve_override: 'airing', valve_override_until: 'pas une date' });
+  assert.match(airing, /Aération/);
+  assert.match(airing, /Chauffage repris à —/);
   assert.match(at({ valve_override: 'manual', system_mode: 'heat' }), />Reprendre la consigne</);
   // A Zigbee valve, without the point: nothing about it.
   assert.doesNotMatch(show('ValveCard', valvePoints(), valveValues), /Suit le programme/);
+});
+
+test('a radiator is drawn with what it does, the room against its setpoint, and what comes next', () => {
+  const points = [...schedulePoints(), point('valve_override', enumeration('none', 'manual', 'airing')), point('valve_override_until', { type: 'text' }, false)];
+  const at = (state, props = {}) => show('RadiatorTile', points, { ...valveValues, valve_override: 'none', ...state }, {}, props);
+  const heating = at({ local_temperature: 18.2, occupied_heating_setpoint: 19 });
+  assert.match(heating, /class="radiator heating/);
+  assert.match(heating, /Chauffe/);
+  assert.match(heating, /Chauffe(<!--[^>]*-->)? · <span[^>]*>18[.,]2° pour 19°/);
+  assert.match(at({ local_temperature: 19 }), /class="radiator holding[^"]*"[\s\S]*À température/);
+  assert.match(at({ local_temperature: 21 }), /Au repos/);
+  assert.match(at({ system_mode: 'off' }), /class="radiator off/);
+  // Turned down for airing: said, with the way back to the schedule.
+  const airing = at({ valve_override: 'airing', valve_override_until: '2026-11-21T09:54:00Z' });
+  assert.match(airing, /Aération/);
+  assert.match(airing, /class="radiator airing/);
+  assert.match(airing, />Reprendre le programme</);
+  const hand = at({ valve_override: 'manual', valve_override_until: '2026-11-21T13:30:00Z' });
+  assert.match(hand, /Réglée sur la vanne · programme repris à \d\d:\d\d/);
+  assert.match(hand, /class="hand\b/);
+  assert.doesNotMatch(heating, /Reprendre/);
+  // Opening the valve's card: the whole face is the button.
+  assert.match(at({}, { onopen: () => {} }), /<button[^>]*class="face\b[^>]*aria-expanded="false"/);
+  assert.match(at({}, { icons: true }), /class="short\b/);
+});
+
+test('a room draws its valve as a radiator, an air conditioner keeps its button', () => {
+  const html = showRoom([{ id: 'fixture:valve', points: valvePoints(), values: { occupied_heating_setpoint: 19, local_temperature: 18, system_mode: 'heat' } }]);
+  assert.match(html, /class="radiator heating/);
+  assert.doesNotMatch(html, /class="clim/);
 });
 
 test('a valve setpoint stops at the bounds its own contract states', () => {
@@ -717,14 +749,14 @@ test('a room lists its valve as a climate and opens the valve card, not the air-
   assert.doesNotMatch(html, /class="dial/);
 });
 
-test('a valve is drawn as its radiator: warming while open, a tick once closed, frost guard when off', () => {
+test('a valve on its own is drawn open or closed, and off', () => {
   const heating = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 20, local_temperature: 19, system_mode: 'heat', running_state: 'heat' });
-  assert.match(heating, /class="hero heating/);
-  assert.match(heating, /Vanne ouverte|Valve open/);
+  assert.match(heating, /class="radiator heating/);
+  assert.match(heating, /Vanne ouverte, chauffe/);
   const closed = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18, local_temperature: 19, system_mode: 'heat', running_state: 'idle' });
-  assert.match(closed, /class="hero reached/);
-  assert.match(closed, /class="badge tick/);
-  assert.match(show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18, local_temperature: 19, system_mode: 'off' }), /class="hero off/);
+  assert.match(closed, /class="radiator closed/);
+  assert.match(closed, /Vanne fermée/);
+  assert.match(show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18, local_temperature: 19, system_mode: 'off' }), /class="radiator off/);
 });
 
 const heatOnlyPoints = () => [
@@ -741,11 +773,12 @@ test('a room thermostat says whether its valve is open, and the valve that only 
       state: { temperature: { value: 22.6 }, target_temperature: { value: 18 }, mode: { value: 'heat' } } },
   };
   const room = render(components.ValveCard, { props: { id: 'room:bureau', name: 'Bureau' } }).body;
-  assert.match(room, /class="hero heating/);
-  assert.match(room, /Chauffe la pièce|Heating the room/);
-  assert.match(room, /Vanne fermée[^<]*radiateur 22,6|Valve closed[^<]*radiator 22.6/);
+  assert.match(room, /class="radiator heating/);
+  assert.match(room, /class="phase[^"]*">Chauffe</);
+  assert.match(room, /Vanne fermée · radiateur 22,6°/);
   const valve = show('ValveCard', heatOnlyPoints(), { temperature: 17, target_temperature: 18, mode: 'heat' });
-  assert.match(valve, /class="hero heating/);
+  assert.match(valve, /class="radiator heating/);
+  assert.match(valve, /Vanne ouverte, chauffe/);
   assert.match(valve, /aria-pressed="true"[^>]*>(Marche|On)</);
   assert.doesNotMatch(valve, /class="dial/);
 });

@@ -7,6 +7,7 @@
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
   import ValveCard from './ValveCard.svelte';
+  import RadiatorTile from './RadiatorTile.svelte';
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
@@ -422,13 +423,17 @@
   {/each}
 
   {#each room.climates as d (d.id)}
+    {#if heatsOnly(d)}
+      <RadiatorTile id={d.id} {icons} open={openClim === d.id} onopen={() => (openClim = openClim === d.id ? null : d.id)} />
+      {#if openClim === d.id}<ValveCard id={d.id} name={nameOf(d.id)} bare />{/if}
+    {:else}
     {@const keys = climateKeys(d)}
     {@const mode = pointOf(d, keys.mode) ? value(d.id, keys.mode) : null}
     {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
     {@const temperature = pointOf(d, keys.temperature) ? value(d.id, keys.temperature) : null}
     {@const target = pointOf(d, keys.target) ? value(d.id, keys.target) : null}
     <button class="clim" class:on={on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
-      <Icon name={heatsOnly(d) ? 'fire' : 'air-conditioner'} size={18} />
+      <Icon name="air-conditioner" size={18} />
       <b>{nameOf(d.id)}</b>
       {#if Number.isFinite(temperature) || Number.isFinite(target)}
         <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, keys.temperature)?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, keys.target)?.unit ?? ''}{/if}</span>
@@ -436,7 +441,8 @@
       <span class="state">{climateState(on, mode)}</span>
     </button>
     {#if openClim === d.id}
-      {#if heatsOnly(d)}<ValveCard id={d.id} name={nameOf(d.id)} />{:else}<ClimateCard id={d.id} name={nameOf(d.id)} />{/if}
+      <ClimateCard id={d.id} name={nameOf(d.id)} />
+    {/if}
     {/if}
   {/each}
 
