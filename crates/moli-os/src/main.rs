@@ -1077,8 +1077,10 @@ fn history_import(config: &Config) -> anyhow::Result<()> {
     }
     let store = moli_history::Store::open(&config.server.data_dir.join("history.db"))?;
     for (point, hours) in &by_point {
-        let (inserted, skipped) = store.import_hourly(point, hours)?;
-        println!("{point}: {inserted} hours imported, {skipped} skipped (known or recorded live)");
+        let (inserted, skipped) = store.import_hourly(point, hours, moli_core::now_ms())?;
+        println!(
+            "{point}: {inserted} hours imported, {skipped} skipped (known, recorded live, or not over yet)"
+        );
     }
     if invalid > 0 {
         println!(

@@ -222,10 +222,12 @@ async fn prune_loop(
             match blocking(move || store.rollup(&points, now_ms())).await {
                 Ok(0) => {}
                 Ok(n) => tracing::debug!(hours = n, "hourly statistics filed"),
-                Err(e) => {
-                    tracing::warn!(error = %e, "hourly statistics not filed, pruning put off");
-                    continue;
-                }
+                // Pruning still runs: it keeps what the hours not filed need
+                // (Store::prune), and the rest must not grow without end.
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "hourly statistics not filed: their changes are kept until they are"
+                ),
             }
         }
         round += 1;
@@ -233,8 +235,8 @@ async fn prune_loop(
             continue;
         }
         let cutoff = now_ms().saturating_sub(u64::from(retention_days) * 86_400_000);
-        let store = Arc::clone(&store);
-        match blocking(move || store.prune(cutoff)).await {
+        let (store, points) = (Arc::clone(&store), hourly.clone());
+        match blocking(move || store.prune(cutoff, &points)).await {
             Ok(0) => {}
             Ok(n) => tracing::info!(removed = n, "history pruned"),
             Err(e) => tracing::warn!(error = %e, "history pruning failed"),

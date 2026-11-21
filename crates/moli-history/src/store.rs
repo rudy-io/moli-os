@@ -253,13 +253,61 @@ impl Store {
     }
 
     /// Deletes samples older than `cutoff_ms`, except the latest of each
-    /// point (a value stable for months must still be known). Returns how many.
-    pub fn prune(&self, cutoff_ms: u64) -> Result<usize, HistoryError> {
-        Ok(lock(&self.writer).execute(
-            "DELETE FROM samples WHERE ts < ?1
-             AND ts < (SELECT MAX(s.ts) FROM samples s WHERE s.point_id = samples.point_id)",
+    /// point (a value stable for months must still be known). A point whose
+    /// hours are kept (`kept`) also keeps the changes of the hours not filed
+    /// yet, and the one before them (where the next hour starts from): a
+    /// rollup failing for days loses nothing, and everything else is pruned
+    /// all the same. Returns how many.
+    pub fn prune(&self, cutoff_ms: u64, kept: &[String]) -> Result<usize, HistoryError> {
+        let mut conn = lock(&self.writer);
+        let tx = conn.transaction()?;
+        // Each kept point: the oldest change its next hours still need.
+        let mut needed: Vec<(i64, i64)> = Vec::new();
+        for point in kept {
+            let Some(id) = point_id(&tx, point)? else {
+                continue;
+            };
+            let from = match own_since(&tx, id)? {
+                // Not begun (no rollup went through yet): every change is needed.
+                None => 0,
+                Some(since) => {
+                    let first = hour_of(since);
+                    let filed: Option<i64> = tx.query_row(
+                        "SELECT MAX(hour) FROM hourly_stats WHERE point_id = ?1 AND hour >= ?2",
+                        params![id, ts(first)],
+                        |r| r.get(0),
+                    )?;
+                    filed.map_or(first, |h| ms(h) + HOUR_MS)
+                }
+            };
+            let before: Option<i64> = tx.query_row(
+                "SELECT MAX(ts) FROM samples WHERE point_id = ?1 AND ts < ?2",
+                params![id, ts(from)],
+                |r| r.get(0),
+            )?;
+            needed.push((id, before.unwrap_or_else(|| ts(from))));
+        }
+        let latest = "ts < (SELECT MAX(s.ts) FROM samples s WHERE s.point_id = samples.point_id)";
+        // Ids read from the database: integers only in the statement.
+        let kept_ids = needed
+            .iter()
+            .map(|(id, _)| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut removed = tx.execute(
+            &format!(
+                "DELETE FROM samples WHERE ts < ?1 AND {latest} AND point_id NOT IN ({kept_ids})"
+            ),
             [ts(cutoff_ms)],
-        )?)
+        )?;
+        for (id, keep_from) in needed {
+            removed += tx.execute(
+                &format!("DELETE FROM samples WHERE point_id = ?1 AND ts < ?2 AND {latest}"),
+                params![id, ts(cutoff_ms).min(keep_from)],
+            )?;
+        }
+        tx.commit()?;
+        Ok(removed)
     }
 
     /// Files the hourly statistics of `points` for every whole hour before
@@ -303,12 +351,15 @@ impl Store {
     }
 
     /// Adds hours recorded elsewhere (Home Assistant's statistics, a
-    /// weather archive) to a point, only before its own statistics began
-    /// and where no hour is filed yet. Returns (inserted, skipped).
+    /// weather archive) to a point, only before its own statistics began,
+    /// where no hour is filed yet, and only hours already over at `now` (a
+    /// later one would stop the filing until then: it goes on from the last
+    /// hour filed). Returns (inserted, skipped).
     pub fn import_hourly(
         &self,
         point: &str,
         rows: &[Hour],
+        now: u64,
     ) -> Result<(usize, usize), HistoryError> {
         let mut conn = lock(&self.writer);
         let tx = conn.transaction()?;
@@ -330,7 +381,9 @@ impl Store {
                  ON CONFLICT (point_id, hour) DO NOTHING",
             )?;
             for h in rows {
-                if own.is_some_and(|own| h.hour + HOUR_MS > own) {
+                if h.hour.saturating_add(HOUR_MS) > now
+                    || own.is_some_and(|own| h.hour + HOUR_MS > own)
+                {
                     skipped += 1;
                 } else if add.execute(params![id, ts(h.hour), h.avg, h.min, h.max])? == 1 {
                     inserted += 1;
@@ -795,7 +848,7 @@ mod tests {
             (p("d/stable"), Value::Int(7), 1_000),
         ];
         store.insert(&rows, false).unwrap();
-        assert_eq!(store.prune(5_000).unwrap(), 1);
+        assert_eq!(store.prune(5_000, &[]).unwrap(), 1);
         assert_eq!(store.series("d/x", 0, 10_000, 10).unwrap().total, 1);
         // A value that never changed is still known, however old.
         let stable = store.series("d/stable", 6_000, 10_000, 10).unwrap();
@@ -831,7 +884,7 @@ mod tests {
         assert_eq!(sql.rows[3][2], serde_json::json!(8.0));
 
         // Long after: the changes are pruned, the hours stay and are read back.
-        assert!(store.prune(103 * H).unwrap() > 0);
+        assert!(store.prune(103 * H, &kept).unwrap() > 0);
         let s = store
             .series("meteo:m/temperature", 90 * H, 104 * H, 100)
             .unwrap();
@@ -868,6 +921,97 @@ mod tests {
     }
 
     #[test]
+    fn a_failing_rollup_never_stops_the_pruning() {
+        const H: u64 = HOUR_MS;
+        let (store, dir) = store("hourly-failing");
+        let kept = vec!["meteo:m/temperature".to_owned()];
+        let at = |v: f64, t: u64| (p("meteo:m/temperature"), Value::Float(v), t);
+        store
+            .insert(
+                &[
+                    at(4.0, 100 * H + H / 2),
+                    at(6.0, 101 * H + H / 2),
+                    (p("other:x/t"), Value::Int(1), 100 * H),
+                    (p("other:x/t"), Value::Int(2), 101 * H),
+                    (p("other:x/t"), Value::Int(3), 102 * H),
+                ],
+                false,
+            )
+            .unwrap();
+        // No rollup ever went through: the other points are pruned, the kept
+        // one keeps every change.
+        assert_eq!(store.prune(200 * H, &kept).unwrap(), 2);
+        assert_eq!(store.series("other:x/t", 0, 200 * H, 10).unwrap().total, 1);
+        assert_eq!(
+            store
+                .series("meteo:m/temperature", 0, 200 * H, 10)
+                .unwrap()
+                .total,
+            2
+        );
+
+        // Filed up to 102 h, then more changes, then the rollup fails again:
+        // only what the next hours need is left, the change before them included.
+        assert_eq!(store.rollup(&kept, 102 * H).unwrap(), 2);
+        store
+            .insert(&[at(8.0, 103 * H), at(9.0, 104 * H)], false)
+            .unwrap();
+        // 4 at 100:30 is no longer needed: 6 at 101:30 is the value 102 h starts from.
+        assert_eq!(store.prune(200 * H, &kept).unwrap(), 1);
+        assert_eq!(
+            store
+                .series("meteo:m/temperature", 0, 200 * H, 10)
+                .unwrap()
+                .total,
+            3
+        );
+        // Filed later on, from where it stopped, with the right value before.
+        assert_eq!(store.rollup(&kept, 105 * H).unwrap(), 3);
+        let sql = store
+            .query_sql(
+                "SELECT hour, avg FROM hourly WHERE hour >= 102 * 3600000 ORDER BY hour",
+                10,
+            )
+            .unwrap();
+        assert_eq!(sql.rows.len(), 3);
+        assert_eq!(sql.rows[0][1], serde_json::json!(6.0)); // 102 h: nothing changed, 6 all along
+        assert_eq!(sql.rows[1][1], serde_json::json!(8.0));
+        // Now the old changes can go (the latest before 105 h stays).
+        assert_eq!(store.prune(200 * H, &kept).unwrap(), 2);
+        assert_eq!(
+            store
+                .series("meteo:m/temperature", 0, 200 * H, 10)
+                .unwrap()
+                .total,
+            1
+        );
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_hour_not_over_is_never_imported() {
+        const H: u64 = HOUR_MS;
+        let (store, dir) = store("hourly-future");
+        let hour = |h: u64| Hour {
+            hour: h * H,
+            avg: 1.0,
+            min: 1.0,
+            max: 1.0,
+        };
+        let point = "pac:x/outside_temperature";
+        // At 10:30: 9 h is over, 10 h is not, 50 h is to come.
+        assert_eq!(
+            store
+                .import_hourly(point, &[hour(9), hour(10), hour(50)], 10 * H + H / 2)
+                .unwrap(),
+            (1, 2)
+        );
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn imported_hours_stop_where_moli_began() {
         const H: u64 = HOUR_MS;
         let (store, dir) = store("hourly-import");
@@ -881,11 +1025,16 @@ mod tests {
         let point = "pac:x/outside_temperature";
         assert_eq!(
             store
-                .import_hourly(point, &[hour(1, 1.0), hour(2, 2.0)])
+                .import_hourly(point, &[hour(1, 1.0), hour(2, 2.0)], 100 * H)
                 .unwrap(),
             (2, 0)
         );
-        assert_eq!(store.import_hourly(point, &[hour(2, 9.0)]).unwrap(), (0, 1));
+        assert_eq!(
+            store
+                .import_hourly(point, &[hour(2, 9.0)], 100 * H)
+                .unwrap(),
+            (0, 1)
+        );
         // Moli began at 10:30: the hour it began in and later ones are its own.
         store
             .insert(&[(p(point), Value::Float(5.0), 10 * H + H / 2)], false)
@@ -893,7 +1042,11 @@ mod tests {
         store.rollup(&[point.to_owned()], 12 * H).unwrap();
         assert_eq!(
             store
-                .import_hourly(point, &[hour(9, 3.0), hour(10, 3.0), hour(11, 3.0)])
+                .import_hourly(
+                    point,
+                    &[hour(9, 3.0), hour(10, 3.0), hour(11, 3.0)],
+                    100 * H
+                )
                 .unwrap(),
             (1, 2)
         );
