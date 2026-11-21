@@ -1,0 +1,7 @@
+{
+ "response_status": {
+  "error_code": "TooManyRequests",
+  "message": "You have exceeded your free daily limit.",
+  "errors": []
+ }
+}

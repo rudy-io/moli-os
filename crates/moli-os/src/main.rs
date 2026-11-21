@@ -1356,6 +1356,7 @@ const KINDS: &[&str] = &[
     "overkiz",
     "dirigera",
     "enedis",
+    "solcast",
     "linky-tic",
     "homeassistant",
     "igd",
@@ -1648,6 +1649,7 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "synology" => configured_driver(config, moli_synology::Synology::new)?,
+        "solcast" => configured_driver(config, moli_solcast::Solcast::new)?,
         "vicare" => Arc::new(moli_vicare::Vicare::new(
             config.options.clone().try_into().with_context(context)?,
         )),

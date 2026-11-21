@@ -18,6 +18,7 @@
   import { isAlarm } from './lib/alarm.js';
   import Energie from './pages/Energie.svelte';
   import Impression from './pages/Impression.svelte';
+  import Pac from './pages/Pac.svelte';
   import Dehors from './pages/Dehors.svelte';
   import Chauffage from './pages/Chauffage.svelte';
   import Moli from './pages/Moli.svelte';
@@ -65,6 +66,7 @@
     { path: 'alarme', label: 'commun.nav.alarme', icon: 'shield', shown: () => Object.values(hub.devices).some(isAlarm) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
+    { path: 'pac', label: 'commun.nav.pac', icon: 'fire', shown: () => !!home.config?.heatpump?.device },
     { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating' || (isValve(d) && scheduleSpec(d))) },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => printersPresent(hub.devices) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
@@ -186,6 +188,8 @@
       {#await import('./pages/Solaire.svelte') then { default: Solaire }}<Solaire />{/await}
     {:else if page === 'energie'}
       <Energie />
+    {:else if page === 'pac'}
+      <Pac />
     {:else if page === 'impression'}
       <Impression />
     {:else if page === 'dehors'}

@@ -116,6 +116,14 @@ apply directly to upstream main as of 2026-11-15.
 - The host idle-report failure was traced to firewall drops at the ephemeral
   UDP listener, not established as a liveness-grace defect. The five-second
   grace is unchanged; no timeout increase or periodic polling was introduced.
+- The bounded subscription report queue holds 512 reports (up from 256). The
+  controller queues the complete priming snapshot before returning the receiver;
+  Hue's merged snapshot contained 276 distinct attributes (295 wire items), so
+  the old bound left a pending `Lagged` event ahead of the first live report and
+  caused Moli to restart its watcher. A controller regression covers the 295-item
+  priming case and verifies the first live report remains consumable. Memory
+  remains bounded; overflow during later steady-state bursts is still surfaced
+  as `Lagged`.
 
 - Controller builder `listen_port(u16)` selects the operational UDP bind port in
   both default and custom discovery paths. The default and `MatterController::open`

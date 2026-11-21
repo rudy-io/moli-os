@@ -14,7 +14,8 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      }
+      },
+      "environment": "preview"
     },
     "production": {
       "autoIncrement": true,
@@ -24,7 +25,8 @@
       "ios": {
         "distribution": "store",
         "autoIncrement": "buildNumber"
-      }
+      },
+      "environment": "production"
     }
   },
   "submit": {
