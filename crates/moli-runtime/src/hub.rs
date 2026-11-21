@@ -82,8 +82,12 @@ pub enum CommandError {
     Busy,
     #[error("driver did not answer in time")]
     Timeout,
+    #[error("command outcome unknown; the device may have carried it out")]
+    OutcomeUnknown,
     #[error("driver error: {0}")]
     Driver(String),
+    #[error("driver refused the command: {0}")]
+    DriverRefused(String),
     /// Held by the guard: a human must approve request `id`.
     #[error("awaiting human approval #{id}: {reason}")]
     NeedsApproval { id: u64, reason: String },
@@ -177,8 +181,8 @@ fn transient(e: &CommandError) -> bool {
         e,
         CommandError::DriverUnavailable
             | CommandError::Busy
-            | CommandError::Timeout
             | CommandError::Driver(_)
+            | CommandError::Timeout
     )
 }
 
@@ -1847,9 +1851,22 @@ impl Hub {
                 mpsc::error::TrySendError::Closed(_) => CommandError::DriverUnavailable,
             })?;
         match tokio::time::timeout(self.0.opts.command_timeout, answer).await {
+            // The hub deadline fired: the follow-up re-sends the order later if
+            // the state does not confirm it, as for every driver. Only an
+            // unknown outcome stays ambiguous: a driver may report it
+            // explicitly, or its reply channel closed after queueing, in which
+            // case whether the device acted cannot be established.
             Err(_) => Err(CommandError::Timeout),
-            Ok(Err(_)) => Err(CommandError::Driver("command dropped".into())),
-            Ok(Ok(result)) => result.map_err(CommandError::Driver),
+            Ok(Err(_)) => Err(CommandError::OutcomeUnknown),
+            Ok(Ok(crate::driver::CommandReply::OutcomeUnknown)) => {
+                Err(CommandError::OutcomeUnknown)
+            }
+            Ok(Ok(crate::driver::CommandReply::Refused(reason))) => {
+                Err(CommandError::DriverRefused(reason))
+            }
+            Ok(Ok(crate::driver::CommandReply::Finished(result))) => {
+                result.map_err(CommandError::Driver)
+            }
         }
     }
 
@@ -2968,6 +2985,17 @@ pub(crate) fn opening(
 mod opening_tests {
     use super::*;
     use moli_core::{Access, Kind, Semantic};
+
+    #[test]
+    fn uncertain_commands_are_not_automatically_retried() {
+        assert!(!transient(&CommandError::OutcomeUnknown));
+        assert!(!transient(&CommandError::DriverRefused(
+            "status failure".into()
+        )));
+        // The hub deadline is a plain transient: the follow-up re-sends the
+        // order when the state does not confirm it, as on main.
+        assert!(transient(&CommandError::Timeout));
+    }
 
     fn point(key: &str, semantic: Semantic, kind: Kind) -> PointSpec {
         PointSpec {

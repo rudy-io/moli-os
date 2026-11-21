@@ -68,3 +68,30 @@ test('every page reads the outside device when there is one, else the forecast (
   // Nothing configured at all: nothing to show.
   assert.equal(readOutside(() => null, 'temperature', undefined), null);
 });
+
+test('the façades of the sun device, from its text point (#258)', async () => {
+  const { facadesOf } = await import('./outside.js');
+  assert.deepEqual(facadesOf('sud=Façade sud\nest=Façade est'), [
+    { id: 'sud', name: 'Façade sud' },
+    { id: 'est', name: 'Façade est' },
+  ]);
+  // A name may hold an « = » ; a line without an id is skipped.
+  assert.deepEqual(facadesOf('ouest=Côté = jardin\n=rien\n\n'), [{ id: 'ouest', name: 'Côté = jardin' }]);
+  assert.deepEqual(facadesOf(null), []);
+});
+
+test('the day between sunrise and sunset, and the sun on its arc (#258)', async () => {
+  const { dayFraction, onArc } = await import('./outside.js');
+  const rise = '2026-11-20T07:15:00Z';
+  const set = '2026-11-20T16:15:00Z';
+  const at = (iso) => Date.parse(iso);
+  assert.equal(dayFraction(rise, set, at('2026-11-20T11:45:00Z')), 0.5);
+  assert.equal(dayFraction(rise, set, at(rise)), 0);
+  assert.equal(dayFraction(rise, set, at('2026-11-20T06:00:00Z')), null, 'before sunrise');
+  assert.equal(dayFraction(rise, set, at('2026-11-20T17:00:00Z')), null, 'after sunset');
+  assert.equal(dayFraction(null, set, at(rise)), null);
+  assert.deepEqual(onArc(0, 200, 40), { x: 0, y: 40 });
+  const top = onArc(0.5, 200, 40);
+  assert.equal(top.x, 100);
+  assert.ok(Math.abs(top.y) < 1e-9, 'noon at the top');
+});

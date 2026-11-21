@@ -26,6 +26,29 @@ async fn state(hub: &Hub, key: &str) -> Value {
         .map_or(Value::Null, |s| s.value)
 }
 
+/// Waits until the alarm's vault holds this state. The phase is written
+/// right after it is shown, in the same turn of the alarm's loop: a power
+/// cut in between rightly loses it, so a test that cuts the power waits for
+/// the write first (a slow runner showed the state before the write).
+async fn kept(hub: &Hub, expected: &str, within: Duration) {
+    let alarm = InstanceId::from("alarme");
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let state = hub
+            .secret(&alarm, "phase")
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|kept| kept.get("state")?.as_str().map(str::to_owned));
+        if state.as_deref() == Some(expected) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the vault never held {expected:?} (last: {state:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn armed_it_triggers_on_the_sensor_and_refuses_to_arm_on_it() {
     let hub = Hub::new(HubOptions {
@@ -225,6 +248,8 @@ async fn a_power_cut_right_after_arming_or_triggering_loses_nothing() {
         state(&hub, "state").await,
         Value::Text("armed_night".into())
     );
+    // The cut comes once the phase is written, not merely shown.
+    kept(&hub, "armed_night", Duration::from_secs(3)).await;
     cancel.cancel();
     drop(hub);
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -287,9 +312,10 @@ async fn a_phase_the_vault_refused_is_kept_a_few_seconds_later() {
         Value::Text("armed_night".into())
     );
     // The vault works again; nothing happens in the house, the alarm tries
-    // again on its own after its wait (5 s).
+    // again on its own after its wait (5 s): the phase reaches the vault
+    // without any event (waited for, a slow runner may need more than 5 s).
     std::fs::remove_file(&vault).unwrap();
-    tokio::time::sleep(Duration::from_millis(5500)).await;
+    kept(&hub, "armed_night", Duration::from_secs(10)).await;
     cancel.cancel();
     drop(hub);
     tokio::time::sleep(Duration::from_millis(100)).await;

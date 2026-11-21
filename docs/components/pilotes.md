@@ -1467,6 +1467,9 @@ Pour chaque façade, `dehors:soleil` ajoute deux points, en lecture seule :
 | `<id>_incidence` | l'angle entre le soleil et la perpendiculaire de la façade, en degrés : 0 = pile en face, 90 = rasant, au-delà = derrière la façade (publié par pas de 0,5°) |
 | `<id>_sun` | vrai quand le soleil tape sur la façade |
 
+Un point `facades` (texte, sens `config`) donne aussi le nom de chaque façade, une par ligne
+(`sud=Façade sud`), pour la page Dehors.
+
 ![L'incidence du soleil sur une baie, vue de dessus](../images/soleil-incidence.svg)
 
 - **L'incidence** vaut `acos(cos(élévation) × cos(azimut du soleil − azimut de la façade))`.

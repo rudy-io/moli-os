@@ -89,9 +89,10 @@ occurrence and must never bypass the private denylist or exempt this directory.
 - Controller and interaction-model tests cover these additional APIs and validation.
 
 These adaptations are maintained inside Moli, not fetched from a personal fork.
-The three corrections below that only make sense on top of them are also kept as
-a three-commit series in [`MOLI-PATCHES/`](MOLI-PATCHES/README.md), ready to be
-sent upstream in order.
+The three corrections below that only make sense on top of them are kept as a
+three-commit series in [`MOLI-PATCHES/`](MOLI-PATCHES/README.md). They need the
+deadline-aware API and parser adaptations first; the recorded series does not
+apply directly to upstream main as of 2026-11-15.
 
 - Guarded attribute writes additionally use a strict write-response parser, rejecting duplicate or mismatched acknowledgements.
 - Deadline-bounded writes and invokes distinguish "never queued" from "queued,
@@ -100,8 +101,12 @@ sent upstream in order.
   attribute twice is refused before any bytes are sent. A steady-state report
   that sets `SuppressResponse` together with `MoreChunkedMessages` is rejected
   (`InvalidAction`) and its exchange closed, instead of leaving the device
-  waiting on an exchange nothing would ever answer. Moli surfaces the unknown
-  outcome through `pilotes.matter.outcome_unknown`.
+  waiting on an exchange nothing would ever answer. The hub journals the hub-side error text;
+  the outcome itself is surfaced through `CommandError::OutcomeUnknown`.
+- If an action was accepted into the controller queue but its reply channel
+  closes before a response arrives, it is also `OutcomeUnknown`; a regression
+  covers this shutdown race. A request rejected before queueing remains a
+  definite controller error.
 - Subscription priming and steady-state reports honor parsed `SuppressResponse`:
   Success remains reliable when requested; suppressed final steady-state reports
   flush their standalone MRP ACK and close, while priming/chunks retain their

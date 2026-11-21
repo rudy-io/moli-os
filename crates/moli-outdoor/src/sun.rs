@@ -27,6 +27,8 @@ pub const ELEVATION: &str = "elevation";
 pub const AZIMUTH: &str = "azimuth";
 /// The step its values are published by (degrees).
 pub const STEP: f64 = 0.5;
+/// The façades and their names, for the dashboard: one `id=name` per line.
+pub const FACADES: &str = "facades";
 /// A façade's points: `<id>_incidence`, `<id>_sun`.
 pub const INCIDENCE: &str = "_incidence";
 pub const ON: &str = "_sun";
@@ -130,6 +132,9 @@ pub fn check(config: &Config) -> Result<(), String> {
         }
         if f.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
             return Err(format!("facade {:?}: an empty name", f.id));
+        }
+        if f.name.as_deref().is_some_and(|n| n.contains(['\n', '\r'])) {
+            return Err(format!("facade {:?}: a name on one line", f.id));
         }
         if !(0.0..360.0).contains(&f.azimuth) {
             return Err(format!("facade {:?}: azimuth must be in 0..360", f.id));
@@ -235,6 +240,16 @@ fn binary(key: &str, label: String) -> PointSpec {
     }
 }
 
+/// The `facades` point's text: one `id=name` per line, in their order.
+#[must_use]
+pub fn names(facades: &[Facade]) -> String {
+    facades
+        .iter()
+        .map(|f| format!("{}={}", f.id, f.name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// The device: the sun's elevation and azimuth, then each façade's
 /// incidence and whether the sun is on it.
 #[must_use]
@@ -253,6 +268,19 @@ pub fn device(id: DeviceId, instance: &InstanceId, facades: &[Facade]) -> Device
             359.5,
         ),
     ];
+    if !facades.is_empty() {
+        points.push(PointSpec {
+            key: FACADES.into(),
+            label: moli_i18n::tr!("pilotes.dehors.soleil.facades").into(),
+            kind: Kind::Text,
+            access: Access {
+                read: true,
+                write: false,
+            },
+            unit: None,
+            semantic: Semantic::Config,
+        });
+    }
     for f in facades {
         points.push(degrees(
             &format!("{}{INCIDENCE}", f.id),
@@ -588,6 +616,7 @@ mod tests {
             [
                 "elevation",
                 "azimuth",
+                "facades",
                 "sud_incidence",
                 "sud_sun",
                 "est_incidence",
@@ -597,8 +626,20 @@ mod tests {
         for p in &d.points {
             assert!(p.access.read && !p.access.write, "{}", p.key);
         }
-        assert_eq!(d.points[2].unit, Some(Unit::Degree));
-        assert_eq!(d.points[3].kind, Kind::Binary);
+        assert_eq!(d.points[2].semantic, Semantic::Config);
+        assert_eq!(d.points[3].unit, Some(Unit::Degree));
+        assert_eq!(d.points[4].kind, Kind::Binary);
+        assert_eq!(
+            names(&[facade("sud", 180.0), facade("est", 90.0)]),
+            "sud=sud\nest=est"
+        );
+        // Without façades, no `facades` point.
+        let bare = device(
+            DeviceId::from("dehors:soleil"),
+            &InstanceId::from("dehors"),
+            &[],
+        );
+        assert!(bare.point("facades").is_none());
     }
 
     fn config(text: &str) -> Config {
@@ -660,6 +701,9 @@ mod tests {
                 .contains("min_elevation")
         );
         assert!(refused(&one("id = \"sud\"\nazimuth = 180\nname = \" \"")).contains("empty"));
+        assert!(
+            refused(&one("id = \"sud\"\nazimuth = 180\nname = \"a\\nb\"")).contains("one line")
+        );
         let twice = "[sun]\n[[sun.facade]]\nid = \"sud\"\nazimuth = 180\n[[sun.facade]]\nid = \"sud\"\nazimuth = 200\n";
         assert!(refused(twice).contains("twice"));
     }

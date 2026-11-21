@@ -91,8 +91,9 @@
     gap: 10px;
     padding: 14px 16px 12px;
     background: var(--card);
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
+    box-shadow: var(--card-shadow, none);
   }
   .offline {
     border-color: var(--line);
@@ -196,7 +197,7 @@
     gap: 6px;
   }
   .actions button {
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     background: var(--sun);
     color: #161512;

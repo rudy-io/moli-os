@@ -37,6 +37,8 @@ pub(crate) const DISCOVERY: &[(u32, u32)] = &[
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Lighting {
     ep: u16,
+    on_off: Option<Cluster>,
+    on_off_present: bool,
     level: Option<Cluster>,
     color: Option<Cluster>,
     levels: Option<(u16, u16)>,
@@ -48,8 +50,27 @@ pub(crate) struct Lighting {
 fn bounded(v: &Tlv, max: u16) -> Option<u16> {
     u16::try_from(uint(v)?).ok().filter(|n| *n <= max)
 }
+fn invoke(cluster: u32, command: u32, values: Vec<u64>) -> Option<Plan> {
+    Some(Plan::Invoke {
+        cluster,
+        command,
+        fields: Tlv::Structure(
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| Some((Tag::Context(u8::try_from(i).ok()?), Tlv::Uint(v))))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        timed: false,
+    })
+}
 impl Lighting {
     pub(crate) fn discover(ep: u16, report: &Report) -> Option<Self> {
+        let on_off = Cluster::discover(ep, 6, report);
+        let on_off_present = matches!(
+            attribute(report, ep, 0x1d, 1),
+            Some(Tlv::Array(ids)) if ids.contains(&Tlv::Uint(6))
+        );
         let level = Cluster::discover(ep, 8, report)
             .filter(|c| c.features & 2 != 0 && c.attributes.contains(&0));
         let color = Cluster::discover(ep, 0x300, report).filter(|c| c.attributes.contains(&8));
@@ -92,6 +113,8 @@ impl Lighting {
         }
         let mut this = Self {
             ep,
+            on_off,
+            on_off_present,
             level,
             color,
             levels,
@@ -135,7 +158,14 @@ impl Lighting {
                 moli_i18n::tr!("pilotes.matter.brightness"),
                 Some((0.0, 100.0)),
                 Some(Unit::Percent),
-                self.levels.is_some() && self.command(8, 0),
+                self.levels.is_some()
+                    && (self.command(8, 4)
+                        || (self.command(8, 0)
+                            && (!self.on_off_present
+                                || self
+                                    .on_off
+                                    .as_ref()
+                                    .is_some_and(|c| c.commands.contains(&1))))),
             );
         }
         if let Some((lo, hi)) = self.ct {
@@ -251,39 +281,54 @@ impl Lighting {
         out
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub(crate) fn plan(&self, key: &str, value: &Value) -> Option<Plan> {
-        let invoke = |cluster, command, values: Vec<u64>| {
-            Some(Plan::Invoke {
-                cluster,
-                command,
-                fields: Tlv::Structure(
-                    values
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, v)| {
-                            (
-                                Tag::Context(u8::try_from(i).expect("bounded fields")),
-                                Tlv::Uint(v),
-                            )
-                        })
-                        .collect(),
-                ),
-                timed: false,
-            })
-        };
-        match key {
-            "brightness" if self.command(8, 0) => {
-                let n = value.as_f64()?;
-                if !n.is_finite() || !(0.0..=100.0).contains(&n) {
-                    return None;
-                }
-                let (lo, hi) = self.levels?;
-                // UI percent rounds to nearest wire level, then respects physical limits.
-                let level = (n * 254.0 / 100.0)
-                    .round()
-                    .clamp(f64::from(lo), f64::from(hi)) as u64;
-                invoke(8, 0, vec![level, 0, 0, 0])
+    fn brightness_plan(&self, value: &Value) -> Option<Plan> {
+        let n = value.as_f64()?;
+        if !n.is_finite() || !(0.0..=100.0).contains(&n) {
+            return None;
+        }
+        let (lo, hi) = self.levels?;
+        let level = (n * 254.0 / 100.0)
+            .round()
+            .clamp(f64::from(lo), f64::from(hi)) as u64;
+        if n == 0.0 {
+            if self
+                .on_off
+                .as_ref()
+                .is_some_and(|c| c.commands.contains(&0))
+            {
+                invoke(6, 0, vec![])
+            } else if self.command(8, 4) {
+                invoke(8, 4, vec![0, 0, 0, 0])
+            } else {
+                None
             }
+        } else if self.command(8, 4) {
+            invoke(8, 4, vec![level, 0, 0, 0])
+        } else if self.on_off_present
+            && self
+                .on_off
+                .as_ref()
+                .is_some_and(|c| c.commands.contains(&1))
+        {
+            Some(Plan::Sequence(vec![
+                Plan::Invoke {
+                    cluster: 6,
+                    command: 1,
+                    fields: Tlv::Structure(vec![]),
+                    timed: false,
+                },
+                invoke(8, 0, vec![level, 0, 0, 0])?,
+            ]))
+        } else if !self.on_off_present {
+            invoke(8, 0, vec![level, 0, 0, 0])
+        } else {
+            None
+        }
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn plan(&self, key: &str, value: &Value) -> Option<Plan> {
+        match key {
+            "brightness" if self.command(8, 0) || self.command(8, 4) => self.brightness_plan(value),
             "color_temp" if self.command(0x300, 10) => {
                 let k = value.as_f64()?;
                 let (lo, hi) = self.ct?;
@@ -415,6 +460,34 @@ mod tests {
         }
         r
     }
+    fn with_on_off(
+        mut report: Vec<(AttributePath, Tlv)>,
+        commands: &[u32],
+    ) -> Vec<(AttributePath, Tlv)> {
+        report.push((
+            path(0x1d, 1),
+            Tlv::Array(vec![Tlv::Uint(6), Tlv::Uint(8), Tlv::Uint(0x300)]),
+        ));
+        for (attribute, value) in [
+            (0xfffc, Tlv::Uint(0)),
+            (0xfffd, Tlv::Uint(1)),
+            (0xfffb, Tlv::Array(vec![Tlv::Uint(0)])),
+            (
+                0xfff9,
+                Tlv::Array(
+                    commands
+                        .iter()
+                        .copied()
+                        .map(u64::from)
+                        .map(Tlv::Uint)
+                        .collect(),
+                ),
+            ),
+        ] {
+            report.push((path(6, attribute), value));
+        }
+        report
+    }
     #[test]
     fn exact_commands_and_limits() {
         let l = Lighting::discover(1, &fixture()).unwrap();
@@ -438,9 +511,7 @@ mod tests {
                 (Tag::Context(3), Tlv::Uint(0))
             ])
         );
-        assert!(
-            matches!(l.plan("brightness",&Value::Int(0)),Some(Plan::Invoke{fields:Tlv::Structure(f),..}) if f[0].1==Tlv::Uint(1))
-        );
+        assert!(l.plan("brightness", &Value::Int(0)).is_none());
         assert!(
             matches!(l.plan("color_temp",&Value::Int(4000)),Some(Plan::Invoke{command:10,fields:Tlv::Structure(f),..}) if f[0].1==Tlv::Uint(250))
         );
@@ -452,6 +523,58 @@ mod tests {
         }
         assert!(l.plan("color_temp", &Value::Int(1000)).is_none());
         assert!(l.plan("color", &Value::Text("#000000".into())).is_none());
+    }
+    #[test]
+    fn zero_requires_off_capability_and_positive_level_restores_power() {
+        let mut report = fixture();
+        if let Some((_, Tlv::Array(commands))) = report
+            .iter_mut()
+            .find(|(p, _)| p.cluster == 8 && p.attribute == 0xfff9)
+        {
+            commands.push(Tlv::Uint(4));
+        }
+        let level_with_on_off = Lighting::discover(1, &report).unwrap();
+        assert!(matches!(
+            level_with_on_off.plan("brightness", &Value::Int(0)),
+            Some(Plan::Invoke {
+                cluster: 8,
+                command: 4,
+                ..
+            })
+        ));
+        assert!(matches!(
+            level_with_on_off.plan("brightness", &Value::Int(30)),
+            Some(Plan::Invoke {
+                cluster: 8,
+                command: 4,
+                ..
+            })
+        ));
+
+        let with_on = Lighting::discover(1, &with_on_off(fixture(), &[1])).unwrap();
+        assert!(with_on.plan("brightness", &Value::Int(0)).is_none());
+        assert!(matches!(
+            with_on.plan("brightness", &Value::Int(30)),
+            Some(Plan::Sequence(plans)) if matches!(plans.as_slice(), [Plan::Invoke { cluster: 6, command: 1, .. }, Plan::Invoke { cluster: 8, command: 0, .. }])
+        ));
+
+        let with_off = Lighting::discover(1, &with_on_off(fixture(), &[0])).unwrap();
+        assert!(matches!(
+            with_off.plan("brightness", &Value::Int(0)),
+            Some(Plan::Invoke {
+                cluster: 6,
+                command: 0,
+                ..
+            })
+        ));
+        assert!(with_off.plan("brightness", &Value::Int(30)).is_none());
+        assert!(
+            with_off
+                .points()
+                .iter()
+                .find(|point| point.key.as_ref() == "brightness")
+                .is_some_and(|point| !point.access.write)
+        );
     }
     #[test]
     fn nullable_and_mode_exclusivity() {

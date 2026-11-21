@@ -108,7 +108,7 @@
   .approvals {
     display: grid;
     gap: 0;
-    border-bottom: var(--stroke) solid var(--ink);
+    border-bottom: var(--stroke) solid var(--edge, var(--ink));
   }
   article {
     display: flex;
@@ -133,7 +133,7 @@
     gap: 8px;
   }
   button {
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     padding: 6px 14px;
     font-weight: 700;

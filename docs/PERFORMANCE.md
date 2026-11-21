@@ -13,6 +13,27 @@ Assistant.
 
 ## Budget
 
+### Build actuel après stabilisation Matter — 15 novembre 2026
+
+Build x86_64 musl depuis le dépôt Moli seul avec le Dockerfile inchangé.
+`rust:1-alpine` résolvait vers Rust 1.100.0 (`sha256:cfbeb9c8c956f048a081ae034a7c8ffbd60242f3ff76b645d3a41523f665f761`).
+
+| Variante | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard avec symboles | 34 455 473 octets | 34 451 232 octets |
+| Compacte, symboles retirés | 28 329 905 octets | 28 325 808 octets |
+
+Les deux images dépassent le budget de 25 000 000 octets. Le strip économise
+6 125 568 octets sur l'image, mais laisse 3 329 905 octets de dépassement.
+Ce saut (+4,17 Mo en neuf jours) n'est pas attribuable à la seule PR de
+stabilisation, beaucoup plus petite : la cause probable est l'évolution de
+l'outillage entre les deux mesures (Rust 1.100 ici contre 1.97 au build
+précédent), à vérifier avec une mesure contrôlée avant tout arbitrage.
+L'épinglage temporaire à Rust 1.97 n'a pas résolu ce dépassement et n'a donc pas
+été conservé dans le Dockerfile. Les hashes et les tests E2E exécutés sur le
+binaire standard sont dans [RESULTS.md](../tools/matter-e2e/RESULTS.md). Aucune
+comparaison Home Assistant ou mesure de charge n'est revendiquée pour ce build.
+
 ### Build actuel — pile locale et familles étendues, 6 novembre 2026
 
 L'image de production construite depuis le dépôt Moli seul mesure :

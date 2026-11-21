@@ -1,6 +1,6 @@
 <script>
   import { home, value, num, isOn, reachable, device, since, nameOf, relative, roomList } from '../lib/home.svelte.js';
-  import { OUTSIDE, idsOf, measures, compass, readOutside } from '../lib/outside.js';
+  import { OUTSIDE, SUN, idsOf, measures, compass, readOutside, facadesOf, dayFraction, onArc } from '../lib/outside.js';
   import { outdoorView } from '../lib/outdoor.js';
   import { weatherOf } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
@@ -101,11 +101,17 @@
   const pumpId = $derived(out.pool_pump);
   const pumpKnown = $derived(pumpId && reachable(pumpId) && v(pumpId, 'switch_1') != null);
 
-  const sunPos = $derived.by(() => {
-    const rise = Date.parse(v(w, 'sunrise'));
-    const set = Date.parse(v(w, 'sunset'));
-    if (!Number.isFinite(rise) || !Number.isFinite(set)) return null;
-    return Math.min(1, Math.max(0, (home.now - rise) / (set - rise)));
+  // The sun (#258): where it is in the sky, computed in the house
+  // (`dehors:soleil`), and the façades it is on.
+  const elevation = $derived(v(SUN, 'elevation'));
+  const sunFrom = $derived(compass(v(SUN, 'azimuth')));
+  const facades = $derived(facadesOf(v(SUN, 'facades')));
+  const hasDay = $derived(Number.isFinite(Date.parse(v(w, 'sunrise'))) && Number.isFinite(Date.parse(v(w, 'sunset'))));
+  // On the arc between sunrise and sunset; none at night.
+  const ARC = { w: 1000, h: 46 };
+  const sunAt = $derived.by(() => {
+    const f = dayFraction(v(w, 'sunrise'), v(w, 'sunset'), home.now);
+    return f == null ? null : onArc(f, ARC.w, ARC.h);
   });
 </script>
 
@@ -136,10 +142,36 @@
         <em class="muted num">{t('maison.dehors.rafales', { speed: num(val('wind_gust', w, 'wind_gusts')) })}{#if windFrom != null}{' · '}{t('maison.dehors.cap').split(',')[windFrom]}{/if}</em>
       </div>
       <div><Icon name="water" size={20} /><small>{t('maison.dehors.pluie_jour')} <SourceBadge key="rain_today" /></small><b class="num">{num(val('rain_today', w, 'today_rain'), 1)} mm</b><em class="muted num">{t('maison.dehors.risque', { pct: num(v(w, 'today_rain_chance')) })}</em></div>
-      <div><Icon name="sun-angle" size={20} /><small>{t('maison.dehors.soleil')}</small><b class="num">{hhmm(v(w, 'sunrise'))} → {hhmm(v(w, 'sunset'))}</b></div>
+      <div>
+        <Icon name="sun-angle" size={20} /><small>{t('maison.dehors.soleil')}</small><b class="num">{hhmm(v(w, 'sunrise'))} → {hhmm(v(w, 'sunset'))}</b>
+        {#if elevation != null}
+          <em class="muted num">{t('maison.dehors.soleil_position', { elevation: num(elevation, 0) })}{#if sunFrom != null}{' · '}{t('maison.dehors.cap').split(',')[sunFrom]}{/if}</em>
+        {/if}
+      </div>
     </div>
-    {#if sunPos != null}
-      <div class="sunline" aria-hidden="true"><i style="left:{sunPos * 100}%"></i></div>
+    {#if hasDay}
+      <!-- The sun's arc, sunrise on the left, sunset on the right (#258). -->
+      <div class="sunarc">
+        <svg viewBox="-12 -12 {ARC.w + 24} {ARC.h + 16}" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0 {ARC.h} Q{ARC.w / 2} {-ARC.h} {ARC.w} {ARC.h}" vector-effect="non-scaling-stroke" />
+          <line x1="-12" y1={ARC.h} x2={ARC.w + 12} y2={ARC.h} vector-effect="non-scaling-stroke" />
+        </svg>
+        {#if sunAt}
+          <i style="left:{((sunAt.x + 12) / (ARC.w + 24)) * 100}%;top:{((sunAt.y + 12) / (ARC.h + 16)) * 100}%"></i>
+        {/if}
+      </div>
+    {/if}
+    {#if facades.length}
+      <div class="facades">
+        <small>{t('maison.dehors.soleil_sur')}</small>
+        {#each facades as f (f.id)}
+          {@const on = v(SUN, `${f.id}_sun`) === true}
+          {@const inc = v(SUN, `${f.id}_incidence`)}
+          <span class="chip" class:warm={on} title={inc != null ? t('maison.dehors.incidence', { deg: num(inc, 0) }) : undefined}>
+            {#if on}<Icon name="sun-angle" size={14} />{/if}{f.name}
+          </span>
+        {/each}
+      </div>
     {/if}
   </section>
 
@@ -353,23 +385,53 @@
     font-size: 13px;
   }
 
-  .sunline {
+  .sunarc {
     position: relative;
-    height: 4px;
-    border-radius: 4px;
-    margin-top: 22px;
-    background: linear-gradient(90deg, var(--surface-3), var(--sun), var(--surface-3));
+    height: 58px;
+    margin-top: 18px;
   }
 
-  .sunline i {
+  .sunarc svg {
     position: absolute;
-    top: 50%;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .sunarc path {
+    fill: none;
+    stroke: color-mix(in srgb, var(--sun) 60%, transparent);
+    stroke-width: 2;
+    stroke-dasharray: 2 6;
+    stroke-linecap: round;
+  }
+
+  .sunarc line {
+    stroke: var(--surface-3);
+    stroke-width: 1;
+  }
+
+  .sunarc i {
+    position: absolute;
     width: 14px;
     height: 14px;
     border-radius: 50%;
     background: var(--sun);
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--sun) 30%, transparent);
     transform: translate(-50%, -50%);
+  }
+
+  .facades {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .facades small {
+    margin-right: 4px;
   }
 
   .grid {
