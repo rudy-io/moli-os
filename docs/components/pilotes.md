@@ -269,7 +269,13 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 - **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
   vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
 - **Une vanne tournée à la main** (sur sa molette, ou depuis le tableau de bord) : sa consigne a
-  changé depuis le dernier coup d'œil et n'est pas celle que Moli a écrite. Moli la laisse telle
+  changé depuis le dernier coup d'œil et n'est pas celle que Moli a écrite (l'une de ses deux
+  dernières écritures, pour une vanne endormie qui remonte un ordre ancien ; ou, juste après une
+  écriture, la même au pas de la vanne près, un demi-degré s'il n'est pas connu : une vanne qui
+  arrondit, dont Moli retient alors la valeur relue). Une vanne au pas plus gros que le demi-degré
+  reçoit sa consigne à son pas. La consigne d'une vanne ne dit pas qui l'a écrite : un ordre
+  d'agent admis par la garde, envoyé à la vanne elle-même, compte aussi comme une main (tenu
+  jusqu'à 2 h au lieu d'être corrigé au tour suivant). Moli la laisse telle
   quelle au lieu de remettre la sienne (`crates/moli-heating/src/hand.rs`) : **2 h au plus**, et
   seulement jusqu'au créneau suivant du programme. Tournée à son minimum (à un demi-degré près) ou
   3 °C ou plus sous la température de la pièce, c'est une **aération** : 30 min au plus, finie dès

@@ -51,13 +51,54 @@ pub struct Hold {
     pub until_ms: u64,
 }
 
+/// What Moli wrote to a valve lately, and what the valve made of it.
+///
+/// A valve may not hold exactly what it is given: one on the whole degree
+/// reads 19 back for a 19.5, another rounds its own way. And a valve asleep
+/// (Zigbee on a battery) may report an older order after a newer one. Both
+/// are Moli's, not a hand's.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Written {
+    /// The last two writes the valve took, the latest first.
+    last: [Option<f64>; 2],
+    /// What the valve read back after one of them, its own rounding.
+    held: Option<f64>,
+    /// A write not read back yet: the next change may be its rounding.
+    echo: bool,
+}
+
+impl Written {
+    /// A write the valve took.
+    pub fn sent(&mut self, value: f64) {
+        self.last = [Some(value), self.last[0]];
+        self.echo = true;
+    }
+
+    /// Whether `current`, the valve's setpoint, is Moli's: one of its last
+    /// two writes (to a quarter of a degree), what the valve held of one, or
+    /// the first change after a write, within the valve's `step` (half a
+    /// degree when not known): then it is what the valve holds of it.
+    pub fn moli(&mut self, current: f64, step: Option<f64>) -> bool {
+        let near = |v: Option<f64>, by: f64| v.is_some_and(|w| (w - current).abs() < by);
+        if self.last.iter().chain([&self.held]).any(|&w| near(w, 0.25)) {
+            self.echo = false;
+            return true;
+        }
+        let rounding = step.filter(|s| s.is_finite()).unwrap_or(0.5).max(0.5) + 0.01;
+        if std::mem::replace(&mut self.echo, false) && near(self.last[0], rounding) {
+            self.held = Some(current);
+            return true;
+        }
+        false
+    }
+}
+
 /// Whether the valve's setpoint was moved by someone else than Moli: it
-/// changed since the last look (`seen`) and is not what Moli last wrote
-/// (`sent`). The first look (`seen` unknown, after a start) says nothing.
+/// changed since the last look (`seen`) and is not Moli's ([`Written`]).
+/// The first look (`seen` unknown, after a start) says nothing.
 #[must_use]
-pub fn turned(seen: Option<f64>, current: f64, sent: Option<f64>) -> bool {
-    seen.is_some_and(|s| (s - current).abs() > 0.05)
-        && sent.is_none_or(|w| (w - current).abs() >= 0.25)
+pub fn turned(seen: Option<f64>, current: f64, written: &mut Written, step: Option<f64>) -> bool {
+    seen.is_some_and(|s| (s - current).abs() > 0.05) && !written.moli(current, step)
 }
 
 /// Whether a setpoint chosen on the valve is airing: its lowest (within half
@@ -102,17 +143,59 @@ pub fn until(
 mod tests {
     use super::*;
 
+    fn wrote(values: &[f64]) -> Written {
+        let mut written = Written::default();
+        for &v in values {
+            written.sent(v);
+        }
+        written
+    }
+
     #[test]
     fn a_valve_is_turned_by_hand_only_when_it_moved_without_moli() {
         // The first look after a start says nothing.
-        assert!(!turned(None, 12.0, Some(19.0)));
+        assert!(!turned(None, 12.0, &mut wrote(&[19.0]), None));
         // Moved, and not what Moli wrote.
-        assert!(turned(Some(19.0), 12.0, Some(19.0)));
-        assert!(turned(Some(19.0), 19.5, None));
+        assert!(turned(Some(19.0), 12.0, &mut wrote(&[19.0]), None));
+        assert!(turned(Some(19.0), 19.5, &mut wrote(&[]), None));
         // Moli's own write coming back.
-        assert!(!turned(Some(18.0), 19.0, Some(19.0)));
+        assert!(!turned(Some(18.0), 19.0, &mut wrote(&[19.0]), None));
         // Not moved: a write the valve did not take is not a hand.
-        assert!(!turned(Some(18.0), 18.0, Some(19.0)));
+        assert!(!turned(Some(18.0), 18.0, &mut wrote(&[19.0]), None));
+    }
+
+    #[test]
+    fn a_valve_that_rounds_is_not_a_hand() {
+        // On the whole degree: 19.5 written, 19 read back, again and again.
+        let mut written = wrote(&[19.5]);
+        assert!(!turned(Some(16.0), 19.0, &mut written, Some(1.0)));
+        written.sent(19.5);
+        assert!(!turned(Some(18.0), 19.0, &mut written, Some(1.0)));
+        // Then turned a notch on its dial: a hand.
+        assert!(turned(Some(19.0), 18.0, &mut written, Some(1.0)));
+
+        // Its step not known: rounded to the half degree, then a notch.
+        let mut written = wrote(&[19.25]);
+        assert!(!turned(Some(16.0), 19.5, &mut written, None));
+        assert!(turned(Some(19.5), 19.0, &mut written, None));
+
+        // Far from the write, even right after it: a hand.
+        assert!(turned(Some(16.0), 22.0, &mut wrote(&[19.5]), Some(1.0)));
+    }
+
+    #[test]
+    fn a_late_echo_of_an_older_write_is_not_a_hand() {
+        // 19 then 20 written to a valve asleep: it reports 19, then 20.
+        let mut written = wrote(&[19.0, 20.0]);
+        assert!(!turned(Some(16.0), 19.0, &mut written, None));
+        assert!(!turned(Some(19.0), 20.0, &mut written, None));
+        // Three writes back is too old.
+        assert!(turned(
+            Some(20.0),
+            17.0,
+            &mut wrote(&[17.0, 19.0, 20.0]),
+            None
+        ));
     }
 
     #[test]

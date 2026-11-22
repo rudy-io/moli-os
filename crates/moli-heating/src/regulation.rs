@@ -117,6 +117,16 @@ pub fn valve_setpoint(room: f64, shift: f64, bounds: (f64, f64)) -> f64 {
     half_degree(room + shift.clamp(SHIFT_RANGE.0, SHIFT_RANGE.1)).clamp(bounds.0, bounds.1)
 }
 
+/// `value` on the valve's `step` when it is coarser than the half degree (a
+/// valve on the whole degree), within its bounds; else as it is.
+#[must_use]
+pub fn on_step(value: f64, step: Option<f64>, bounds: (f64, f64)) -> f64 {
+    match step {
+        Some(step) if step > 0.5 => ((value / step).round() * step).clamp(bounds.0, bounds.1),
+        _ => value,
+    }
+}
+
 /// Whether to write `next`: it differs from what the valve holds by half a
 /// degree or more, and the last write is old enough: `interval` (usually
 /// [`MIN_INTERVAL`]), or `floor` ([`URGENT_FLOOR`]) when `urgent` (the room's
@@ -210,6 +220,15 @@ mod tests {
         // No thermometer on the valve: the room's.
         assert!(valve_heats(19.0, None, 18.8));
         assert!(!valve_heats(19.0, None, 19.3));
+    }
+
+    #[test]
+    fn a_valve_on_the_whole_degree_is_given_whole_degrees() {
+        assert!((on_step(19.5, Some(1.0), (5.0, 30.0)) - 20.0).abs() < 1e-9);
+        assert!((on_step(19.0, Some(1.0), (5.0, 30.0)) - 19.0).abs() < 1e-9);
+        assert!((on_step(19.5, Some(0.5), (5.0, 30.0)) - 19.5).abs() < 1e-9);
+        assert!((on_step(19.5, None, (5.0, 30.0)) - 19.5).abs() < 1e-9);
+        assert!((on_step(29.6, Some(2.0), (5.0, 29.0)) - 29.0).abs() < 1e-9);
     }
 
     #[test]

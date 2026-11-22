@@ -75,6 +75,10 @@ impl Driver for Valves {
                     vec![setpoint_point("sp", Unit::Celsius, Semantic::Other)],
                 ),
                 (
+                    "entiere",
+                    vec![setpoint_point("sp", Unit::Celsius, Semantic::Other)],
+                ),
+                (
                     "volet",
                     vec![
                         setpoint_point("sp", Unit::Celsius, Semantic::Other),
@@ -98,7 +102,12 @@ impl Driver for Valves {
             }
             ctx.ready();
             while let Some(command) = ctx.next_command().await {
-                ctx.set_state(&command.device.id, &command.key, command.value.clone());
+                // « entiere » keeps whole degrees, cut down, without saying so.
+                let value = match command.value.as_f64() {
+                    Some(v) if &*command.device.native_name == "entiere" => Value::Float(v.floor()),
+                    _ => command.value.clone(),
+                };
+                ctx.set_state(&command.device.id, &command.key, value);
                 command.reply(Ok(()));
             }
             Ok(())
@@ -160,6 +169,10 @@ async fn house() -> (Hub, CancellationToken) {
 }
 
 async fn house_with(tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken) {
+    house_of(rooms(), tune).await
+}
+
+async fn house_of(rooms: Vec<Room>, tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken) {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let cancel = CancellationToken::new();
     spawn_driver(
@@ -176,7 +189,7 @@ async fn house_with(tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken)
     );
     until(&hub, "maison:volume/value", 16.0).await;
     until(&hub, "vannes:v/sp", 16.0).await;
-    let mut heating = Heating::new(hub.clone(), rooms(), jiff::tz::TimeZone::UTC);
+    let mut heating = Heating::new(hub.clone(), rooms, jiff::tz::TimeZone::UTC);
     heating.settle = Duration::ZERO;
     heating.floor = Duration::ZERO;
     tune(&mut heating);
@@ -331,6 +344,50 @@ async fn a_valve_turned_by_hand_is_left_as_it_is_for_a_while() {
     order("occupied_heating_setpoint", Value::Float(21.0)).await;
     until(&hub, "vannes:v/sp", 21.0).await;
     until_text(&hub, &state("valve_override"), "none").await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_valve_that_rounds_what_it_is_given_is_not_turned_by_hand() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let rooms = toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:entiere/sp"]
+        initial = 21.5
+        "#,
+    )
+    .unwrap()
+    .heating;
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+        h.interval = Duration::ZERO;
+    })
+    .await;
+    let room = "chauffage:bureau/valve_override";
+    // 21.5 written, 21 read back, look after look: still the room's.
+    until(&hub, "vannes:entiere/sp", 21.0).await;
+    for _ in 0..15 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        until_text(&hub, room, "none").await;
+    }
+    // Turned on its dial: a hand.
+    hub.command(
+        &point("vannes:entiere/sp"),
+        Value::Float(18.0),
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    until_text(&hub, room, "manual").await;
+    until(&hub, "vannes:entiere/sp", 18.0).await;
     cancel.cancel();
 }
 

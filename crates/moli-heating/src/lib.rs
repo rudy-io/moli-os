@@ -217,8 +217,8 @@ impl Heating {
 /// What a valve's point is, as the hub knows it.
 #[derive(Debug, PartialEq)]
 enum Valve {
-    /// A setpoint in °C, and its bounds.
-    Writable((f64, f64)),
+    /// A setpoint in °C, its bounds, and its step when it says.
+    Writable((f64, f64), Option<f64>),
     /// Its device not there yet (its driver starts).
     Unknown,
     /// Something else: never written.
@@ -252,10 +252,10 @@ struct ValveRun {
     urgent: bool,
     /// Its point said once not to be a valve's setpoint.
     refused: bool,
-    /// Its setpoint at the last look, and the last one Moli wrote (and was
+    /// Its setpoint at the last look, and what Moli wrote lately (and was
     /// told was taken): a change that is neither was made by hand.
     seen: Option<f64>,
-    written: Option<f64>,
+    written: hand::Written,
     /// Turned by hand: left as it is until then.
     hold: Option<hand::Hold>,
 }
@@ -490,7 +490,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
                 urgent: false,
                 refused: false,
                 seen: None,
-                written: None,
+                written: hand::Written::default(),
                 hold: None,
             })
             .collect(),
@@ -595,14 +595,14 @@ impl Heating {
             Kind::Numeric {
                 min: Some(min),
                 max: Some(max),
-                ..
+                step,
             } if spec.access.write
                 && min < max
                 && spec.unit == Some(Unit::Celsius)
                 && !matches!(spec.semantic, Semantic::Control | Semantic::Lock)
                 && !opening =>
             {
-                Valve::Writable((min, max))
+                Valve::Writable((min, max), step.filter(|s| s.is_finite() && *s > 0.0))
             }
             _ => Valve::Other,
         }
@@ -674,7 +674,7 @@ impl Heating {
                 state.hold = None;
                 state.urgent = true;
             }
-            let Valve::Writable((min, _)) = self.bounds(valve) else {
+            let Valve::Writable((min, _), step) = self.bounds(valve) else {
                 continue;
             };
             let Some(current) = self
@@ -685,7 +685,7 @@ impl Heating {
             else {
                 continue;
             };
-            if settled && hand::turned(state.seen, current, state.written) {
+            if settled && hand::turned(state.seen, current, &mut state.written, step) {
                 self.turned_by_hand(room, next_step, state, (current, min), temperature);
             }
             state.seen = Some(current);
@@ -714,8 +714,8 @@ impl Heating {
             if !settled || state.hold.is_some() {
                 continue;
             }
-            let bounds = match self.bounds(valve) {
-                Valve::Writable(bounds) => bounds,
+            let (bounds, step) = match self.bounds(valve) {
+                Valve::Writable(bounds, step) => (bounds, step),
                 Valve::Unknown => continue,
                 Valve::Other => {
                     if !std::mem::replace(&mut state.refused, true) {
@@ -733,6 +733,8 @@ impl Heating {
                 Mode::Off => bounds.0,
                 Mode::Heat | Mode::Auto => valve_setpoint(run.setpoint, shift, bounds),
             };
+            // On the valve's own step, coarser than the half degree: what it holds.
+            let next = regulation::on_step(next, step, bounds);
             let point = PointId::from(valve.as_str());
             let current = self.hub.state(&point).and_then(|s| s.value.as_f64());
             let since = state.sent.map(|t| t.elapsed());
@@ -753,7 +755,7 @@ impl Heating {
                 .await
             {
                 // Its report coming back is Moli's, not a hand's.
-                Ok(()) => state.written = Some(next),
+                Ok(()) => state.written.sent(next),
                 Err(e) => {
                     tracing::warn!(room = %room.id, error = %e, "heating: valve setpoint refused");
                 }
