@@ -40,7 +40,8 @@ pub const SHIFT_RANGE: (f64, f64) = (-3.0, 6.0);
 pub const MAX_STEP: Duration = Duration::from_secs(15 * 60);
 
 /// A valve is written again at most this often, except when the room's own
-/// setpoint changed: its battery, and the radio of a sleepy device.
+/// setpoint changed: its battery, and the radio of a sleepy device. (A valve
+/// turned by hand is not written at all for a while: [`crate::hand`].)
 pub const MIN_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// Even when the room changed, a valve is not written again sooner than
@@ -116,20 +117,30 @@ pub fn valve_setpoint(room: f64, shift: f64, bounds: (f64, f64)) -> f64 {
     half_degree(room + shift.clamp(SHIFT_RANGE.0, SHIFT_RANGE.1)).clamp(bounds.0, bounds.1)
 }
 
+/// `value` on the valve's `step` when it is coarser than the half degree (a
+/// valve on the whole degree), within its bounds; else as it is.
+#[must_use]
+pub fn on_step(value: f64, step: Option<f64>, bounds: (f64, f64)) -> f64 {
+    match step {
+        Some(step) if step > 0.5 => ((value / step).round() * step).clamp(bounds.0, bounds.1),
+        _ => value,
+    }
+}
+
 /// Whether to write `next`: it differs from what the valve holds by half a
-/// degree or more, and the last write is old enough: [`MIN_INTERVAL`], or
-/// `floor` ([`URGENT_FLOOR`]) when `urgent` (the room's setpoint or mode just
-/// changed).
+/// degree or more, and the last write is old enough: `interval` (usually
+/// [`MIN_INTERVAL`]), or `floor` ([`URGENT_FLOOR`]) when `urgent` (the room's
+/// setpoint or mode just changed).
 #[must_use]
 pub fn worth_sending(
     current: Option<f64>,
     next: f64,
     since_last: Option<Duration>,
     urgent: bool,
-    floor: Duration,
+    (floor, interval): (Duration, Duration),
 ) -> bool {
     let moved = current.is_none_or(|c| (c - next).abs() >= 0.5 - 1e-9);
-    let interval = if urgent { floor } else { MIN_INTERVAL };
+    let interval = if urgent { floor } else { interval };
     moved && since_last.is_none_or(|d| d >= interval)
 }
 
@@ -212,27 +223,60 @@ mod tests {
     }
 
     #[test]
+    fn a_valve_on_the_whole_degree_is_given_whole_degrees() {
+        assert!((on_step(19.5, Some(1.0), (5.0, 30.0)) - 20.0).abs() < 1e-9);
+        assert!((on_step(19.0, Some(1.0), (5.0, 30.0)) - 19.0).abs() < 1e-9);
+        assert!((on_step(19.5, Some(0.5), (5.0, 30.0)) - 19.5).abs() < 1e-9);
+        assert!((on_step(19.5, None, (5.0, 30.0)) - 19.5).abs() < 1e-9);
+        assert!((on_step(29.6, Some(2.0), (5.0, 29.0)) - 29.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn a_valve_is_written_on_a_real_change_and_not_too_often() {
         let long = Some(MIN_INTERVAL);
         let short = Some(MINUTE);
-        assert!(worth_sending(None, 20.0, None, false, URGENT_FLOOR));
-        assert!(worth_sending(Some(20.0), 20.5, long, false, URGENT_FLOOR));
-        assert!(!worth_sending(Some(20.0), 20.0, long, true, URGENT_FLOOR));
+        assert!(worth_sending(
+            None,
+            20.0,
+            None,
+            false,
+            (URGENT_FLOOR, MIN_INTERVAL)
+        ));
+        assert!(worth_sending(
+            Some(20.0),
+            20.5,
+            long,
+            false,
+            (URGENT_FLOOR, MIN_INTERVAL)
+        ));
+        assert!(!worth_sending(
+            Some(20.0),
+            20.0,
+            long,
+            true,
+            (URGENT_FLOOR, MIN_INTERVAL)
+        ));
         assert!(
-            !worth_sending(Some(20.2), 20.5, long, false, URGENT_FLOOR),
+            !worth_sending(Some(20.2), 20.5, long, false, (URGENT_FLOOR, MIN_INTERVAL)),
             "under half a degree"
         );
         assert!(
-            !worth_sending(Some(20.0), 21.0, short, false, URGENT_FLOOR),
+            !worth_sending(Some(20.0), 21.0, short, false, (URGENT_FLOOR, MIN_INTERVAL)),
             "too soon"
         );
         assert!(
-            worth_sending(Some(20.0), 21.0, short, true, URGENT_FLOOR),
+            worth_sending(Some(20.0), 21.0, short, true, (URGENT_FLOOR, MIN_INTERVAL)),
             "the room changed"
         );
         let hurried = Some(Duration::from_secs(5));
         assert!(
-            !worth_sending(Some(20.0), 21.0, hurried, true, URGENT_FLOOR),
+            !worth_sending(
+                Some(20.0),
+                21.0,
+                hurried,
+                true,
+                (URGENT_FLOOR, MIN_INTERVAL)
+            ),
             "not twice in a hurry"
         );
         assert!(

@@ -7,13 +7,15 @@
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
   import ValveCard from './ValveCard.svelte';
+  import RadiatorTile from './RadiatorTile.svelte';
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { watts } from '../lib/energy-live.svelte.js';
   import AlarmCard from './AlarmCard.svelte';
   import { phase, PHASES } from '../lib/printers.js';
-  import { canWrite, pointOf, isValve, climateKeys, impulsePoints } from '../lib/capabilities.js';
+  import { canWrite, pointOf, climateKeys, impulsePoints } from '../lib/capabilities.js';
+  import { heatsOnly } from '../lib/radiator.js';
   import { coverCommands } from '../lib/cover-controls.js';
   import { climateMode } from '../lib/climate.js';
 
@@ -435,6 +437,10 @@
   {/each}
 
   {#each room.climates as d (d.id)}
+    {#if heatsOnly(d)}
+      <RadiatorTile id={d.id} {icons} open={openClim === d.id} onopen={() => (openClim = openClim === d.id ? null : d.id)} />
+      {#if openClim === d.id}<ValveCard id={d.id} name={nameOf(d.id)} bare />{/if}
+    {:else}
     {@const keys = climateKeys(d)}
     {@const mode = pointOf(d, keys.mode) ? value(d.id, keys.mode) : null}
     {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
@@ -449,7 +455,8 @@
       <span class="state">{climateState(on, mode)}</span>
     </button>
     {#if openClim === d.id}
-      {#if isValve(d)}<ValveCard id={d.id} name={nameOf(d.id)} />{:else}<ClimateCard id={d.id} name={nameOf(d.id)} />{/if}
+      <ClimateCard id={d.id} name={nameOf(d.id)} />
+    {/if}
     {/if}
   {/each}
 

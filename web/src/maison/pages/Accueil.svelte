@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, alarmDevices, act, pending, roomOf, protectedRoom } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
-  import { isValve } from '../lib/capabilities.js';
+  import { heatsOnly } from '../lib/radiator.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import LightTile from '../ui/LightTile.svelte';
@@ -280,7 +280,7 @@
         <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
         <div class="clims">
           {#each cfg.favorites?.climate ?? [] as c (c.id)}
-            {#if isValve(device(c.id))}<ValveCard id={c.id} name={c.name} />{:else}<ClimateCard id={c.id} name={c.name} />{/if}
+            {#if heatsOnly(device(c.id))}<ValveCard id={c.id} name={c.name} />{:else}<ClimateCard id={c.id} name={c.name} />{/if}
           {/each}
         </div>
       </section>

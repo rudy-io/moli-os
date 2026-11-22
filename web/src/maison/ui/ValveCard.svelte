@@ -2,28 +2,37 @@
   import { onDestroy } from 'svelte';
   import { device, value, reachable, num, act } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
-  import Icon from './Icon.svelte';
   import ScheduleEditor from './ScheduleEditor.svelte';
   import ValveChart from './ValveChart.svelte';
   import { scheduleSpec } from '../lib/schedule.js';
   import { pointOf, canWrite, numericRange, quantize, writableChoices, climateKeys } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
+  import RadiatorTile from './RadiatorTile.svelte';
 
-  // A Zigbee thermostatic valve: its setpoint and its mode, with the temperature
-  // it measures for context. Every order goes through `act`, the hub's normal path and the guard.
+  // A thermostat that only heats: a Zigbee valve, a valve on another protocol,
+  // or a room's thermostat kept by Moli (it drives the room's valves). Its
+  // radiator drawn on top (`RadiatorTile`), then its setpoint and its mode. Every order goes through `act`, the hub's normal path and the guard.
   // `schedule`: false where the schedule is edited beside the card (the Chauffage page).
-  let { id, name, schedule = true } = $props();
+  // `bare`: under a radiator's tile, which already says its name, what it does and the hold.
+  let { id, name, schedule = true, bare = false } = $props();
 
   const d = $derived(device(id));
   const keys = $derived(climateKeys(d));
   const unit = $derived(pointOf(d, keys.target)?.unit);
   const range = $derived(numericRange(d, keys.target, 0.5));
   const modes = $derived(writableChoices(d, keys.mode));
-  const temp = $derived(value(id, keys.temperature));
   const target = $derived(value(id, keys.target));
   const mode = $derived(value(id, keys.mode));
   const writable = $derived(!!range && canWrite(d, keys.target));
-  const hasSchedule = $derived(!!scheduleSpec(d));
+  const spec = $derived(scheduleSpec(d));
+  const hasSchedule = $derived(!!spec);
+  // Without a schedule, `heat` is just on.
+  const scheduled = $derived(!!pointOf(d, keys.mode)?.kind?.values?.includes('auto'));
+  // A thermostat that states hundredths (Matter) is still nudged by half a degree.
+  const step = $derived(range ? Math.max(range.step, 0.5) : 0.5);
+
+  // A room thermostat of Moli: a valve turned by hand is left as it is for a while.
+  const override = $derived(pointOf(d, 'valve_override') ? value(id, 'valve_override') : null);
   let editing = $state(false);
   let charting = $state(false);
 
@@ -78,27 +87,25 @@
 
   /** A mode said in the house's language (an unknown one: as the valve says it). */
   const MODE_LABELS = { off: 'commun.vanne.mode.off', auto: 'commun.vanne.mode.auto', heat: 'commun.vanne.mode.heat' };
-  const modeLabel = (key) => (MODE_LABELS[key] ? t(MODE_LABELS[key]) : (key ?? '—'));
+  const modeLabel = (key) => (key === 'heat' && !scheduled ? t('commun.vanne.mode.marche') : MODE_LABELS[key] ? t(MODE_LABELS[key]) : (key ?? '—'));
   const setMode = (key) => modes.includes(key) && act(`${id}/${keys.mode}`, key, t('commun.action', { label: name, action: modeLabel(key).toLowerCase() }));
 </script>
 
 <div class="valve" class:unreachable={!reachable(id)}>
-  <div class="head">
-    <h3><Icon name="fire" size={16} />{name}</h3>
-    {#if Number.isFinite(temp)}
-      <b class="num temp" title={t('commun.clim.temp_piece')}>{num(temp, 1)}{pointOf(d, keys.temperature)?.unit ?? ''}</b>
-    {/if}
-  </div>
+  {#if !bare}<RadiatorTile {id} />{/if}
   {#if Number.isFinite(shown) && pointOf(d, keys.target)}
     {#if writable}
       <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
-        <button onclick={() => nudge(-range.step)} aria-label={t('commun.clim.moins_chaud')} disabled={shown <= range.first}>−</button>
+        <button onclick={() => nudge(-step)} aria-label={t('commun.clim.moins_chaud')} disabled={shown <= range.first}>−</button>
         <b class="num">{num(shown, shown % 1 ? 1 : 0)}{unit ?? ''}</b>
-        <button onclick={() => nudge(range.step)} aria-label={t('commun.clim.plus_chaud')} disabled={shown >= range.last}>+</button>
+        <button onclick={() => nudge(step)} aria-label={t('commun.clim.plus_chaud')} disabled={shown >= range.last}>+</button>
       </div>
     {:else}
       <p class="muted">{t('commun.clim.consigne_val', { temp: num(shown, shown % 1 ? 1 : 0), unit: unit ?? '' })}</p>
     {/if}
+  {/if}
+  {#if override === 'none' && mode === 'auto'}
+    <p class="muted">{t('commun.vanne.reglage.programme')}</p>
   {/if}
   {#if modes.length}
     <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
@@ -132,25 +139,6 @@
 
   .valve.unreachable {
     opacity: 0.55;
-  }
-
-  .head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  h3 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    font-size: 15px;
-  }
-
-  .temp {
-    font-size: 22px;
   }
 
   .setpoint {
@@ -216,6 +204,7 @@
     text-decoration: underline;
     cursor: pointer;
   }
+
 
   .muted {
     margin: 0;

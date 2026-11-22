@@ -4,6 +4,7 @@
   import Icon from '../ui/Icon.svelte';
   import Spark from '../ui/infra/Spark.svelte';
   import ValveCard from '../ui/ValveCard.svelte';
+  import RadiatorTile from '../ui/RadiatorTile.svelte';
   import WeekSchedule from '../ui/WeekSchedule.svelte';
   import ScheduleEditor from '../ui/ScheduleEditor.svelte';
   import { isValve } from '../lib/capabilities.js';
@@ -95,7 +96,8 @@
         {@const correction = value(id, 'valve_correction')}
         {@const others = rooms.filter((o) => o.id !== id)}
         <section class="card room" class:unreachable={!reachable(id)}>
-          <ValveCard {id} {name} schedule={false} />
+          <RadiatorTile {id} />
+          <ValveCard {id} {name} schedule={false} bare />
           {#if typeof correction === 'number'}
             <p class="muted">{t('maison.chauffage.correction', { gap: `${correction > 0 ? '+' : ''}${num(correction, 1)}°` })}</p>
           {/if}

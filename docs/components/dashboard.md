@@ -250,10 +250,28 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
   garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
   quand ce n'est pas le groupe suivi par la vanne.
+  Partout où il paraît (Pièces, Chauffage, Accueil, Moli), un thermostat qui ne fait que chauffer
+  est **dessiné en radiateur** : vanne Zigbee, thermostat de pièce de Moli, et vanne d'un autre
+  protocole (Matter : `target_temperature` et un mode `off`/`heat`, sans rien d'un climatiseur,
+  `heatsOnly`), qui prend alors la carte de vanne au lieu du cadran, réglée par demi-degré. Une
+  vanne seule (ni membres, ni `valve_correction`, ni `valve_override`) dit si elle est **ouverte**
+  ou **fermée** (`running_state`, sinon son thermomètre à plus de 0,5 °C au-dessus de sa consigne) ;
+  le thermostat d'une pièce dit en plus l'état de ses vannes (« Vanne fermée · radiateur 22,6° »,
+  « 1 vanne ouverte sur 2 »).
+  Le dessin (`ui/RadiatorTile.svelte`, calcul pur dans `lib/radiator.js`) : ses éléments se remplissent de
+  chaleur et des volutes montent quand il chauffe (sonde de la pièce à plus de 0,2 °C sous la
+  consigne, ou `running_state` à `heat`), à moitié quand il est à température, gris au repos ou à
+  l'arrêt, bleus et traversés d'un courant d'air pendant une aération (`valve_override`) ; une
+  petite molette dit une vanne réglée à la main. En mots : ce qu'il fait, « 18,2° pour 19° », puis
+  le prochain changement du programme (« Programme · 17° à 22:00 ») ou la fin du réglage à la main,
+  avec **Reprendre le programme**. Toucher la tuile ouvre la carte de la vanne (consigne, modes),
+  sans son en-tête. Animations coupées avec `prefers-reduced-motion`.
   La page **Chauffage** (`pages/Chauffage.svelte`) réunit, au-dessus de la pompe à chaleur, chaque
   thermostat qui a une table horaire (thermostats de pièce de Moli, `crates/moli-heating`, et vannes
   Zigbee2MQTT) : la carte de la vanne sans son repli de table horaire, la correction appliquée aux
-  vannes (`valve_correction`), **la semaine** (`ui/WeekSchedule.svelte`, calcul pur dans
+  vannes (`valve_correction`), le réglage fait à la main sur une vanne (`valve_override` : « Réglée
+  sur la vanne · programme repris à 14:30 » ou « Aération », avec **Reprendre le programme** ; sinon
+  « Suit le programme »), **la semaine** (`ui/WeekSchedule.svelte`, calcul pur dans
   `lib/week.js`) en sept bandes de 24 h colorées par consigne sur une même échelle pour toutes les
   pièces (15 °C froid → 23 °C chaud, `color-mix` entre `--cool` et `--warm`), avec l'heure actuelle
   sur la ligne du jour, puis l'éditeur du jour choisi. Une limite entre deux créneaux se fait glisser
