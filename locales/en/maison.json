@@ -232,6 +232,7 @@
   "maison.meteo.jours": "7 days",
   "maison.meteo.maintenant": "Now",
   "maison.meteo.heure": "{h}:00",
+  "maison.meteo.mm": "{mm} mm",
   "maison.meteo.aujourdhui": "Today",
   "maison.meteo.fin_pluie": "The rain should stop around {h}:00",
   "maison.meteo.pluie_continue": "Rain for the next few hours",

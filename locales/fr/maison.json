@@ -232,6 +232,7 @@
   "maison.meteo.jours": "7 jours",
   "maison.meteo.maintenant": "Maint.",
   "maison.meteo.heure": "{h} h",
+  "maison.meteo.mm": "{mm} mm",
   "maison.meteo.aujourdhui": "Auj.",
   "maison.meteo.fin_pluie": "La pluie devrait s’arrêter vers {h} h",
   "maison.meteo.pluie_continue": "De la pluie pour les prochaines heures",
