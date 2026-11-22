@@ -372,6 +372,15 @@ base_topic = "zwave"        # défaut
   brut du gateway (accents et espaces intacts) ; seul le sujet MQTT est assaini.
 - **Identité** : `nodeId` zwave (`<instance>:<nodeId>`), jamais le nom ; le nom et la
   localisation zwave-js servent de suggestions (`native_name`, `native_room`).
+- **Graine** : après chaque réponse `getNodes`, chaque point est semé avec la valeur et
+  l'horodatage (`lastUpdate`, ms) de la passerelle : un point restauré après redémarrage
+  est libéré immédiatement — la passerelle ne publie un sujet de valeur que quand la
+  valeur change, sans cela une valeur restaurée stagnerait derrière sa porte
+  « premier échantillon en ligne » jusqu'au prochain changement réel (plusieurs heures
+  pour un contacteur qui ne bouge qu'avec le plan de chauffage) — et un échantillon en
+  ligne qui a divergé (publication manquée) est resynchronisé. Un point déjà vivant et
+  conforme à la graine est laissé tel quel : la graine ne déplace pas son horodatage,
+  donc le rafraîchissement de 300 s est un no-op, même si la réponse arrive en double.
 - **Pièges** : le gateway ne rejoue pas les états sans le flag retain → bootstrap `getNodes`
   à chaque connexion (fenêtre initiale de 15 s), puis réessai toutes les 30 s jusqu'à
   la première réponse acceptée, puis rafraîchissement périodique toutes les 300 s (les
@@ -397,7 +406,7 @@ base_topic = "zwave"        # défaut
   (6 nœuds synthétiques, dont un moteur de volet CC 38), `value_messages.json` et
   `get_nodes_real.json` (capture réelle anonymisée) : découverte, typage, décodage,
   encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
-  et de config.
+  et de config, graines du snapshot.
 
 ## `rfxcom2mqtt` : 433 MHz via rfxcom2mqtt (`crates/moli-rfxcom2mqtt`)
 

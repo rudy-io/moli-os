@@ -343,6 +343,17 @@ impl DriverCtx {
             .map(|sample| sample.value)
     }
 
+    /// Whether one of this instance's points still awaits its first sample
+    /// of this run: a restored value is not usable until the driver confirms
+    /// it (a live reading, or a value read from the gateway's snapshot).
+    #[must_use]
+    pub fn is_awaiting(&self, device: &DeviceId, key: &str) -> bool {
+        if !self.owns(device) {
+            return false;
+        }
+        self.hub.is_awaiting(device, key)
+    }
+
     /// Every change in the house (states, devices, availability), to follow
     /// other devices: read-only, the driver still acts on its own only.
     /// The whole house, so for trusted drivers: compiled into Moli and

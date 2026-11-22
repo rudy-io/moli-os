@@ -22,13 +22,13 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use anyhow::Context as _;
-use moli_core::{DeviceId, Value};
+use moli_core::{DeviceId, PointId, Sample, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
 use serde::Deserialize;
 use serde_json::Value as Json;
 
-pub use catalog::{Catalog, Entry, SetTarget};
+pub use catalog::{Catalog, Entry, Seed, SetTarget};
 
 /// Driver configuration (`[driver.options]` in `moli.toml`).
 #[derive(Clone, Debug, Deserialize)]
@@ -390,6 +390,7 @@ fn handle_get_nodes(ctx: &DriverCtx, state: &mut ZwaveState, payload: &[u8]) -> 
         }
         Ok(fresh) => {
             apply_catalog(ctx, &mut state.catalog, fresh);
+            seed_points(ctx, &state.catalog);
             state.bootstrapped = true;
             true
         }
@@ -483,6 +484,71 @@ fn apply_catalog(ctx: &DriverCtx, current: &mut Catalog, fresh: Catalog) {
     }
     tracing::info!(devices = fresh.len(), "zwave catalog loaded");
     *current = fresh;
+}
+
+/// Whether to feed one snapshot seed to the hub. `Record` when the point is
+/// still awaiting its first sample of this run (a restart restored it; the
+/// seed is that first sample, recorded at the gateway's own timestamp), or
+/// when the gateway's value differs from the hub's and the snapshot is at
+/// least as fresh as the live sample (a publish was missed between the last
+/// sample and the snapshot). `Skip` otherwise: a live point matching the
+/// snapshot keeps its own timestamp (the gateway's `lastUpdate` can be older
+/// than it — a meter quiet for a day), and a live sample newer than the
+/// snapshot wins (it landed while a duplicate answer was in flight).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SeedDecision {
+    Record,
+    Skip,
+}
+
+#[must_use]
+fn seed_decision(awaiting: bool, current: Option<&Sample>, seed: &Seed) -> SeedDecision {
+    let Some(sample) = current else {
+        // No sample at all (a point created since the last restore): the
+        // seed is its first value.
+        return SeedDecision::Record;
+    };
+    if awaiting {
+        // Restored after a restart, gate not released yet: the seed is the
+        // first sample of this run, even when the values match.
+        return SeedDecision::Record;
+    }
+    if sample.value == seed.value {
+        return SeedDecision::Skip;
+    }
+    // Diverged: re-sync only when the snapshot is at least as fresh as the
+    // live sample.
+    if seed.ts >= sample.ts {
+        SeedDecision::Record
+    } else {
+        SeedDecision::Skip
+    }
+}
+
+/// Feeds the hub the points' values from the `getNodes` snapshot (see
+/// `catalog::Seed`), after `apply_catalog` so the device definitions exist.
+/// The gateway publishes a value topic only when a value changes: after a
+/// restart, a restored point would stay gated (`awaiting_samples`) until
+/// the next live change — hours, for a switch that only moves with the
+/// heating plan. The snapshot releases each point with the gateway's value
+/// and timestamp, and re-syncs any point that diverged from it.
+fn seed_points(ctx: &DriverCtx, catalog: &Catalog) {
+    for entry in catalog.entries() {
+        for seed in &entry.seeds {
+            let awaiting = ctx.is_awaiting(&entry.device.id, &seed.key);
+            let current = ctx.read(&PointId::new(&entry.device.id, &seed.key));
+            if seed_decision(awaiting, current.as_ref(), seed) == SeedDecision::Record {
+                tracing::debug!(
+                    instance = %ctx.instance(),
+                    device = %entry.device.id,
+                    point = %seed.key,
+                    ts = seed.ts,
+                    "zwave point seeded from the getNodes snapshot"
+                );
+                ctx.set_state_at(&entry.device.id, &seed.key, seed.value.clone(), seed.ts);
+            }
+        }
+    }
 }
 
 /// Our own (and others') `set`/`get` commands echo back through `#`.
@@ -746,5 +812,56 @@ mod tests {
             !replaces_catalog(&empty, &populated),
             "an empty answer while devices are accumulated must keep the catalog"
         );
+    }
+
+    #[test]
+    fn a_seed_records_awaiting_or_diverged_points_only() {
+        let seed = Seed {
+            key: "on".into(),
+            value: Value::Bool(false),
+            ts: 2_000,
+        };
+        // Awaiting (restored after a restart, gate not released yet): the
+        // seed is the first sample of this run, recorded even if the values
+        // match — that is the incident this exists to fix.
+        let restored = Sample {
+            value: Value::Bool(false),
+            ts: 1_000,
+        };
+        assert_eq!(
+            seed_decision(true, Some(&restored), &seed),
+            SeedDecision::Record
+        );
+        assert_eq!(seed_decision(true, None, &seed), SeedDecision::Record);
+        // Live and matching the snapshot: never re-seed — doing so would
+        // move the sample's timestamp to the gateway's `lastUpdate`, which
+        // can be older than the live one.
+        assert_eq!(
+            seed_decision(false, Some(&restored), &seed),
+            SeedDecision::Skip
+        );
+        // Live but diverged, snapshot at least as fresh (a publish was
+        // missed between the last sample and the snapshot): re-sync.
+        let stale = Sample {
+            value: Value::Bool(true),
+            ts: 1_500,
+        };
+        assert_eq!(
+            seed_decision(false, Some(&stale), &seed),
+            SeedDecision::Record
+        );
+        // Diverged but the live sample is newer than the snapshot (it landed
+        // while a duplicate answer was in flight): the live sample wins.
+        let fresh = Sample {
+            value: Value::Bool(true),
+            ts: 3_000,
+        };
+        assert_eq!(
+            seed_decision(false, Some(&fresh), &seed),
+            SeedDecision::Skip
+        );
+        // No sample at all (a point created since the last restart): the
+        // seed is its first value.
+        assert_eq!(seed_decision(false, None, &seed), SeedDecision::Record);
     }
 }

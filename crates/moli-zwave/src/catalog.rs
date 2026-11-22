@@ -31,6 +31,20 @@ pub struct SetTarget {
     pub property: &'static str,
 }
 
+/// A point value as held by the gateway's `getNodes` snapshot, with the time
+/// the gateway last updated it (epoch ms). The driver feeds these to the hub
+/// so a point restored after a restart becomes usable as soon as the first
+/// answer arrives — the gateway only publishes a value topic when a value
+/// changes, so a restored point would otherwise wait for the next live
+/// change (hours, for a switch that only moves with the heating plan).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seed {
+    pub key: Arc<str>,
+    pub value: Value,
+    /// Epoch ms (`lastUpdate` in the payload).
+    pub ts: u64,
+}
+
 /// One Z-Wave node with everything needed to decode its value topics and
 /// encode its commands.
 #[derive(Clone, Debug)]
@@ -50,6 +64,9 @@ pub struct Entry {
     /// `brightness` is exposed in percent and converted both ways. `None`
     /// for a neutral `level`, which keeps the device's own scale.
     pub level_max: Option<f64>,
+    /// The points' values from the `getNodes` snapshot (empty in
+    /// accumulation mode, which has no snapshot).
+    pub seeds: Vec<Seed>,
 }
 
 /// Multilevel Switch (CC 38) levels run 0–99 (zwave-js `ValueMetadata.Level`);
@@ -210,6 +227,8 @@ impl Catalog {
             on_target: None,
             level_target: None,
             level_max: None,
+            // Accumulation mode has no `getNodes` snapshot, so no seeds.
+            seeds: Vec::new(),
         });
         self.by_base.entry(name).or_insert(entry.device.id.clone());
         // A CC 38 `currentValue` is also the level (see `Entry::decode`): a
@@ -319,6 +338,29 @@ impl Entry {
         // The optional fifth segment (propertyKey) is tolerated; it decides
         // the mapping for meter values (CC 50).
         let property_key = parts.next().filter(|k| !k.is_empty());
+        let Ok(json) = serde_json::from_slice::<Json>(payload) else {
+            tracing::debug!(entry = %self.name, "unreadable zwave value payload ignored");
+            return Vec::new();
+        };
+        // The real gateway wraps value payloads in a `{time, value}`
+        // envelope; bare values (fixtures, older gateways) pass through.
+        let value_json = json.get("value").unwrap_or(&json);
+        self.values_for(cc, endpoint, property, property_key, value_json)
+    }
+
+    /// The mapping from one gateway value to this entry's point values,
+    /// shared by live value topics and the `getNodes` seed, so a snapshot
+    /// produces exactly the pairs a live publish would. `value_json` is the
+    /// unwrapped value (the `{time, value}` envelope is stripped by the
+    /// caller; snapshot values arrive bare).
+    fn values_for(
+        &self,
+        cc: u8,
+        endpoint: u8,
+        property: &str,
+        property_key: Option<&str>,
+        value_json: &Json,
+    ) -> Vec<(Arc<str>, Value)> {
         let Some(kind) = map_value(cc, property, property_key) else {
             return Vec::new();
         };
@@ -337,13 +379,6 @@ impl Entry {
         if !has_point && level_key.is_none() {
             return Vec::new();
         }
-        let Ok(json) = serde_json::from_slice::<Json>(payload) else {
-            tracing::debug!(entry = %self.name, "unreadable zwave value payload ignored");
-            return Vec::new();
-        };
-        // The real gateway wraps value payloads in a `{time, value}`
-        // envelope; bare values (fixtures, older gateways) pass through.
-        let value_json = json.get("value").unwrap_or(&json);
         let mut values = Vec::new();
         if has_point {
             let value = match (kind, value_json) {
@@ -691,8 +726,10 @@ fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option
         on_target,
         level_target,
         level_max,
+        seeds: Vec::new(),
     };
     refresh_write_access(&mut entry);
+    entry.seeds = collect_seeds(raw, &entry);
     Some(entry)
 }
 
@@ -792,6 +829,68 @@ fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>, Option<f
         }
     }
     (points, level_target, level_max)
+}
+
+/// The points' values from the `getNodes` snapshot, with the time the gateway
+/// last updated each (epoch ms): fed to the hub so a point restored after a
+/// restart becomes usable as soon as the first answer arrives (the gateway
+/// publishes a value topic only when a value changes). Reuses
+/// `Entry::values_for`, so a seed holds exactly what a live publish would
+/// record. First-wins per key (like the point construction); a value with
+/// no `lastUpdate`, a `null` value, or a type the point cannot hold is
+/// skipped — never seeded twice, never over a live sample.
+fn collect_seeds(raw: &RawNode, entry: &Entry) -> Vec<Seed> {
+    let mut seeds: Vec<Seed> = Vec::new();
+    for value in raw.values.iter() {
+        let Some(cc) = value.command_class else {
+            continue;
+        };
+        let Some(property) = value
+            .property
+            .as_ref()
+            .and_then(property_as_str)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let Some(ts) = value.last_update else {
+            continue;
+        };
+        let Some(value_json) = value.value.as_ref().filter(|v| !matches!(v, Json::Null)) else {
+            continue;
+        };
+        let property_key = value.property_key.as_ref().and_then(property_key_as_str);
+        // Only types the point can hold: a switch takes a boolean (or a
+        // 0/1 number, CC 38), a numeric point a number; `targetValue`
+        // (order, not state) and unmapped values are never seeds.
+        let Some(kind) = map_value(cc, &property, property_key.as_deref()) else {
+            continue;
+        };
+        let usable = match kind {
+            PointKind::On => {
+                matches!(value_json, Json::Bool(_) | Json::Number(_))
+                    && entry.device.point(kind.key()).is_some()
+            }
+            PointKind::Level => false,
+            _ => value_json.is_number() && entry.device.point(kind.key()).is_some(),
+        };
+        if !usable {
+            continue;
+        }
+        let endpoint = value.endpoint_index.unwrap_or(0);
+        for (key, point_value) in
+            entry.values_for(cc, endpoint, &property, property_key.as_deref(), value_json)
+        {
+            if !seeds.iter().any(|seed| seed.key.as_ref() == key.as_ref()) {
+                seeds.push(Seed {
+                    key,
+                    value: point_value,
+                    ts,
+                });
+            }
+        }
+    }
+    seeds
 }
 
 /// `on` is commanded through the first switch command class present,
@@ -931,6 +1030,13 @@ struct RawValue {
     maximum: Option<f64>,
     #[serde(default)]
     metadata: Option<RawMetadata>,
+    /// The gateway's current value for this value (absent while the device
+    /// never reported one, and on command-only values like `reset`).
+    #[serde(default)]
+    value: Option<Json>,
+    /// When the gateway last updated the value (epoch ms).
+    #[serde(rename = "lastUpdate", default)]
+    last_update: Option<u64>,
 }
 
 /// Raw Z-Wave+ device class as reported by the gateway (`getNodes`):
@@ -1856,6 +1962,203 @@ mod tests {
                 "Variateur_salon/38/0/targetValue/set".to_owned(),
                 "42".to_owned()
             )
+        );
+    }
+
+    fn seeds_of(catalog: &Catalog, base: &str) -> Vec<(String, Value, u64)> {
+        catalog
+            .by_base(base)
+            .map(|entry| {
+                entry
+                    .seeds
+                    .iter()
+                    .map(|s| (s.key.to_string(), s.value.clone(), s.ts))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn snapshot_seeds_hold_the_gateway_values_and_timestamps() {
+        // The fixture is one gateway sweep: a node every 60 s, its values 1 s
+        // apart. Each seed must carry the stamp of the value it was read from,
+        // never a shared one.
+        const LAMP: u64 = 1_792_000_000_000; // 38-0-currentValue
+        const PLUG_ON: u64 = 1_792_000_060_000; // 32-0-currentValue
+        const PLUG_POWER: u64 = 1_792_000_062_000; // 50-0-power
+        const TEMP: u64 = 1_792_000_120_000; // 31-0-Air_temperature
+        const HUMIDITY: u64 = 1_792_000_121_000; // 49-0-Relative_humidity-0
+        const BATTERY: u64 = 1_792_000_122_000; // 53-0-batteryLevel
+        const SWITCH: u64 = 1_792_000_180_000; // 37-0-currentValue
+        const DIMMER: u64 = 1_792_000_240_000; // 38-0-currentValue
+        const SHUTTER: u64 = 1_792_000_300_000; // 38-0-currentValue
+        let catalog = catalog();
+        // Declared dimmer (0x11/0x01): `on` from the CC 38 level (> 0),
+        // `brightness` as a whole percent of the 0-99 scale.
+        assert_eq!(
+            seeds_of(&catalog, "bureau_lamp"),
+            vec![
+                ("on".to_owned(), Value::Bool(true), LAMP),
+                ("brightness".to_owned(), Value::Int(65), LAMP)
+            ]
+        );
+        // Plug: CC 32 `currentValue` is the switch state, CC 50 `power` the
+        // watt reading; the CC 32 `targetValue` maps to no point.
+        assert_eq!(
+            seeds_of(&catalog, "cuisine_plug"),
+            vec![
+                ("on".to_owned(), Value::Bool(true), PLUG_ON),
+                ("power".to_owned(), Value::Float(12.4), PLUG_POWER)
+            ]
+        );
+        assert_eq!(
+            seeds_of(&catalog, "garage_sensor"),
+            vec![
+                ("temperature".to_owned(), Value::Float(21.5), TEMP),
+                ("humidity".to_owned(), Value::Int(45), HUMIDITY),
+                ("battery".to_owned(), Value::Int(87), BATTERY)
+            ]
+        );
+        // Binary switch: only `currentValue` seeds `on` (never `targetValue`).
+        assert_eq!(
+            seeds_of(&catalog, "couloir_switch"),
+            vec![("on".to_owned(), Value::Bool(false), SWITCH)]
+        );
+        // Dimmer at level 0: off, 0 %.
+        assert_eq!(
+            seeds_of(&catalog, "kitchen_dimmer"),
+            vec![
+                ("on".to_owned(), Value::Bool(false), DIMMER),
+                ("brightness".to_owned(), Value::Int(0), DIMMER)
+            ]
+        );
+        // Shutter (0x11/0x05): neutral `level` on the device's own scale.
+        assert_eq!(
+            seeds_of(&catalog, "volet_garage"),
+            vec![
+                ("on".to_owned(), Value::Bool(true), SHUTTER),
+                ("level".to_owned(), Value::Int(50), SHUTTER)
+            ]
+        );
+    }
+
+    #[test]
+    fn real_gateway_snapshot_seeds_switch_and_meter() {
+        const TS: u64 = 1_792_000_000_000;
+        let catalog = Catalog::from_get_nodes(&instance(), GET_NODES_REAL).unwrap();
+        // The relays: `on` from CC 37 `currentValue` (the other endpoints
+        // and `targetValue` never re-seed it), `power` from the first watt
+        // meter value (key 66049).
+        for base in ["nodeID_6", "nodeID_18"] {
+            assert_eq!(
+                seeds_of(&catalog, base),
+                vec![
+                    ("on".to_owned(), Value::Bool(false), TS),
+                    ("power".to_owned(), Value::Int(0), TS)
+                ]
+            );
+        }
+        // The Fibaro sensors: CC 128 battery before the temperature in the
+        // gateway's key order (the map iterates by topic key).
+        assert_eq!(
+            seeds_of(&catalog, "nodeID_7"),
+            vec![
+                ("battery".to_owned(), Value::Int(100), TS),
+                ("temperature".to_owned(), Value::Float(19.9), TS)
+            ]
+        );
+        assert_eq!(
+            seeds_of(&catalog, "nodeID_8"),
+            vec![("battery".to_owned(), Value::Int(100), TS)]
+        );
+        assert_eq!(
+            seeds_of(&catalog, "nodeID_9"),
+            vec![
+                ("battery".to_owned(), Value::Int(92), TS),
+                ("temperature".to_owned(), Value::Float(18.9), TS)
+            ]
+        );
+    }
+
+    #[test]
+    fn seeds_skip_unstamped_null_and_wrong_type_values() {
+        const TS: u64 = 1_764_000_000_000;
+        // `on` is created by the first `currentValue` (no timestamp, no
+        // seed); the endpoint-1 value carries the gateway's timestamp and
+        // seeds the point. `power` gets a string then a number: only the
+        // number is usable. A `null` temperature is the spec's "no reading"
+        // marker, never a seed.
+        let payload = json!([
+            {
+                "nodeId": 20,
+                "name": "seededge",
+                "values": [
+                    { "commandClass": 37, "endpointIndex": 0, "property": "currentValue", "value": true },
+                    { "commandClass": 32, "endpointIndex": 1, "property": "currentValue", "value": true, "lastUpdate": 1_764_000_000_000u64 },
+                    { "commandClass": 50, "endpointIndex": 0, "property": "power", "value": "hot", "lastUpdate": 1_764_000_000_000u64 },
+                    { "commandClass": 50, "endpointIndex": 1, "property": "power", "value": 5, "lastUpdate": 1_764_000_000_000u64 },
+                    { "commandClass": 31, "endpointIndex": 0, "property": "Air_temperature", "value": null, "lastUpdate": 1_764_000_000_000u64 }
+                ]
+            }
+        ])
+        .to_string();
+        let catalog = Catalog::from_get_nodes(&instance(), payload.as_bytes()).unwrap();
+        let edge = catalog.by_base("seededge").unwrap();
+        // Every mapped value still creates its point…
+        for key in ["on", "power", "temperature"] {
+            assert!(edge.device.point(key).is_some(), "point {key}");
+        }
+        // …but only the usable, timestamped values are seeded.
+        assert_eq!(
+            seeds_of(&catalog, "seededge"),
+            vec![
+                ("on".to_owned(), Value::Bool(true), TS),
+                ("power".to_owned(), Value::Int(5), TS)
+            ]
+        );
+    }
+
+    #[test]
+    fn dimmer_level_seed_comes_from_the_level_target_endpoint() {
+        let ts = 1_764_000_000_000u64;
+        let payload = json!([
+            {
+                "nodeId": 21,
+                "name": "seeddimmer",
+                "deviceClass": { "basic": 4, "generic": 17, "specific": 1 },
+                "values": [
+                    { "commandClass": 38, "endpointIndex": 0, "property": "targetValue", "value": 50, "minimum": 0, "maximum": 99, "lastUpdate": ts },
+                    { "commandClass": 38, "endpointIndex": 1, "property": "currentValue", "value": 40, "minimum": 0, "maximum": 99, "lastUpdate": ts }
+                ]
+            },
+            {
+                "nodeId": 22,
+                "name": "seeddimmer2",
+                "deviceClass": { "basic": 4, "generic": 17, "specific": 1 },
+                "values": [
+                    { "commandClass": 38, "endpointIndex": 0, "property": "currentValue", "value": 60, "minimum": 0, "maximum": 99, "lastUpdate": ts },
+                    { "commandClass": 38, "endpointIndex": 0, "property": "targetValue", "value": 60, "minimum": 0, "maximum": 99, "lastUpdate": ts }
+                ]
+            }
+        ])
+        .to_string();
+        let catalog = Catalog::from_get_nodes(&instance(), payload.as_bytes()).unwrap();
+        // Endpoint 1's `currentValue` seeds `on` but not the level: the
+        // level target is endpoint 0, and a `currentValue` elsewhere is not
+        // its state.
+        let dimmer = catalog.by_base("seeddimmer").unwrap();
+        assert!(dimmer.device.point("brightness").is_some());
+        assert_eq!(
+            seeds_of(&catalog, "seeddimmer"),
+            vec![("on".to_owned(), Value::Bool(true), ts)]
+        );
+        // Same endpoint: `on` and the percent-converted level are seeded.
+        assert_eq!(
+            seeds_of(&catalog, "seeddimmer2"),
+            vec![
+                ("on".to_owned(), Value::Bool(true), ts),
+                ("brightness".to_owned(), Value::Int(60), ts)
+            ]
         );
     }
 }

@@ -732,6 +732,18 @@ impl Hub {
         model.states.get(&device)?.get(key).cloned()
     }
 
+    /// Whether one of `device`'s points still awaits its first sample of this
+    /// run: restored values are not usable until the owning driver confirms
+    /// one (a live reading, or a value read from the gateway's snapshot).
+    #[must_use]
+    pub(crate) fn is_awaiting(&self, device: &DeviceId, key: &str) -> bool {
+        let model = self.read();
+        model
+            .awaiting_samples
+            .get(device)
+            .is_some_and(|keys| keys.contains(key))
+    }
+
     /// Most recent journal entries first.
     #[must_use]
     pub fn journal(&self, limit: usize) -> Vec<Arc<JournalEntry>> {
