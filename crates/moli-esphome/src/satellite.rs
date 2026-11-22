@@ -39,6 +39,8 @@ const CONTINUE_WAIT: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub(crate) enum Thought {
     Heard(String),
+    /// A few words to say while the answer is on its way.
+    Meanwhile(String),
     Answered(Answer),
     /// The speaker said the answer (`true`), or did not.
     Spoken(bool),
@@ -270,9 +272,20 @@ impl Voice {
                 who: Speaker::Person,
                 text,
             });
-            let thought = match brain.answer(&device, lines).await {
-                Ok(answer) => Thought::Answered(answer),
-                Err(e) => Thought::Failed(e),
+            let (words_tx, mut words) = mpsc::unbounded_channel();
+            let answer = brain.answer(&device, lines, words_tx);
+            tokio::pin!(answer);
+            let thought = loop {
+                tokio::select! {
+                    biased;
+                    Some(said) = words.recv() => {
+                        let _ = tx.send((generation, Thought::Meanwhile(said))).await;
+                    }
+                    answer = &mut answer => break match answer {
+                        Ok(answer) => Thought::Answered(answer),
+                        Err(e) => Thought::Failed(e),
+                    },
+                }
             };
             tracing::info!(
                 heard_ms,
@@ -313,6 +326,19 @@ impl Voice {
                     text,
                 });
                 Self::event(tx, VoiceEvent::IntentStart, &[]).await
+            }
+            Thought::Meanwhile(words) => {
+                // Only a speaker says them: the device's own player takes one
+                // sound per run, the answer's. The speaker queues the answer
+                // behind these words.
+                if let (Some(speaker), Some(brain)) = (self.speaker.clone(), ctx.voice_brain()) {
+                    tokio::spawn(async move {
+                        if let Err(why) = brain.say_on(&speaker, &words).await {
+                            tracing::debug!(error = %why, "the waiting words were not said");
+                        }
+                    });
+                }
+                Ok(())
             }
             Thought::Answered(Answer {
                 text: reply,

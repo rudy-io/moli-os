@@ -46,6 +46,11 @@ pub struct Pcm {
     pub rate: u32,
 }
 
+/// Where a turn puts the few words to say while it is still working
+/// (« Je cherche sur internet. »): the silence of a slow answer is what a
+/// person hears as slowness. Never part of the conversation.
+pub type Meanwhile = tokio::sync::mpsc::UnboundedSender<String>;
+
 pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// What was said (a 16 kHz mono 16-bit WAV), in the house's language;
     /// empty when nothing was understood.
@@ -55,11 +60,13 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// order) and answers in one short sentence, or closes the conversation
     /// when asked. The last line is the person's.
     /// `satellite` is the device asking: what is kept per asker is kept per
-    /// satellite.
+    /// satellite. `meanwhile` receives the words to say while the answer is
+    /// on its way, when the turn goes looking for something.
     fn answer(
         &self,
         satellite: &moli_core::DeviceId,
         conversation: Vec<Said>,
+        meanwhile: Meanwhile,
     ) -> BoxFuture<'_, Result<Answer, String>>;
 
     /// An address under `base` the satellite plays: `text` in Moli's voice,
