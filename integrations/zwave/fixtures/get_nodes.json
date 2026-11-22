@@ -44,7 +44,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 65
+          "value": 65,
+          "lastUpdate": 1792000000000
         },
         {
           "id": "38-0-targetValue",
@@ -63,7 +64,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 65
+          "value": 65,
+          "lastUpdate": 1792000001000
         }
       ]
     },
@@ -105,7 +107,8 @@
             "writeable": true,
             "description": "Current state of the basic command class"
           },
-          "value": true
+          "value": true,
+          "lastUpdate": 1792000060000
         },
         {
           "id": "32-0-targetValue",
@@ -124,7 +127,8 @@
           },
           "minimum": 0,
           "maximum": 255,
-          "value": 255
+          "value": 255,
+          "lastUpdate": 1792000061000
         },
         {
           "id": "50-0-power",
@@ -141,7 +145,8 @@
             "writeable": false,
             "description": "Active power"
           },
-          "value": 12.4
+          "value": 12.4,
+          "lastUpdate": 1792000062000
         }
       ]
     },
@@ -183,7 +188,8 @@
             "writeable": false,
             "description": "Air temperature"
           },
-          "value": 21.5
+          "value": 21.5,
+          "lastUpdate": 1792000120000
         },
         {
           "id": "49-0-Relative_humidity-0",
@@ -200,7 +206,8 @@
             "writeable": false,
             "description": "Relative humidity"
           },
-          "value": 45
+          "value": 45,
+          "lastUpdate": 1792000121000
         },
         {
           "id": "53-0-batteryLevel",
@@ -219,7 +226,8 @@
             "minimum": 0,
             "maximum": 100
           },
-          "value": 87
+          "value": 87,
+          "lastUpdate": 1792000122000
         }
       ]
     },
@@ -261,7 +269,8 @@
             "writeable": false,
             "description": "Current state of the switch"
           },
-          "value": false
+          "value": false,
+          "lastUpdate": 1792000180000
         },
         {
           "id": "37-0-targetValue",
@@ -278,7 +287,8 @@
             "writeable": true,
             "description": "Target state of the switch"
           },
-          "value": false
+          "value": false,
+          "lastUpdate": 1792000181000
         }
       ]
     },
@@ -322,7 +332,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 0
+          "value": 0,
+          "lastUpdate": 1792000240000
         },
         {
           "id": "38-0-targetValue",
@@ -341,7 +352,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 0
+          "value": 0,
+          "lastUpdate": 1792000241000
         }
       ]
     },
@@ -385,7 +397,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 50
+          "value": 50,
+          "lastUpdate": 1792000300000
         },
         {
           "id": "38-0-targetValue",
@@ -404,7 +417,8 @@
           },
           "minimum": 0,
           "maximum": 99,
-          "value": 50
+          "value": 50,
+          "lastUpdate": 1792000301000
         }
       ]
     }
