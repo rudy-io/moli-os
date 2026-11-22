@@ -23,3 +23,6 @@ webpki-roots.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rcgen = "0.14"

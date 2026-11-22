@@ -1,0 +1,24 @@
+[integration]
+id = "freebox"
+name = "Freebox (Freebox OS)"
+brands = ["Free"]
+models = ["Freebox Server v7 (Delta)", "Freebox Server v6 (Revolution)", "Freebox Pop", "Freebox Ultra"]
+transport = "https"
+driver = "freebox"
+crate = "moli-freebox"
+
+[discovery]
+mdns = []
+ssdp = []
+# mafreebox.freebox.fr: plain HTTP for /api_version, then HTTPS checked against Free's authorities.
+ports = [80, 443]
+
+[needs]
+# The app token, given once on the box's screen, kept by the driver itself.
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = ""
+author = "agent"
