@@ -18,10 +18,14 @@ import * as Battery from "expo-battery";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground, unpair } from "./src/moli";
-import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from "./src/house";
+import { allowedSuffixes, currentHouse, forgetHouse, looksLikeMoliSession, PRESET, saveHouse } from "./src/house";
 import { declineOffer, fingerprintReady, forgetPin, keepPin, offerDeclined, pinKept, unlockPin } from "./src/pinlock";
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
+import { useWall, WALL_WATCH, wallAvailable, type WallState } from "./src/wall";
+import { useUpdates } from "./src/update";
+import { googleSignIn, handoffAvailable, isGoogleSignIn } from "./src/handoff";
+import { MoliApp } from "./modules/moli-app";
 
 // The shell: Moli's own dashboard, at the house's address, chosen on the
 // first screen (src/house.ts) unless this build is made for one house.
@@ -56,6 +60,15 @@ const EVERY = 10 * 60 * 1000;
 // Back from the background, the page has this long to answer, or it is reloaded.
 const PAGE_ALIVE = 3000;
 const PING = `window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'alive' })); true;`;
+// Once signed in (behind Cloudflare Access the first screen could not tell),
+// the page is asked whether it is a Moli: its session answer, with the
+// page's own cookies.
+const MOLI_CHECK = `
+  fetch('/api/session', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; })
+    .then(function (b) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'moli-check', body: b })); });
+  true;`;
 
 // A notification that arrives while the app is open shows anyway.
 Notifications.setNotificationHandler({
@@ -153,6 +166,9 @@ class Guard extends Component<{ children: ReactNode; onLeave: () => void }, { br
 function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   const webRef = useRef<WebView>(null);
   const [failed, setFailed] = useState(false);
+  // The address turned out not to be a Moli (checked once signed in).
+  const [notMoli, setNotMoli] = useState(false);
+  const checked = useRef(false);
   const [askLocation, setAskLocation] = useState(false);
   // The top of the screen takes the dashboard's own colour (day or night).
   const [top, setTop] = useState<{ bg: string; dark: boolean }>({ bg: BG, dark: true });
@@ -176,16 +192,37 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       `if (window.MoliNative) { window.MoliNative.fingerprint = ${lock.fingerprint}; window.MoliNative.pinSaved = ${lock.kept}; } true;`,
     );
   }, [lock]);
+  // The wall tablet (src/wall.ts): its state is told to the page with a
+  // `moli-native-wall` event on `window` (null: not possible here).
+  const tellWall = useCallback((state: WallState | null) => {
+    webRef.current?.injectJavaScript(
+      `window.dispatchEvent(new CustomEvent('moli-native-wall', { detail: ${JSON.stringify(state)} })); true;`,
+    );
+  }, []);
+  const wall = useWall(tellWall);
+  // The app's own updates, from the house (src/update.ts).
+  const updates = useUpdates(base);
+  // Known only to the bridge injected in the main frame: on Android every
+  // frame of the page reaches ReactNativeWebView.postMessage, a third-party
+  // iframe of the dashboard included, but it cannot read the main frame's
+  // window.MoliNative. The house's own orders (wall-, pin-) carry it. Drawn
+  // from the platform's secure random (the PKCE verifier), else Math.random.
+  const nonce = useMemo(
+    () => MoliApp?.handoffKeys().verifier ?? `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+    [],
+  );
   const bridge = useMemo(
     () =>
       `window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, ` +
       `fingerprint: ${lock.fingerprint}, pinSaved: ${lock.kept}, ` +
       `changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); }, ` +
-      `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock' })); }, ` +
-      `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin) })); }, ` +
-      `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin) })); }, ` +
-      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); } }; true;`,
-    [lock],
+      `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock', k: ${JSON.stringify(nonce)} })); }, ` +
+      `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin), k: ${JSON.stringify(nonce)} })); }, ` +
+      `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin), k: ${JSON.stringify(nonce)} })); }, ` +
+      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget', k: ${JSON.stringify(nonce)} })); }, ` +
+      `wall: ${wallAvailable}, ` +
+      `wallSend: function (type, extra) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, extra || {}, { type: 'wall-' + type, k: ${JSON.stringify(nonce)} }))); } }; true;`,
+    [lock, nonce],
   );
 
   // A sleeping app may lose its page: iOS kills the web view's process when
@@ -269,6 +306,21 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     ]);
   }, [onLeave]);
 
+  // Google's sign-in, behind Cloudflare Access: in a browser tab of the
+  // app's own, its session then brought back (src/handoff.ts).
+  const signingIn = useRef(false);
+  const signInWithGoogle = useCallback(async () => {
+    if (signingIn.current) return;
+    signingIn.current = true;
+    try {
+      const done = await googleSignIn(base);
+      if (done === "ok") webRef.current?.injectJavaScript(`location.replace(${JSON.stringify(base + "/")}); true;`);
+      else if (done === "error") Alert.alert(t.unreachableTitle, t.googleFailed);
+    } finally {
+      signingIn.current = false;
+    }
+  }, [base]);
+
   // Everything outside the house's hosts (and its sign-in page) opens in the browser.
   const onShouldStart = useCallback((req: { url: string }) => {
     try {
@@ -276,12 +328,16 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       if (url.protocol === "about:" || url.protocol === "blob:" || url.protocol === "data:") return true;
       const internal = allowed.some((d) => inDomain(url.hostname, d));
       if ((url.protocol === "https:" || url.protocol === "http:") && internal) return true;
+      if (isGoogleSignIn(url.hostname) && handoffAvailable(base)) {
+        void signInWithGoogle();
+        return false;
+      }
     } catch {
       return false;
     }
     Linking.openURL(req.url).catch(() => {});
     return false;
-  }, [allowed]);
+  }, [allowed, base, signInWithGoogle]);
 
   // Once the dashboard itself shows (signed in), pair this phone if needed.
   const onLoadEnd = useCallback(async (e: { nativeEvent: { url: string } }) => {
@@ -292,6 +348,10 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       return;
     }
     if (url.hostname !== new URL(base).hostname || url.pathname.startsWith("/cdn-cgi/")) return;
+    if (!checked.current) {
+      checked.current = true;
+      webRef.current?.injectJavaScript(MOLI_CHECK);
+    }
     if (pairingAsked.current || (await pairing())) return;
     pairingAsked.current = true;
     const token = await pushToken();
@@ -312,6 +372,23 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     }
     if (msg.type === "alive") {
       alive.current = true;
+      return;
+    }
+    if (msg.type === "moli-check") {
+      // A network hiccup (null) is not proof: only a plain « not Moli » is.
+      const body = (msg as { body?: unknown }).body;
+      if (body !== null && body !== undefined && !looksLikeMoliSession(body)) setNotMoli(true);
+      return;
+    }
+    // The wall tablet: only the house's own pages may set it up.
+    if (msg.type?.startsWith("wall-")) {
+      let fromHouse = false;
+      try {
+        fromHouse = new URL(e.nativeEvent.url).host === new URL(base).host;
+      } catch {
+        fromHouse = false;
+      }
+      if (fromHouse && (msg as { k?: unknown }).k === nonce) await wall.onMessage(msg as Parameters<typeof wall.onMessage>[0]);
       return;
     }
     if (msg.type === "theme" && typeof (msg as { bg?: unknown }).bg === "string") {
@@ -335,7 +412,9 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       } catch {
         fromHouse = false;
       }
-      if (!fromHouse) return;
+      // The page's address is the main frame's: the nonce tells the bridge
+      // from an iframe of the page.
+      if (!fromHouse || (msg as { k?: unknown }).k !== nonce) return;
       if (msg.type === "pin-unlock") {
         const answer = await unlockPin(base);
         if ("error" in answer && answer.error === "unavailable") setLock((l) => ({ ...l, kept: false }));
@@ -373,7 +452,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       // Not signed in yet, or refused: try again on the next page.
       pairingAsked.current = false;
     }
-  }, [base, askLeave]);
+  }, [base, askLeave, wall.onMessage, nonce]);
 
   const startLocation = useCallback(async () => {
     setAskLocation(false);
@@ -385,9 +464,20 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   }, []);
 
   return (
-      <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top"]}>
-        <StatusBar style={top.dark ? "light" : "dark"} />
-        {failed ? (
+      // Every edge: Android's buttons at the bottom (or on the side, a tablet
+      // turned) must not cover the dashboard's menu.
+      <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top", "bottom", "left", "right"]}>
+        <StatusBar style={top.dark ? "light" : "dark"} hidden={!!wall.state?.enabled} />
+        {notMoli ? (
+          <View style={styles.center}>
+            <Text style={styles.title}>{t.notMoliTitle}</Text>
+            <Text style={styles.sub}>{t.notMoli}</Text>
+            <Text style={styles.address}>{base.replace(/^https?:\/\//, "")}</Text>
+            <Pressable style={styles.button} onPress={onLeave}>
+              <Text style={styles.buttonText}>{t.changeHouse}</Text>
+            </Pressable>
+          </View>
+        ) : failed ? (
           <View style={styles.center}>
             <Text style={styles.title}>{t.unreachableTitle}</Text>
             <Text style={styles.sub}>{t.unreachableSub}</Text>
@@ -412,7 +502,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             style={styles.web}
             applicationNameForUserAgent="MoliNative"
             injectedJavaScriptBeforeContentLoaded={bridge}
-            injectedJavaScript={THEME_WATCH}
+            injectedJavaScript={THEME_WATCH + WALL_WATCH}
             allowsBackForwardNavigationGestures
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -440,6 +530,17 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             textZoom={100}
           />
         )}
+        {wall.dark && (
+          // Nobody there, and Moli may not switch the screen off: black over
+          // the page until a touch or a movement.
+          <Pressable style={[StyleSheet.absoluteFill, styles.dark]} onPress={wall.wake} />
+        )}
+        {updates.downloading && (
+          <View style={styles.toast} pointerEvents="none">
+            <ActivityIndicator size="small" color={GOLD} />
+            <Text style={styles.toastText}>{t.updateDownloading}</Text>
+          </View>
+        )}
         {askLocation && (
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{t.locationTitle}</Text>
@@ -461,6 +562,20 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   web: { flex: 1, backgroundColor: BG },
+  dark: { backgroundColor: "#000" },
+  toast: {
+    position: "absolute",
+    alignSelf: "center",
+    bottom: 96,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: "rgba(22, 21, 18, 0.92)",
+  },
+  toastText: { color: "#f4f1ea", fontSize: 14, fontWeight: "600" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: BG, padding: 24 },
   title: { color: "#f3efe6", fontSize: 22, fontWeight: "600" },
   sub: { color: "#b9b2a4", fontSize: 14, marginTop: 8, textAlign: "center" },

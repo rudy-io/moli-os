@@ -364,6 +364,55 @@ impl Energy {
         Ok(before)
     }
 
+    /// Every price of the house at once, as edited from the dashboard (a
+    /// past price corrected, one added with its date, one removed). The hours
+    /// already filed from the first change on take the new prices, for the
+    /// meters the house's price prices (see [`Self::house_priced`]).
+    /// Returns how many hours were priced again.
+    pub async fn set_house_prices(&self, prices: Vec<HousePrice>) -> Result<usize, EnergyError> {
+        if prices.is_empty() {
+            return Err(EnergyError::Invalid(
+                "keep at least one price: without any, every hour would lose its cost".into(),
+            ));
+        }
+        let mut new = prices;
+        new.sort_by_key(|p| p.since);
+        for p in &new {
+            config::check_price(p.price).map_err(EnergyError::Invalid)?;
+        }
+        if new.windows(2).any(|w| w[0].since == w[1].since) {
+            return Err(EnergyError::Invalid(
+                "two prices begin at the same moment".into(),
+            ));
+        }
+        let old = self.inner.prices.all();
+        let Some(from) = price::first_change(&old, &new) else {
+            return Ok(0);
+        };
+        let meters = self.house_priced();
+        let store = Arc::clone(&self.inner.store);
+        let kept = new.clone();
+        let repriced = blocking(move || store.replace_house_prices(&kept, &meters, from)).await?;
+        self.inner.prices.replace(new);
+        Ok(repriced)
+    }
+
+    /// The meters priced by the house's price: they consume, have no price
+    /// of their own, and the house has no tariff periods (whose prices come
+    /// first, and whose past periods are not kept).
+    fn house_priced(&self) -> Vec<String> {
+        let config = &self.inner.config;
+        if config.tariff.is_some() {
+            return Vec::new();
+        }
+        config
+            .meters
+            .iter()
+            .filter(|m| m.role.consumes() && m.price.is_none() && m.price_point.is_none())
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.inner.config

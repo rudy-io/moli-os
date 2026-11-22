@@ -2766,13 +2766,15 @@ impl Hub {
                 .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
             let before = states.get(&key).map(|s| s.ts);
-            // A copied value also tells when its reading got newer: its age is
-            // what it says.
+            // A copied value whose reading got older (another source's, kept
+            // as the last known) is a change: its age goes back. A newer
+            // reading of the same value is only a `Seen` (#230), like any
+            // value read again.
             let changed = always
                 || first_live
                 || states
                     .get(&key)
-                    .is_none_or(|s| s.value != value || (at.is_some() && s.ts != ts));
+                    .is_none_or(|s| s.value != value || (at.is_some() && ts < s.ts));
             states.insert(
                 key.clone(),
                 Sample {

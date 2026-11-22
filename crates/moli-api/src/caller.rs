@@ -97,6 +97,9 @@ fn public(method: &Method, path: &str) -> bool {
     (!api && (method == Method::GET || method == Method::HEAD))
         || path == "/api/session"
         || (path == "/api/invitation" && method == Method::POST)
+        // The app's Google sign-in handoff: its one-time code and secret are
+        // the proof (appli.rs).
+        || (path == "/api/phones/handoff" && method == Method::POST)
 }
 
 /// What a visitor may not change in a demo house: everything but playing
@@ -285,9 +288,13 @@ fn vouch(gate: &Gate, caller: &mut Caller) {
     }
 }
 
-/// `/api/phones/<id>/report` → the phone's id.
+/// `/api/phones/<id>/report` (and the app's update, `/app`, `/app.apk`) →
+/// the phone's id.
 fn phone_report(path: &str) -> Option<&str> {
-    let id = path.strip_prefix("/api/phones/")?.strip_suffix("/report")?;
+    let rest = path.strip_prefix("/api/phones/")?;
+    let id = ["/report", "/app", "/app.apk"]
+        .iter()
+        .find_map(|end| rest.strip_suffix(end))?;
     (!id.is_empty() && id.len() <= 16 && id.bytes().all(|b| b.is_ascii_alphanumeric()))
         .then_some(id)
 }
@@ -440,6 +447,7 @@ mod tests {
             (Method::DELETE, "/api/assistant/rules/3"),
             (Method::PUT, "/api/session/pin"),
             (Method::PUT, "/api/energy/price"),
+            (Method::PUT, "/api/energy/prices"),
             (Method::POST, "/api/session/setup"),
             (Method::POST, "/api/machines/pc/remote"),
             (Method::POST, "/api/automations/soir/run/again"),

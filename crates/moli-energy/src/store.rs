@@ -323,6 +323,55 @@ impl Store {
         Ok(())
     }
 
+    /// Every price of the house at once (the list edited from the
+    /// dashboard), and the hours of `meters` from `from` on priced again
+    /// with it, in one go: an hour takes the price in force in its middle,
+    /// none before the first price. Returns how many hours were priced again.
+    pub fn replace_house_prices(
+        &self,
+        prices: &[HousePrice],
+        meters: &[String],
+        from: u64,
+    ) -> Result<usize, EnergyError> {
+        let mut sorted = prices.to_vec();
+        sorted.sort_by_key(|p| p.since);
+        // Slices of time from `from` on, each with its price (none before the first).
+        let mut slices: Vec<(u64, u64, Option<f64>)> = Vec::new();
+        let first = sorted.first().map_or(u64::MAX, |p| p.since);
+        if from < first {
+            slices.push((from, first, None));
+        }
+        for (i, p) in sorted.iter().enumerate() {
+            let end = sorted.get(i + 1).map_or(u64::MAX, |n| n.since);
+            if end > from {
+                slices.push((p.since.max(from), end, Some(p.price)));
+            }
+        }
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM house_price", [])?;
+        let mut repriced = 0;
+        {
+            let mut add = tx.prepare("INSERT INTO house_price (since, price) VALUES (?1, ?2)")?;
+            for p in &sorted {
+                add.execute(params![ms(p.since), p.price])?;
+            }
+            // The middle of an hour decides its price: `hour + half` in [a, b).
+            let mut set = tx.prepare(
+                "UPDATE energy_hour SET cost = kwh * ?4
+                 WHERE meter = ?1 AND hour + ?5 >= ?2 AND hour + ?5 < ?3",
+            )?;
+            let half = ms(crate::meter::HOUR_MS / 2);
+            for meter in meters {
+                for &(a, b, price) in &slices {
+                    repriced += set.execute(params![meter, ms(a), ms(b), price, half])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(repriced)
+    }
+
     /// The first hour on record (for « depuis le … »).
     pub fn first_hour(&self) -> Result<Option<u64>, EnergyError> {
         let first: Option<Option<i64>> = self
@@ -469,6 +518,63 @@ mod tests {
         store.add_house_price(late).unwrap();
         store.add_house_price(early).unwrap();
         assert_eq!(store.house_prices().unwrap(), vec![early, late]);
+    }
+
+    #[test]
+    fn a_new_list_of_prices_prices_the_hours_again_from_where_it_changed() {
+        const H: u64 = 3_600_000;
+        let store = Store::memory();
+        // Three hours of the grid and of the panels, 2 kWh each.
+        let rows: Vec<HourRow> = (0..3)
+            .flat_map(|i| {
+                [
+                    row("grid", i * H, 2.0, Some(0.4)),
+                    row("pv", i * H, 2.0, None),
+                ]
+            })
+            .collect();
+        store.import(&rows).unwrap();
+        let cost = |meter: &str, hour: u64| {
+            store
+                .hours(0, 3 * H)
+                .unwrap()
+                .into_iter()
+                .find(|r| r.meter == meter && r.hour == hour)
+                .and_then(|r| r.cost)
+        };
+        // 0.10 for the first hour, 0.30 from the second one on: only the
+        // grid's hours from the second one are priced again.
+        let prices = [
+            HousePrice {
+                since: 0,
+                price: 0.10,
+            },
+            HousePrice {
+                since: H,
+                price: 0.30,
+            },
+        ];
+        let repriced = store
+            .replace_house_prices(&prices, &["grid".to_owned()], H)
+            .unwrap();
+        assert_eq!(repriced, 2);
+        assert_eq!(store.house_prices().unwrap(), prices.to_vec());
+        assert_eq!(cost("grid", 0), Some(0.4));
+        assert!((cost("grid", H).unwrap() - 0.6).abs() < 1e-9);
+        assert!((cost("grid", 2 * H).unwrap() - 0.6).abs() < 1e-9);
+        assert_eq!(cost("pv", H), None);
+        // Before the first price, an hour has none.
+        let later = [HousePrice {
+            since: 2 * H,
+            price: 0.5,
+        }];
+        store
+            .replace_house_prices(&later, &["grid".to_owned()], 0)
+            .unwrap();
+        assert_eq!(store.house_prices().unwrap(), later.to_vec());
+        assert_eq!(cost("grid", 0), None);
+        assert_eq!(cost("grid", H), None);
+        assert!((cost("grid", 2 * H).unwrap() - 1.0).abs() < 1e-9);
     }
 
     #[test]

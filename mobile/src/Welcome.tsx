@@ -52,9 +52,12 @@ export function Welcome({ initial, onDone }: { initial?: string | null; onDone: 
       onDone(base);
       return;
     }
-    // Unencrypted over the Internet: never offered. Otherwise the person
-    // knows their house better than a knock does (another sign-in in front…).
-    setProblem({ message: explain(answer), base: answer.why === "insecure" ? undefined : base });
+    // Opening anyway is offered only where the knock cannot tell: nobody
+    // answers (yet), Moli refuses from here, or another address took over
+    // (another sign-in in front of the house). Never for a site that plainly
+    // is not a Moli, nor unencrypted over the Internet.
+    const unsure = answer.why === "unreachable" || answer.why === "refused" || (answer.why === "not-moli" && answer.elsewhere);
+    setProblem({ message: explain(answer), base: unsure ? base : undefined });
   };
 
   return (

@@ -290,9 +290,25 @@ const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|
 const NOT_LIGHT = /vmc|ventil|pompe|prise|chauffe|\bfan\b|pump|heater|outlet|socket/i;
 const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!write || p.access?.write));
 
+/** A helper: a value Moli keeps for itself (`helpers` driver), never a plug. */
+export const isHelper = (d) => d?.manufacturer === 'Moli' && d?.model === 'Aide';
+
+/** A helper's icon, by its kind: a switch, a choice, a number or a text. */
+export function helperIcon(d) {
+  const kind = d?.points?.[0]?.kind?.type;
+  if (kind === 'binary') return 'toggle';
+  if (kind === 'enum') return 'helper-select';
+  if (kind === 'numeric') return 'helper-number';
+  return 'helper-text';
+}
+
+/** A helper that is a switch: a pad, Oui / Non. The others are chips. */
+export const isSwitchHelper = (d) => isHelper(d) && d.points?.some((p) => p.key === 'on');
+
 /** What a device is, for choosing how to show it. */
 export function deviceKind(d) {
   if (!d) return 'unknown';
+  if (isHelper(d)) return 'helper';
   if (has(d, 'progress') && has(d, 'nozzle_temperature')) return 'printer';
   // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
   if (has(d, 'key', true)) return 'tv';
@@ -354,6 +370,7 @@ export function roomList() {
         climates: by('climate'),
         media: by('tv', 'speaker'),
         alarms: by('alarm'),
+        helpers: by('helper'),
         sensors: [...by('sensor', 'plant', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
         opened: by('cover').filter((d) => {

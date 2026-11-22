@@ -382,7 +382,9 @@ impl DriverCtx {
     }
 
     /// Records a value read at `ts` (ms since the epoch), not now: for a
-    /// value copied from another device's reading, whose age it keeps.
+    /// value copied from another device's reading, whose age it keeps. A
+    /// newer reading of the same value is no change (only a `Seen`, #230);
+    /// an older one is (the age goes back).
     pub fn set_state_at(&self, device: &DeviceId, key: &str, value: Value, ts: u64) {
         if self.owns(device) {
             self.hub.set_state_at(device, key, value, ts);

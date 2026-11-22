@@ -40,6 +40,8 @@
   <div class="card tight"><LightTile {id} name={title} dimmer /></div>
 {:else if kind === 'plug'}
   <div class="card tight"><LightTile {id} name={title} icon="flash" /></div>
+{:else if kind === 'helper' && d.points.some((p) => p.key === 'on')}
+  <div class="card tight"><LightTile {id} point="on" name={title} icon="toggle" /></div>
 {:else}
   <SensorCard {id} name={title} />
 {/if}

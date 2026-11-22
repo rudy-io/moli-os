@@ -1889,6 +1889,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-freebox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-frigate"
 version = "0.1.0"
 dependencies = [
@@ -2220,6 +2237,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "rcgen",
  "ring",
  "rustls",
  "serde_json",
@@ -2256,6 +2274,7 @@ dependencies = [
  "moli-energy",
  "moli-engie",
  "moli-esphome",
+ "moli-freebox",
  "moli-frigate",
  "moli-govee",
  "moli-heating",

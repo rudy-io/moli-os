@@ -6,7 +6,12 @@
 //! charts (raw, or bucketed when long) and — the agent-native part —
 //! read-only SQL over a simple view, so any agent can ask its own questions
 //! (« combien de fois la porte s'est ouverte cette semaine ? »).
+//!
+//! Changes are kept a few weeks. A few points (the outside temperature) are
+//! also kept for ever as hourly statistics: average, lowest, highest; a
+//! series further back than the changes reads them.
 
+mod hourly;
 mod store;
 
 use std::path::PathBuf;
@@ -20,12 +25,15 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+pub use hourly::{HOUR_MS, Hour};
 pub use store::{Bucket, HistoryError, Series, SqlResult, Store};
 
 const BATCH_EVERY: Duration = Duration::from_secs(2);
 const BATCH_MAX: usize = 1_000;
 const WRITER_QUEUE: usize = 64;
-const RETENTION_EVERY: Duration = Duration::from_secs(6 * 3600);
+/// Hourly statistics are filed every hour; changes are pruned every 6.
+const ROLLUP_EVERY: Duration = Duration::from_secs(3600);
+const PRUNE_EVERY_ROLLUPS: u32 = 6;
 
 type Row = (PointId, Value, u64);
 
@@ -36,6 +44,9 @@ type Batch = (Vec<Row>, bool);
 pub struct Options {
     pub path: PathBuf,
     pub retention_days: u32,
+    /// Points whose hourly statistics (average, lowest, highest) are kept
+    /// for ever, long after their changes are pruned.
+    pub hourly: Vec<String>,
 }
 
 /// Cheap handle used by the surfaces to read history.
@@ -59,6 +70,7 @@ impl History {
         tokio::spawn(prune_loop(
             Arc::clone(&store),
             options.retention_days,
+            options.hourly.clone(),
             cancel.clone(),
         ));
         let source = hub_events(hub);
@@ -191,16 +203,40 @@ async fn write_loop(store: Arc<Store>, mut queue: mpsc::Receiver<Batch>) {
     }
 }
 
-async fn prune_loop(store: Arc<Store>, retention_days: u32, cancel: CancellationToken) {
-    let mut tick = tokio::time::interval(RETENTION_EVERY);
+async fn prune_loop(
+    store: Arc<Store>,
+    retention_days: u32,
+    hourly: Vec<String>,
+    cancel: CancellationToken,
+) {
+    let mut tick = tokio::time::interval(ROLLUP_EVERY);
+    let mut round = 0u32;
     loop {
         tokio::select! {
             () = cancel.cancelled() => break,
             _ = tick.tick() => {}
         }
+        // The hours first: pruning removes the changes they are made of.
+        if !hourly.is_empty() {
+            let (store, points) = (Arc::clone(&store), hourly.clone());
+            match blocking(move || store.rollup(&points, now_ms())).await {
+                Ok(0) => {}
+                Ok(n) => tracing::debug!(hours = n, "hourly statistics filed"),
+                // Pruning still runs: it keeps what the hours not filed need
+                // (Store::prune), and the rest must not grow without end.
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "hourly statistics not filed: their changes are kept until they are"
+                ),
+            }
+        }
+        round += 1;
+        if round % PRUNE_EVERY_ROLLUPS != 1 {
+            continue;
+        }
         let cutoff = now_ms().saturating_sub(u64::from(retention_days) * 86_400_000);
-        let store = Arc::clone(&store);
-        match blocking(move || store.prune(cutoff)).await {
+        let (store, points) = (Arc::clone(&store), hourly.clone());
+        match blocking(move || store.prune(cutoff, &points)).await {
             Ok(0) => {}
             Ok(n) => tracing::info!(removed = n, "history pruned"),
             Err(e) => tracing::warn!(error = %e, "history pruning failed"),

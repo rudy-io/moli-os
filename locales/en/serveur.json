@@ -23,6 +23,13 @@
   "serveur.telephone.notice_titre": "New phone",
   "serveur.telephone.notice_appaire": "A phone ({id}) has just been paired from {by}: it will receive the house’s notifications. Name given: {name}",
 
+  "serveur.appli.aucune": "no app version left on the house",
+  "serveur.appli.connexion_access": "this sign-in step comes after Cloudflare Access, for a person of the house",
+  "serveur.appli.lien_invalide": "invalid sign-in link: start signing in again from the app",
+  "serveur.appli.code_refuse": "sign-in code unknown, already used or expired: start signing in again",
+  "serveur.appli.connexion_faite": "Signed in. Back to the Moli app…",
+  "serveur.appli.revenir": "Back to Moli",
+
   "serveur.plan.fichier_illisible": "plan.json: {error}",
   "serveur.plan.humain_arrange": "only a person (with the code) can rearrange the plan",
   "serveur.plan.humain_ajoute": "only a person (with the code) can add a plan",
@@ -138,6 +145,7 @@
   "serveur.energie.point.over_budget": "Estimated bill over budget",
   "serveur.energie.prix_humain": "only a person (with the code) or an owner can change the price of a kWh",
   "serveur.energie.prix_invalide": "invalid price of a kWh: a positive number, in {currency} per kWh (0.2319, not 23.19)",
+  "serveur.energie.prix_liste_vide": "Keep at least one price: without any, every hour would lose its cost.",
   "serveur.energie.absente": "no [energy] section in the configuration",
   "serveur.energie.charge.modele": "Driven load",
   "serveur.energie.charge.mode": "Mode",

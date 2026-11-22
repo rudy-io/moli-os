@@ -1298,6 +1298,26 @@ location = "http://<box>:<port>/<chemin>/gatedesc.xml"   # optionnel : saute la 
 - **Retrouvée ailleurs** : une ligne au journal (« retrouvé à une nouvelle adresse », ancienne → nouvelle description) ; `location` n'est jamais réécrite.
 - **Pièges** : la Livebox ne répond aux recherches SSDP que pour un autre de ses services (`WFADevice`, port 1990), jamais pour sa passerelle (port 60000, chemin tiré au redémarrage) : elle n'est connue que par ses annonces, peu fréquentes hors redémarrage. Fixer `location` accélère le premier démarrage.
 - **Tests** : conversion en Mbit/s, identité (numéro de série, UDN, adresse), annonces retenues ; parsing UPnP et annonces dans `crates/moli-net/src/upnp.rs`.
+
+## `freebox` : Freebox (`crates/moli-freebox`)
+
+- **Couvre** : la Freebox par l'API de Freebox OS (Server v7 « Delta », Revolution, Pop, Ultra) : températures et ventilateurs, connexion (état, débits instantanés, débit de la ligne, IP publique), disques (température, espace libre), grappe de disques (dégradée ou non), Wi-Fi (allumé ou non), durée, micrologiciel. **Lecture seule.** L'état de la connexion seul existe aussi par `igd` ; ce pilote donne ce que l'UPnP ne dit pas.
+- **Protocole** : `GET http://mafreebox.freebox.fr/api_version` (sans secret : version de l'API, nom de domaine du certificat, `uid` de la box), puis HTTPS à la même adresse locale (443), le certificat **vérifié en entier contre les autorités de Free** (`crates/moli-freebox/src/freebox-roots.pem`, publiées sur dev.freebox.fr : « Freebox ECC Root CA » et « Freebox Root CA », valables jusqu'en 2035) pour le domaine de la box (`moli_net::PinnedHttps::with_roots`) : rien n'est épinglé, le certificat que la box renouvelle tous les trois mois passe tel quel. Lecture toutes les 30 s (`poll_s`).
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "freebox"
+kind = "freebox"
+# [driver.options]
+# host = "mafreebox.freebox.fr"   # ou l'adresse locale de la box
+# poll_s = 30
+```
+
+- **Secrets** : l'**app token**, donné une fois sur l'écran du Freebox Server (`login/authorize` ; le statut du pilote dit d'accepter, flèche de droite pour « Oui » puis OK), et l'`uid` de la box qui l'a donné, au coffre (`app_token`, `box_uid`). Le jeton ne repasse jamais sur le réseau : chaque session s'ouvre par HMAC-SHA1(jeton, défi) (`login/session`), en-tête `X-Fbx-App-Auth`. Jeton révoqué dans Freebox OS (Gestion des accès) : oublié, la box redemandée. Jeton d'une autre box (`uid` différent) : jamais envoyé, oublié. Personne à l'écran à temps : nouvelle demande 10 min plus tard ; refus : le pilote attend un redémarrage. Aucune permission demandée : la lecture n'en exige pas.
+- **Points** (appareil `<instance>:box`) : `temp_*` (°C, un par capteur que la box liste dans `system.sensors`, avec son nom), ventilateurs (`fan*`, rpm, `system.fans`), et pour les plus anciennes API `temp_cpum`, `temp_cpub`, `temp_sw`, `fan_rpm` ; `uptime` (s), `firmware` ; `connected`, `rate_down` et `rate_up` (kB/s), `line_down` et `line_up` (Mbit/s), `external_ip` ; `disk_<id>_temp` (°C, seulement si la box n'a pas ses propres sondes `temp_hdd*` ; un disque endormi à 0 °C est sauté), `free_space` (% libre, toutes partitions) ; `raid_degraded` ; `wifi`. Les points apparaissent avec la première valeur que la box donne : une box sans disque n'en a pas.
+- **Pièges** : la box renouvelle son certificat tous les 90 jours mais ne charge le nouveau qu'à son redémarrage : un certificat expiré se lit dans le journal du pilote (« certificate expired ») et se règle en redémarrant la box. La racine n'est pas envoyée par la box (seulement l'intermédiaire « Freebox ECC Intermediate CA ») : elle doit être dans le crate.
+- **Tests** : mot de passe de session (RFC 2202), réponses et refus de l'API, base de l'API selon la version, températures et ventilateurs (liste et anciens champs), connexion dans les unités du tableau de bord, disques, grappe, Wi-Fi, autorités de Free lues ; dans `moli-net` : autorité propre (chaîne et nom vérifiés, autre nom et autre autorité refusés).
 ## `ipp` : imprimante réseau (`crates/moli-ipp`)
 
 - **Couvre** : toute imprimante IPP Everywhere / AirPrint (Canon, Epson, HP, Brother depuis ~2013) : état en mots, niveau de chaque cartouche, file, dernière impression ; **imprimer depuis Moli** (photo, pages d'un PDF rendues par le tableau de bord), « Faire clignoter », « Annuler ».
@@ -1407,8 +1427,10 @@ transmet aucun). Ses `members` sont les sources.
   une valeur dès qu'une source a parlé une fois. Frais = relevé depuis moins de `stale_after`.
 - **L'âge** : la valeur garde l'heure du relevé de sa source, pas celle de la recopie ; la règle
   `stale` des automatismes marche telle quelle. Quand une source relit seulement la même valeur,
-  l'heure avance au plus toutes les 5 minutes : l'âge reste juste à 5 minutes près, et
-  l'historique ne prend pas une ligne par répétition.
+  l'heure avance à chaque relevé, sans ligne dans l'historique : comme pour tout appareil, le
+  hub ne le dit qu'en `seen`, au plus toutes les 5 minutes (#230), et l'âge affiché reste juste
+  à 5 minutes près. Une valeur recopiée dont le relevé est plus ancien (la dernière connue d'une
+  autre source) est un changement : son âge recule.
 - **La source** : `<clé>_source` (texte, lecture seule, sens `config`) porte l'identifiant de
   l'appareil source. Il ne change que quand la source change : son heure dit depuis quand cette
   source est retenue. `stations` et `forecast` (texte, sens `config`) listent les sources
@@ -1819,6 +1841,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `govee` | `moli-govee` | UDP 4001/4002/4003 (API locale Govee), multidiffusion | oui : marche, luminosité, couleur, température | pas encore (aucune lumière Govee disponible) |
 | `shelly` | `moli-shelly` | WebSocket local 80 (JSON-RPC Gen2), notifications poussées, digest SHA-256 | oui : sorties (`on`) | Pro 4PM, Pro 3EM (une phase câblée) : lecture identique à HA au Wh près ; ordre sur une sortie : pas encore |
 | `igd` | `moli-igd` | UPnP IGD (SSDP + SOAP) | non | Livebox |
+| `freebox` | `moli-freebox` | API Freebox OS : HTTP 80 (`api_version`) puis HTTPS 443, autorités de Free | non | Freebox Server v7 (Delta) |
 | `ipp` | `moli-ipp` | IPP 2.0 HTTP 631 | identifier, annuler, imprimer (tableau de bord) | Canon MG3600 |
 | `host` | `moli-host` | /proc, /sys ; WoL ; agent HTTP sortant | allumer, éteindre, veille, Claude et Codex pour le téléphone (PIN) | hôte Linux ; PC Windows avec l'agent |
 | `presence` | `moli-presence` | UDP + table ARP de l'hôte | non | téléphones sur le Wi-Fi |
