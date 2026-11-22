@@ -1,0 +1,40 @@
+{
+ "data": [
+  {
+   "active": 1,
+   "avail": 508536487936,
+   "content": "backup",
+   "enabled": 1,
+   "shared": 0,
+   "storage": "freebox-backup",
+   "total": 983319691264,
+   "type": "dir",
+   "used": 474783203328,
+   "used_fraction": 0.482837074804933
+  },
+  {
+   "active": 1,
+   "avail": 10614860678,
+   "content": "images,rootdir",
+   "enabled": 1,
+   "shared": 0,
+   "storage": "local-lvm",
+   "total": 151640866816,
+   "type": "lvmthin",
+   "used": 141026006138,
+   "used_fraction": 0.9299999999941968
+  },
+  {
+   "active": 1,
+   "avail": 62379380736,
+   "content": "backup,iso,import,vztmpl",
+   "enabled": 1,
+   "shared": 0,
+   "storage": "local",
+   "total": 72722055168,
+   "type": "dir",
+   "used": 6601777152,
+   "used_fraction": 0.0907809485959768
+  }
+ ]
+}

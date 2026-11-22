@@ -1,0 +1,57 @@
+{
+ "data": {
+  "boot-info": {
+   "mode": "efi",
+   "secureboot": 0
+  },
+  "cpu": 0,
+  "cpuinfo": {
+   "cores": 6,
+   "cpus": 12,
+   "family": "6",
+   "flags": "fpu vme sse sse2 avx avx2",
+   "hvm": "1",
+   "mhz": "4324.706",
+   "model": "12th Gen Intel(R) Core(TM) i5-12500T",
+   "sockets": 1,
+   "user_hz": 100,
+   "vendor": "GenuineIntel"
+  },
+  "current-kernel": {
+   "machine": "x86_64",
+   "release": "7.0.14-30-pve",
+   "sysname": "Linux",
+   "version": "#1 SMP PREEMPT_DYNAMIC PMX 7.0.14-30 (2026-11-16T21:55Z)"
+  },
+  "idle": 773056,
+  "ksm": {
+   "shared": 0
+  },
+  "kversion": "Linux 7.0.14-30-pve #1 SMP PREEMPT_DYNAMIC PMX 7.0.14-30 (2026-11-16T21:55Z)",
+  "loadavg": [
+   "0.25",
+   "0.43",
+   "0.45"
+  ],
+  "memory": {
+   "available": 8946085888,
+   "free": 3509141504,
+   "total": 16441614336,
+   "used": 7495528448
+  },
+  "pveversion": "pve-manager/9.2.31/30a00e01666ece52",
+  "rootfs": {
+   "avail": 62379380736,
+   "free": 66120278016,
+   "total": 72722055168,
+   "used": 6601777152
+  },
+  "swap": {
+   "free": 8222466048,
+   "total": 8589930496,
+   "used": 367464448
+  },
+  "uptime": 66842,
+  "wait": 0
+ }
+}

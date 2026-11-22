@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
+kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, proxmox, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -1789,6 +1789,28 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Tests** : `src/model.rs` (fixtures de `integrations/synology/fixtures/`) ; `src/tests.rs` (faux DSM en TLS :
   publication, ordre d'arrêt, session perdue, identifiants refusés, certificat changé, NAS éteint qui garde ses ordres).
 
+## `proxmox` : Proxmox VE, lecture seule (`crates/moli-proxmox`)
+
+- **Couvre** : le nœud (processeur, mémoire, disque système, durée d'allumage, mises à jour en attente, version), un
+  appareil par conteneur et machine virtuelle (en marche, processeur, mémoire, disque des conteneurs), par stockage
+  actif (occupation, libre), la dernière sauvegarde (`vzdump` : résultat, heure, durée, âge de la dernière réussie) et
+  un par disque (SMART, vie restante). Chaque partie qui peut aller mal porte `problem` (sens `alert`) et `detail`.
+- **Protocole** : l'API REST de Proxmox, HTTPS (8006), certificat **épinglé au premier contact** (`PinnedHttps`,
+  empreinte sous `cert`) ; `GET` seulement, en-tête `PVEAPIToken` : ni session ni mot de passe, rien dans une adresse.
+- **Configuration** : `host`, `token_id` (`utilisateur@royaume!nom`), `port` (8006), `node` (défaut : le seul nœud),
+  `poll_secs` (60), `full_percent` (90), `backup_hours` (26). **Secret** : `token_secret` (rôle `PVEAuditor`).
+  Voir `integrations/proxmox/onboarding.md`.
+- **Lectures** : disques toutes les 10 min, mises à jour toutes les heures, configuration d'un invité seulement s'il est
+  arrêté (`onboot`, 32 au plus par lecture). Réponses bornées : 4 Mio (`moli-net`), 256 entrées par liste (invités
+  de chaque sorte, stockages, disques, tâches). Une partie illisible est laissée de côté ; seul `/status` dit si le
+  nœud répond.
+- **Nœud injoignable** : une valeur (`up` faux, `problem` vrai), pas un échec du pilote. **Jeton refusé** : avertissement,
+  nouvel essai dans 15 min. **Certificat changé** : attente d'une personne.
+- **État** : éprouvé sur Proxmox VE 9.2 (un nœud, six LXC), fixtures = réponses réelles anonymisées ; machines
+  virtuelles, cluster et pannes non éprouvés. Pas encore : température, ordres. Détail : `integrations/proxmox/README.md`.
+- **Tests** : `src/model.rs` (fixtures de `integrations/proxmox/fixtures/`) ; `src/tests.rs` (faux Proxmox en TLS :
+  publication, jeton dans l'en-tête seulement, certificat épinglé, invité arrêté qui devrait tourner, jeton refusé).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -1852,6 +1874,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
 | `synology` | `moli-synology` | HTTPS (5001), certificat épinglé, API web DSM | oui : réveil, arrêt, redémarrage | DS1019+ (DSM 7.4) ; `reboot` essayé, `shutdown` et `wake` non |
+| `proxmox` | `moli-proxmox` | HTTPS (8006), certificat épinglé, API REST, jeton `PVEAuditor` | non (lecture seule) | Proxmox VE 9.2, un nœud, LXC ; machines virtuelles et cluster pas encore |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin, relais des prises Meross) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO ; prises Meross MSS110, MSS210, MSS310 et multiprises : **pas essayées** (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |

@@ -317,6 +317,19 @@ base_topic = "zigbee2mqtt"
 # calls_per_day = 10            # a free home user account
 # timezone = "Europe/Paris"
 
+# Proxmox VE (HTTPS 8006), read only. Needs the master key and one secret (token_secret: an API token of a
+# user with the PVEAuditor role); see integrations/proxmox/onboarding.md.
+# [[driver]]
+# id = "pve"
+# kind = "proxmox"
+#
+# [driver.options]
+# host = "192.168.0.x"
+# token_id = "moli@pve!moli"
+# node = "pve"                 # only when the cluster has several nodes
+# full_percent = 90            # memory, disk or storage above this: a problem
+# backup_hours = 26            # no successful backup for this long: a problem
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
