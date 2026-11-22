@@ -523,7 +523,9 @@ export { refreshSession };
 
 export function num(v, digits = 0) {
   if (v == null || !Number.isFinite(Number(v))) return '—';
-  return Number(v).toLocaleString(locale(), { maximumFractionDigits: digits, minimumFractionDigits: digits });
+  // -0.2 rounded to 0 digits is « -0 »: a zero has no sign.
+  const n = Number(Number(v).toFixed(digits)) || 0;
+  return n.toLocaleString(locale(), { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
 export function clock(ts) {

@@ -31,6 +31,10 @@
   });
 
   const rows = $derived(hours(sky.forecast));
+  // Rain expected in millimetres (Open-Meteo: per hour, and the day's sum):
+  // shown from 0.1 mm, one decimal under 10 mm.
+  const wetMm = (mm) => Number(mm) >= 0.1;
+  const mmText = (mm) => (wetMm(mm) ? t('maison.meteo.mm', { mm: num(mm, Number(mm) < 10 ? 1 : 0) }) : '');
   const week = $derived(days(sky.forecast));
   const line = $derived(outlook(rows));
   const lo = $derived(Math.min(...week.map((d) => d.min).filter(Number.isFinite)));
@@ -101,7 +105,8 @@
               <small>{i === 0 ? t('maison.meteo.maintenant') : t('maison.meteo.heure', { h: h.hour })}</small>
               <Icon path={s.icon} size={24} label={s.label} />
               <b class="num">{num(h.temp, 0)}°</b>
-              <em class="num" class:dry={h.rain < 20}>{h.rain}%</em>
+              <em class="num" class:dry={h.rain < 20 && !wetMm(h.mm)}>{h.rain}%</em>
+              <em class="mm num" class:dry={!wetMm(h.mm)}>{mmText(h.mm)}</em>
             </li>
           {/each}
         </ol>
@@ -117,7 +122,8 @@
                 <i class="bar" aria-hidden="true"><i style="left:{((d.min - lo) / Math.max(1, hi - lo)) * 100}%; right:{((hi - d.max) / Math.max(1, hi - lo)) * 100}%"></i></i>
                 <span>{num(d.min, 0)}°</span>
               </span>
-              <em class="num" class:dry={d.rain < 20}>{d.rain}%</em>
+              <em class="num" class:dry={d.rain < 20 && !wetMm(d.mm)}>{d.rain}%</em>
+              <em class="mm num" class:dry={!wetMm(d.mm)}>{mmText(d.mm)}</em>
             </li>
           {/each}
         </ol>
@@ -344,6 +350,11 @@
 
   .strip em.dry {
     visibility: hidden;
+  }
+
+  .strip em.mm {
+    font-weight: 600;
+    opacity: 0.85;
   }
 
   .week li {
