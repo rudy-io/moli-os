@@ -288,9 +288,11 @@ impl std::fmt::Debug for Session<'_> {
     }
 }
 
+/// A 401 or 403 is the e-mail address or the password; a 400 is a request
+/// GRDF no longer understands (its sign-in changed), not a refusal.
 fn refused_or(status: StatusCode) -> Failure {
     match status.as_u16() {
-        400 | 401 | 403 => Failure::Refused,
+        401 | 403 => Failure::Refused,
         429 => Failure::Throttled,
         other => Failure::Status(other),
     }
@@ -683,6 +685,20 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(failure, Failure::Refused);
+    }
+
+    #[tokio::test]
+    async fn a_request_grdf_no_longer_understands_is_not_a_refusal() {
+        let fake = Fake::default()
+            .on(START, reply(200, r#"{"stateToken":"02.id.x"}"#))
+            .on(
+                "connexion.grdf.fr/idp/idx/identify",
+                reply(400, r#"{"errorCode":"E0000003"}"#),
+            );
+        let failure = Session::open(&fake, "user@example.com", "pw")
+            .await
+            .unwrap_err();
+        assert_eq!(failure, Failure::Status(400));
     }
 
     #[tokio::test]

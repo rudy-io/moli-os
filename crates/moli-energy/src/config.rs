@@ -330,20 +330,7 @@ impl Config {
                     m.id
                 ));
             }
-            // A gas meter read a day late (GRDF) files its hours like a Linky.
-            let late = m.role.consumes() || m.role == Role::Gas;
-            if m.history
-                && (!late
-                    || m.integrate
-                    || m.estimate
-                    || m.period.is_some()
-                    || m.kwh_per_unit.is_some())
-            {
-                return Err(format!(
-                    "meter {:?}: `history` is for a meter that consumes or a gas meter, in kWh, without `integrate`, `estimate`, `period` nor `kwh_per_unit`",
-                    m.id
-                ));
-            }
+            check_history(m)?;
             check_meter_price(m)?;
         }
         let mut load_ids = HashSet::new();
@@ -426,6 +413,27 @@ fn check_point(point: &str) -> Result<(), String> {
         Some((device, key)) if device.contains(':') && !key.is_empty() => Ok(()),
         _ => Err(format!("{point:?} is not a point id (instance:device/key)")),
     }
+}
+
+/// A meter filed from a service a day late (`history`): one that consumes,
+/// or a gas meter (GRDF), in kWh.
+fn check_history(m: &MeterConfig) -> Result<(), String> {
+    // A gas meter read a day late (GRDF) files its hours like a Linky.
+    let late = m.role.consumes() || m.role == Role::Gas;
+    if m.history && (!late || m.integrate || m.estimate || m.period.is_some()) {
+        return Err(format!(
+            "meter {:?}: `history` is for a meter that consumes or a gas meter, without `integrate`, `estimate` nor `period`",
+            m.id
+        ));
+    }
+    // Its hours come in kWh already, each priced by `price` alone.
+    if m.history && m.role == Role::Gas && (m.kwh_per_unit.is_some() || m.price_point.is_some()) {
+        return Err(format!(
+            "meter {:?}: a gas meter with `history` gives kWh priced by `price`: no `kwh_per_unit` nor `price_point`",
+            m.id
+        ));
+    }
+    Ok(())
 }
 
 /// A meter's price: fixed, or from a point plus what it leaves out.
@@ -524,6 +532,7 @@ mod tests {
         let gas = "[[meter]]\nid = \"gaz\"\nname = \"Gaz\"\npoint = \"grdf:gazpar/hours\"\nrole = \"gas\"\nhistory = true\nprice = 0.12\n";
         assert!(parse(&format!("{ok}{gas}")).is_ok());
         assert!(parse(&format!("{ok}{gas}kwh_per_unit = 11.3\n")).is_err());
+        assert!(parse(&format!("{ok}{gas}price_point = \"x:y/z\"\n")).is_err());
         let made = gas
             .replace("\"gas\"", "\"solar\"")
             .replace("price = 0.12\n", "");

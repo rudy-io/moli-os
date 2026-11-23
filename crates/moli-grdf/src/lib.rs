@@ -34,8 +34,12 @@ const DAYS: i64 = 7;
 const FIRST_DAYS: i64 = 365;
 /// Days in one value of the `hours` point (a text point holds 4000 characters).
 const DAYS_AT_ONCE: usize = 3;
-/// Between two values of `hours`: the energy recorder reads each one.
-const PACE: Duration = Duration::from_millis(50);
+/// Between two values of `hours`: the energy recorder reads each one, and a
+/// recorder that falls behind the hub's events only rereads the last one.
+const PACE: Duration = Duration::from_millis(200);
+/// The first year, sent once more after this: whatever the recorder missed
+/// then is filed now (what is filed stays: nothing counts twice).
+const REPLAY_AFTER: Duration = Duration::from_secs(600);
 /// Days without news before the meter is shown as unreachable (GRDF is often
 /// two days late, sometimes more).
 const PATIENCE_DAYS: i32 = 5;
@@ -191,7 +195,8 @@ async fn fetch(
     model::days(&body, pce).map_err(|_| Failure::Unreadable)
 }
 
-async fn publish(ctx: &DriverCtx, id: &DeviceId, days: &[Day]) {
+/// The days, hour by hour, a few days at a time, for the energy recorder.
+async fn publish_hours(ctx: &DriverCtx, id: &DeviceId, days: &[Day]) {
     for (i, chunk) in days.chunks(DAYS_AT_ONCE).enumerate() {
         if i > 0 {
             tokio::time::sleep(PACE).await;
@@ -201,6 +206,10 @@ async fn publish(ctx: &DriverCtx, id: &DeviceId, days: &[Day]) {
             ctx.set_state(id, "hours", Value::Text(text.into()));
         }
     }
+}
+
+async fn publish(ctx: &DriverCtx, id: &DeviceId, days: &[Day]) {
+    publish_hours(ctx, id, days).await;
     let Some(day) = days.last() else { return };
     if last_day(ctx, id).is_some_and(|done| done > day.date) {
         return;
@@ -266,12 +275,27 @@ async fn run(driver: &Grdf, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         if due {
             let today = now.date();
             let done = last_day(ctx, &id);
+            let backfill = done.is_none();
             let Some(first) = first_day(today, done) else {
                 anyhow::bail!(moli_i18n::tr!("pilotes.grdf.reponse_illisible"));
             };
             match fetch(&session::Internet, (&email, &password), pce, first, today).await {
                 Ok(days) => {
+                    tracing::info!(
+                        instance = %ctx.instance(),
+                        days = days.len(),
+                        last = %days.last().map(|d| d.date.to_string()).unwrap_or_default(),
+                        "GRDF: readings received"
+                    );
                     publish(ctx, &id, &days).await;
+                    if backfill && !days.is_empty() {
+                        // The year once more, from memory (no new request).
+                        tokio::select! {
+                            () = ctx.cancelled() => return Ok(()),
+                            () = tokio::time::sleep(REPLAY_AFTER) => {}
+                        }
+                        publish_hours(ctx, &id, &days).await;
+                    }
                     // A week without a reading is not a late meter: say so.
                     if days.is_empty() {
                         ctx.warn(moli_i18n::tr!("pilotes.grdf.pas_de_donnees"));
