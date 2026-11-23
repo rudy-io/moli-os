@@ -121,7 +121,7 @@
   "commun.theme_sheet.probleme.unknown": "“{key}” ignored: unknown setting",
   "commun.theme_sheet.probleme.mode": "“{key}” ignored: a list of colours was expected",
   "commun.theme_sheet.probleme.background": "“{key}” ignored: a background is { image, gradient, dim }",
-  "commun.theme_sheet.probleme.image": "“{key}” ignored: an image is a path (/api/plan/images/…) or an https address",
+  "commun.theme_sheet.probleme.image": "“{key}” ignored: an image is a plan image kept by Moli (/api/plan/images/…), never an address elsewhere",
   "commun.theme_sheet.probleme.gradient": "“{key}” ignored: a gradient has 2 to 6 #rrggbb colours",
   "commun.theme_sheet.probleme.dim": "“{key}” ignored: the veil goes from 0 to 0.9",
   "commun.theme_sheet.probleme.font": "Unknown font “{key}”: figtree, system, rounded, serif or mono",

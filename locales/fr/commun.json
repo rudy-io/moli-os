@@ -119,7 +119,7 @@
   "commun.theme_sheet.probleme.unknown": "« {key} » ignorée : réglage inconnu",
   "commun.theme_sheet.probleme.mode": "« {key} » ignoré : une liste de couleurs était attendue",
   "commun.theme_sheet.probleme.background": "« {key} » ignoré : un fond s’écrit { image, gradient, dim }",
-  "commun.theme_sheet.probleme.image": "« {key} » ignorée : une image est un chemin (/api/plan/images/…) ou une adresse https",
+  "commun.theme_sheet.probleme.image": "« {key} » ignorée : une image est une image du plan gardée par Moli (/api/plan/images/…), jamais une adresse ailleurs",
   "commun.theme_sheet.probleme.gradient": "« {key} » ignoré : un dégradé va de 2 à 6 couleurs #rrggbb",
   "commun.theme_sheet.probleme.dim": "« {key} » ignoré : le voile va de 0 à 0,9",
   "commun.theme_sheet.probleme.font": "Police « {key} » inconnue : figtree, system, rounded, serif ou mono",

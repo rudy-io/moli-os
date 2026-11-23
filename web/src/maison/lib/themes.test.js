@@ -70,11 +70,14 @@ test('a theme without a usable id is not a theme', () => {
   assert.equal(readTheme(null).theme, null);
 });
 
-test('a wallpaper is a path or an https address, never CSS', () => {
-  const ok = readTheme({ id: 'a', background: { image: '/api/plan/images/fond.jpg', dim: 0.3 } });
-  assert.deepEqual(ok.theme.background, { image: '/api/plan/images/fond.jpg', dim: 0.3 });
-  assert.deepEqual(readTheme({ id: 'b', background: { image: 'https://example.com/fond.jpg' } }).theme.background, { image: 'https://example.com/fond.jpg' });
-  for (const image of ['/x.jpg") ; color: red', 'javascript:alert(1)', 'http://example.com/a.jpg', '/a b.jpg', "/a'.jpg"]) {
+test('a wallpaper is an image Moli keeps, never an address elsewhere nor CSS', () => {
+  const ok = readTheme({ id: 'a', background: { image: '/api/plan/images/0123456789abcdef.jpg', dim: 0.3 } });
+  assert.deepEqual(ok.theme.background, { image: '/api/plan/images/0123456789abcdef.jpg', dim: 0.3 });
+  for (const image of [
+    'https://example.com/fond.jpg', '//example.com/fond.jpg', '/\\example.com/fond.jpg', 'http://example.com/a.jpg',
+    '/api/plan/images/../../x.jpg', '/api/plan/images/0123456789ABCDEF.jpg', '/api/plan/images/fond.jpg',
+    '/api/plan/images/0123456789abcdef.jpg?x', '/x.jpg") ; color: red', 'javascript:alert(1)', '/a b.jpg', "/a'.jpg",
+  ]) {
     const { theme, problems } = readTheme({ id: 'c', background: { image } });
     assert.equal(theme.background, null, image);
     assert.equal(problems[0].code, 'image', image);
@@ -83,9 +86,9 @@ test('a wallpaper is a path or an https address, never CSS', () => {
 });
 
 test('the wallpaper layers: veil, image, gradient, then the colour', () => {
-  const { theme } = readTheme({ id: 'a', background: { image: '/api/plan/images/f.jpg', dim: 0.5 }, night: { background: { gradient: ['#000', '#111'] } } });
+  const { theme } = readTheme({ id: 'a', background: { image: '/api/plan/images/00000000000000ff.jpg', dim: 0.5 }, night: { background: { gradient: ['#000', '#111'] } } });
   const day = applyTheme(theme, 'day');
-  assert.equal(day.wallpaper, 'linear-gradient(#edf0f580, #edf0f580), url("/api/plan/images/f.jpg") center / cover no-repeat, #edf0f5');
+  assert.equal(day.wallpaper, 'linear-gradient(#edf0f580, #edf0f580), url("/api/plan/images/00000000000000ff.jpg") center / cover no-repeat, #edf0f5');
   assert.equal(applyTheme(theme, 'night').wallpaper, 'linear-gradient(160deg, #000000, #111111), #0d1016');
 });
 

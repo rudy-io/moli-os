@@ -139,9 +139,11 @@ export function contrast(a, b) {
 // ---- reading a theme ----------------------------------------------------------------
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
-// A wallpaper is served by Moli (`/api/plan/images/…`) or comes from an https address.
-// No quote, parenthesis, backslash or space: it goes into a CSS url().
-const IMAGE = /^(\/[A-Za-z0-9._~%/-]+|https:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~%/?=&+-]*)?)$/;
+// A wallpaper is an image Moli keeps (`/api/plan/images/<name>`, the names `plan.rs`
+// `image_name_ok` writes), never an address elsewhere: each screen of the house would
+// otherwise fetch it from a third party (the house's IP, every guest's screen too).
+// It goes into a CSS url(), so nothing but those letters.
+const IMAGE = /^\/api\/plan\/images\/[0-9a-f]{16}\.(png|jpg|webp|svg)$/;
 
 function readColors(raw, where, problems) {
   const out = {};

@@ -174,7 +174,7 @@ change, jour et nuit séparément ; le reste vient de Porcelaine ou de Nuit.
     "name": { "fr": "Chez nous", "en": "Our home" },
     "font": "rounded",
     "corners": "pill",
-    "background": { "image": "/api/plan/images/collines.jpg", "dim": 0.35 },
+    "background": { "image": "/api/plan/images/3f9c0a7e5b21d864.jpg", "dim": 0.35 },
     "day":   { "bg": "#f6e6d8", "surface": "#fffaf6", "ink": "#2a1a12", "warm": "#e2763a", "cool": "#3f6fb5" },
     "night": { "bg": "#170f0b", "surface": "#241913", "ink": "#f6ebe2", "warm": "#f08a4e",
                "background": { "gradient": ["#170f0b", "#2a1810"] } }
@@ -195,8 +195,9 @@ change, jour et nuit séparément ; le reste vient de Porcelaine ou de Nuit.
   Porcelaine ou de Nuit qui se lit ; la feuille Thème dit ce qui a été ignoré ou ajusté.
 - `font` : `figtree` (dans le paquet), `system`, `rounded`, `serif`, `mono` (polices de
   l'appareil, rien à télécharger). `corners` : `square`, `soft`, `round` (défaut), `pill`.
-- `background` (pour les deux, ou dans `day` / `night`) : `image` (un chemin servi par Moli, par
-  exemple une image du plan `/api/plan/images/…`, ou une adresse `https://`), `gradient` (2 à 6
+- `background` (pour les deux, ou dans `day` / `night`) : `image` (une image gardée par Moli,
+  celle d'un étage du plan : `/api/plan/images/<nom>` ; jamais une adresse ailleurs, que chaque
+  écran irait chercher chez un tiers), `gradient` (2 à 6
   couleurs), `dim` (un voile de la couleur `bg`, de 0 à 0,9, pour que le texte reste lisible sur
   une photo). Le fond reste immobile quand la page défile ; les cartes gardent leur `surface`.
 - Les couleurs voulues ne suivent pas le thème : vidéo des caméras, couleurs des lampes, ciel,
