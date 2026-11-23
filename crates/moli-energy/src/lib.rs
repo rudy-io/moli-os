@@ -778,6 +778,14 @@ fn pace_until(config: &Config, rows: &[HourRow], month: u64, now: u64) -> u64 {
         .unwrap_or(month)
 }
 
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, EnergyError> + Send + 'static,
+) -> Result<T, EnergyError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| EnergyError::Internal(e.to_string()))?
+}
+
 /// One entry of a `history` point: an hour, or a whole day (from its start
 /// to the next day's, 23 to 25 hours) when the service gives only the day.
 #[derive(Deserialize)]
@@ -823,14 +831,6 @@ fn reported_rows(
         }
     }
     Ok(rows)
-}
-
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, EnergyError> + Send + 'static,
-) -> Result<T, EnergyError> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| EnergyError::Internal(e.to_string()))?
 }
 
 /// Tariff periods seen, in time order: what each hour was billed as.
@@ -1551,46 +1551,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_late_report_files_each_hour_once_at_its_place() {
-        let config: Config = toml::from_str(
-            "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n",
-        )
-        .unwrap();
-        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
-        let store = Arc::new(Store::memory());
-        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
-        let point = "enedis:linky/hours";
-        let text = |json: String| Value::Text(json.into());
-        let first = format!(
-            r#"[{{"hour":{},"kwh":2.0}},{{"hour":{},"kwh":1.0}}]"#,
-            10 * H,
-            11 * H
-        );
-        recorder.on_meter(point, &text(first.clone()), 30 * H).await;
-        // The same report again, then a new hour, an impossible one, and nonsense.
-        recorder.on_meter(point, &text(first), 31 * H).await;
-        let more = format!(
-            r#"[{{"hour":{},"kwh":4.0}},{{"hour":{},"kwh":-1.0}}]"#,
-            12 * H,
-            13 * H
-        );
-        recorder.on_meter(point, &text(more), 32 * H).await;
-        recorder.on_meter(point, &text("nope".into()), 33 * H).await;
-        recorder.on_meter(point, &Value::Null, 34 * H).await;
-        let rows = store.hours(0, 100 * H).unwrap();
-        let filed: Vec<(u64, f64, Option<f64>)> =
-            rows.iter().map(|r| (r.hour, r.kwh, r.cost)).collect();
-        assert_eq!(
-            filed,
-            vec![
-                (10 * H, 2.0, Some(1.0)),
-                (11 * H, 1.0, Some(0.5)),
-                (12 * H, 4.0, Some(2.0)),
-            ]
-        );
-    }
-
-    #[tokio::test]
     async fn a_whole_day_fills_only_a_day_without_any_hour() {
         let config: Config = toml::from_str(
             "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n",
@@ -1638,6 +1598,46 @@ mod tests {
                 .all(|r| (r.kwh - 0.5).abs() < 1e-9 && r.cost == Some(0.25))
         );
         assert!(rows.iter().all(|r| r.hour < 72 * H));
+    }
+
+    #[tokio::test]
+    async fn a_late_report_files_each_hour_once_at_its_place() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n",
+        )
+        .unwrap();
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let store = Arc::new(Store::memory());
+        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
+        let point = "enedis:linky/hours";
+        let text = |json: String| Value::Text(json.into());
+        let first = format!(
+            r#"[{{"hour":{},"kwh":2.0}},{{"hour":{},"kwh":1.0}}]"#,
+            10 * H,
+            11 * H
+        );
+        recorder.on_meter(point, &text(first.clone()), 30 * H).await;
+        // The same report again, then a new hour, an impossible one, and nonsense.
+        recorder.on_meter(point, &text(first), 31 * H).await;
+        let more = format!(
+            r#"[{{"hour":{},"kwh":4.0}},{{"hour":{},"kwh":-1.0}}]"#,
+            12 * H,
+            13 * H
+        );
+        recorder.on_meter(point, &text(more), 32 * H).await;
+        recorder.on_meter(point, &text("nope".into()), 33 * H).await;
+        recorder.on_meter(point, &Value::Null, 34 * H).await;
+        let rows = store.hours(0, 100 * H).unwrap();
+        let filed: Vec<(u64, f64, Option<f64>)> =
+            rows.iter().map(|r| (r.hour, r.kwh, r.cost)).collect();
+        assert_eq!(
+            filed,
+            vec![
+                (10 * H, 2.0, Some(1.0)),
+                (11 * H, 1.0, Some(0.5)),
+                (12 * H, 4.0, Some(2.0)),
+            ]
+        );
     }
 
     #[tokio::test]
