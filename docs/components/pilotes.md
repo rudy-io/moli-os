@@ -224,8 +224,13 @@ id = "parents"                       # stable : chauffage:parents
 name = "Chambre parentale"           # son nom, et sa pièce dans Moli
 sensor = "matter:…-6/temperature"    # la sonde de la pièce (°C)
 valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
-# correction = false : les vannes reçoivent la consigne de la pièce telle quelle (une vanne
-#   qui régule déjà sur une sonde de la pièce, comme tado X avec la sienne)
+# regulation = "shift" (défaut) : la consigne de la pièce + le décalage appris ;
+#   "none" : telle quelle (une vanne qui régule déjà sur une sonde de la pièce, comme tado X
+#   avec la sienne ; `correction = false` dit la même chose) ;
+#   "force" : + force_offset tant que la pièce demande de la chaleur, − force_offset sinon
+# force_offset = 4.0 : l'écart du forçage (0,5 à 10 °C)
+# hysteresis = 0.3 : la pièce demande de la chaleur sous consigne − 0,3, plus au-dessus de
+#   consigne + 0,3 ; entre les deux, rien ne change (0 à 2 °C)
 # min = 5.0, max = 25.0 : les consignes que la pièce accepte
 # initial = 19.0 : la consigne et le programme avant qu'on les règle
 ```
@@ -237,7 +242,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   `off` donne aux vannes leur consigne la plus basse, hors-gel), `weekly_schedule_<jour>`
   (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
   `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
-  l'autre). En `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
+  l'autre), `heat_demand` (la pièce demande de la chaleur, en lecture : voir plus bas). En
+  `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
 - **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
   reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
   chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
@@ -253,6 +259,19 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   (le radiateur chauffe, la vanne lit plus chaud, l'écart grandit, la consigne monte, la vanne
   reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
   pièce (tado X) : une chambre voulue à 18 °C recevait 24.
+- **Le forçage** (`regulation = "force"`), pour les vannes qui régulent mal sur leur propre
+  thermomètre (beaucoup de vannes Tuya TS0601) : la pièce demande de la chaleur, la vanne reçoit
+  consigne + `force_offset` et s'ouvre en grand ; elle ne la demande plus, consigne −
+  `force_offset`, et elle se ferme. Du tout-ou-rien sur la sonde de la pièce, sans décalage appris
+  (`valve_correction` reste à 0). Une vanne n'est réécrite que quand la demande ou la consigne de
+  la pièce change : en régime établi, presque plus d'écritures. **Sonde muette** : plus rien pour
+  décider, les vannes reçoivent une fois la consigne de la pièce telle quelle, leur propre
+  régulation reprend la main (dit une fois au journal).
+- **La demande de chaleur** (`heat_demand`, quel que soit le mode de régulation) : la sonde sous
+  la consigne de plus de `hysteresis`, la pièce demande ; au-dessus de plus de `hysteresis`, elle
+  ne demande plus ; entre les deux, elle garde son état (le bruit de la sonde ne la fait pas
+  osciller). Jamais en `off` ni la sonde muette. De quoi piloter une chaudière ou un circulateur
+  depuis un automatisme, et la voir dans l'historique.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
   plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
   toutes les 30 s, et le changement attend la vanne qui n'est pas encore là), jamais dans les 3 min
@@ -267,7 +286,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   (pièces protégées, heures calmes) : une vanne rangée dans une chambre protégée la protège même si
   le nom du `[[heating]]` diffère. Un ordre que le hub a déjà donné pour échoué n'est pas appliqué.
 - **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
-  vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
+  vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce (en
+  `force`, elles reçoivent la consigne de la pièce, voir plus haut).
 - **Une vanne tournée à la main** (sur sa molette, ou depuis le tableau de bord) : sa consigne a
   changé depuis le dernier coup d'œil et n'est pas celle que Moli a écrite (l'une de ses deux
   dernières écritures, pour une vanne endormie qui remonte un ordre ancien ; ou, juste après une
@@ -286,7 +306,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   de Moli les oublie : les vannes reçoivent de nouveau la consigne de la pièce.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
-  mal écrite, une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
+  mal écrite (dont `correction = false` avec `regulation`, `force_offset` hors de 0,5 à 10 et
+  `hysteresis` hors de 0 à 2), une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
   dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
   ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
 
@@ -1127,7 +1148,9 @@ kind = "frigate"
   `SECURITY-MODEL.md`). Appareil `review: true`.
 - **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
   (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
-- **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
+- **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `alert` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
+- **Compteurs au repos** : une caméra ou une zone déclarée part de 0 objet. Frigate ne publie un compte que quand il change : sans cela, un compte resté inconnu après un redémarrage ne donnait pas de franchissement pour un automatisme (« dépasse 0 »), et la première personne vue était ratée ; un compte gardé d'avant le redémarrage serait de toute façon périmé.
+- **Alertes** (`frigate/reviews`) : `alert` est vrai tant qu'une revue de gravité « alerte » est en cours sur la caméra, et sur chaque zone qu'elle a atteinte (de son `new`, ou de l'`update` qui la fait passer en alerte, jusqu'à son `end`). Une intrusion fait **une seule** montée, quand les compteurs clignotent entre 0 et 1 tant que la personne bouge : c'est le déclencheur d'une alerte d'intrusion. Frigate ou le broker qui s'en va remet tout à faux (les `end` seraient perdus) ; 64 alertes suivies au plus. Seuls les noms de caméra et de zone que Frigate accepte sont pris.
 - **Zones** (avec `review` seulement) : chaque zone de la configuration de Frigate (`/api/config`, lue en tâche de
   fond, nouvel essai de 5 s à 5 min tant que Frigate ne répond pas) devient un appareil « Zone <nom> (<caméra>) »,
   `<instance>:zone.<zone>` : compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` (sens `occupancy`), tenus à jour
@@ -1139,7 +1162,7 @@ kind = "frigate"
 - **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : sans `review`, elles sont ignorées). Disponibilité globale via `frigate/available`, zones comprises.
 - **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate) ; zone : `zone.<nom>` (un point, que Frigate refuse dans un nom de caméra : jamais le même id qu'une caméra).
 - **Pièges** : abonnements ciblés, jamais les JPEG retenus (`…/snapshot`) ni `stats`. Broker injoignable : commandes refusées (pas mises en file), nouvel essai après 5 s.
-- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra.
+- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra ; revues lues ou refusées (noms, id), une alerte de son début à sa fin malgré ses mises à jour, deux alertes qui se chevauchent, la borne des alertes suivies.
 
 ## `bambu` : imprimante Bambu Lab (`crates/moli-bambu`)
 
