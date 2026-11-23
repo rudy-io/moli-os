@@ -778,6 +778,53 @@ fn pace_until(config: &Config, rows: &[HourRow], month: u64, now: u64) -> u64 {
         .unwrap_or(month)
 }
 
+/// One entry of a `history` point: an hour, or a whole day (from its start
+/// to the next day's, 23 to 25 hours) when the service gives only the day.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Reported {
+    Hour { hour: u64, kwh: f64 },
+    Day { day: u64, to: u64, kwh: f64 },
+}
+
+/// The hours to file: those reported, and each whole day spread evenly over
+/// its hours when the store has none of them for this meter.
+fn reported_rows(
+    store: &Store,
+    meter: &str,
+    reported: Vec<Reported>,
+) -> Result<Vec<ImportRow>, EnergyError> {
+    let mut rows = Vec::new();
+    for entry in reported {
+        match entry {
+            Reported::Hour { hour, kwh } => rows.push(ImportRow {
+                meter: meter.to_owned(),
+                hour,
+                kwh,
+            }),
+            Reported::Day { day, to, kwh } => {
+                let hours = to.saturating_sub(day) / meter::HOUR_MS;
+                let whole =
+                    to > day && (to - day) % meter::HOUR_MS == 0 && (23..=25).contains(&hours);
+                if !whole || !kwh.is_finite() || kwh < 0.0 {
+                    continue;
+                }
+                if store.hours(day, to)?.iter().any(|r| r.meter == meter) {
+                    continue;
+                }
+                #[allow(clippy::cast_precision_loss)] // 23 to 25
+                let share = kwh / hours as f64;
+                rows.extend((0..hours).map(|i| ImportRow {
+                    meter: meter.to_owned(),
+                    hour: day + i * meter::HOUR_MS,
+                    kwh: share,
+                }));
+            }
+        }
+    }
+    Ok(rows)
+}
+
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, EnergyError> + Send + 'static,
 ) -> Result<T, EnergyError> {
@@ -1095,11 +1142,6 @@ impl Recorder {
     /// Hours a service reported late, filed as they are. The same hours can
     /// come back (a restart, the next report): what is filed stays.
     async fn on_history(&mut self, index: usize, value: &Value) {
-        #[derive(Deserialize)]
-        struct Reported {
-            hour: u64,
-            kwh: f64,
-        }
         let Value::Text(text) = value else {
             return; // unavailable: nothing to file
         };
@@ -1108,14 +1150,19 @@ impl Recorder {
             tracing::warn!(meter = meter.id, "energy history unreadable");
             return;
         };
-        let rows: Vec<ImportRow> = reported
-            .into_iter()
-            .map(|r| ImportRow {
-                meter: meter.id.clone(),
-                hour: r.hour,
-                kwh: r.kwh,
-            })
-            .collect();
+        let id = meter.id.clone();
+        let store = Arc::clone(&self.store);
+        // A whole day (a service that gave only the day's total) is spread
+        // over its hours only when none of them is filed yet: hours a curve
+        // gave, even in part, are never topped up.
+        let rows = blocking(move || reported_rows(&store, &id, reported)).await;
+        let rows = match rows {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::warn!(error = %error, "energy history not read");
+                return;
+            }
+        };
         let Ok(tz) = TimeZone::get(&self.config.timezone) else {
             return; // refused when the recorder started
         };
@@ -1541,6 +1588,56 @@ mod tests {
                 (12 * H, 4.0, Some(2.0)),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_whole_day_fills_only_a_day_without_any_hour() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n",
+        )
+        .unwrap();
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let store = Arc::new(Store::memory());
+        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
+        let point = "enedis:linky/hours";
+        let text = |json: String| Value::Text(json.into());
+        // The curve gave two hours of the first day, then stopped.
+        let curve = format!(
+            r#"[{{"hour":{},"kwh":1.0}},{{"hour":{},"kwh":1.0}}]"#,
+            24 * H,
+            25 * H
+        );
+        recorder.on_meter(point, &text(curve), 30 * H).await;
+        // Then the daily totals: that day (left as it is), the next one (spread),
+        // one of 22 hours (refused), and a negative one (refused).
+        let days = format!(
+            r#"[{{"day":{},"to":{},"kwh":48.0}},{{"day":{},"to":{},"kwh":12.0}},{{"day":{},"to":{},"kwh":5.0}},{{"day":{},"to":{},"kwh":-1.0}}]"#,
+            24 * H,
+            48 * H,
+            48 * H,
+            72 * H,
+            72 * H,
+            94 * H,
+            96 * H,
+            120 * H
+        );
+        recorder.on_meter(point, &text(days.clone()), 80 * H).await;
+        // The same again: nothing counts twice.
+        recorder.on_meter(point, &text(days), 81 * H).await;
+        let rows = store.hours(0, 200 * H).unwrap();
+        let first: f64 = rows.iter().filter(|r| r.hour < 48 * H).map(|r| r.kwh).sum();
+        let second: Vec<_> = rows
+            .iter()
+            .filter(|r| (48 * H..72 * H).contains(&r.hour))
+            .collect();
+        assert!((first - 2.0).abs() < 1e-9, "{first}");
+        assert_eq!(second.len(), 24);
+        assert!(
+            second
+                .iter()
+                .all(|r| (r.kwh - 0.5).abs() < 1e-9 && r.cost == Some(0.25))
+        );
+        assert!(rows.iter().all(|r| r.hour < 72 * H));
     }
 
     #[tokio::test]

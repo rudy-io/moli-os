@@ -215,46 +215,29 @@ fn last_total(body: &[u8]) -> Result<Option<Total>, serde_json::Error> {
     Ok(totals(body)?.pop())
 }
 
-/// A day's total, the same share each hour of that day (23, 24 or 25 of
-/// them), rounded to the Wh; the last hour takes what rounding left. The
-/// meter sent nothing finer: the energy page gets the day right, not its
-/// shape.
+/// A day's total as the energy recorder takes it: from local midnight to
+/// the next (23, 24 or 25 hours), spread over its hours there, and only if
+/// none of them is filed yet.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WholeDay {
+    /// Start of the day, ms since epoch.
+    pub day: u64,
+    /// Start of the next day, ms since epoch.
+    pub to: u64,
+    pub kwh: f64,
+}
+
 #[must_use]
-pub fn even_hours(total: &Total, tz: &TimeZone) -> Vec<Hour> {
-    let bounds = (|| {
-        let start = total.date.to_zoned(tz.clone()).ok()?;
-        let end = total.date.tomorrow().ok()?.to_zoned(tz.clone()).ok()?;
-        Some((
-            start.timestamp().as_millisecond(),
-            end.timestamp().as_millisecond(),
-        ))
-    })();
-    let Some((start, end)) = bounds else {
-        return Vec::new();
+pub fn whole_day(total: &Total, tz: &TimeZone) -> Option<WholeDay> {
+    let ms = |date: Date| -> Option<u64> {
+        let start = date.to_zoned(tz.clone()).ok()?;
+        u64::try_from(start.timestamp().as_millisecond()).ok()
     };
-    let count = (end - start) / 3_600_000;
-    let Ok(n) = u32::try_from(count) else {
-        return Vec::new();
-    };
-    if n == 0 {
-        return Vec::new();
-    }
-    let share = (total.kwh / f64::from(n) * 1000.0).round() / 1000.0;
-    let mut left = total.kwh;
-    (0..n)
-        .filter_map(|i| {
-            let kwh = if i + 1 == n {
-                (left * 1000.0).round() / 1000.0
-            } else {
-                left -= share;
-                share
-            };
-            Some(Hour {
-                hour: u64::try_from(start + i64::from(i) * 3_600_000).ok()?,
-                kwh: kwh.max(0.0),
-            })
-        })
-        .collect()
+    Some(WholeDay {
+        day: ms(total.date)?,
+        to: ms(total.date.tomorrow().ok()?)?,
+        kwh: total.kwh,
+    })
 }
 
 /// Why Enedis refused, as the Conso API relays it (`error.error_description`,
@@ -480,13 +463,12 @@ mod tests {
     }
 
     #[test]
-    fn a_day_without_its_curve_is_spread_over_its_own_hours() {
+    fn a_day_without_its_curve_goes_whole_from_midnight_to_midnight() {
         let tz = TimeZone::get("Europe/Paris").unwrap();
-        let day = |d, kwh| Total { date: d, kwh };
-        let hours = even_hours(&day(date(2026, 11, 21), 10.0), &tz);
-        assert_eq!(hours.len(), 24);
+        let day = |d, kwh| super::whole_day(&Total { date: d, kwh }, &tz).unwrap();
+        let normal = day(date(2026, 11, 21), 10.0);
         assert_eq!(
-            hours[0].hour,
+            normal.day,
             u64::try_from(
                 paris_at("2026-11-21T00:00:00+01:00")
                     .timestamp()
@@ -494,11 +476,12 @@ mod tests {
             )
             .unwrap()
         );
-        let sum: f64 = hours.iter().map(|h| h.kwh).sum();
-        assert!((sum - 10.0).abs() < 1e-6, "{sum}");
+        let hours = |d: WholeDay| (d.to - d.day) / 3_600_000;
+        assert_eq!(hours(normal.clone()), 24);
+        assert!((normal.kwh - 10.0).abs() < 1e-9);
         // The clocks change: 25 hours that day, 23 in spring.
-        assert_eq!(even_hours(&day(date(2026, 10, 25), 5.0), &tz).len(), 25);
-        assert_eq!(even_hours(&day(date(2026, 3, 29), 5.0), &tz).len(), 23);
+        assert_eq!(hours(day(date(2026, 10, 25), 5.0)), 25);
+        assert_eq!(hours(day(date(2026, 3, 29), 5.0)), 23);
     }
 
     #[test]

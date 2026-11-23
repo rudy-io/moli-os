@@ -164,7 +164,40 @@ fn said(status: u16, body: &[u8]) -> String {
     }
 }
 
-async fn fetch(ask: Ask, prm: &str, bearer: &HeaderValue, now: &Zoned) -> Result<Vec<u8>, Failure> {
+/// One HTTPS exchange with the Conso API: the network, or a test's fake.
+trait Web: Send + Sync {
+    fn send(
+        &self,
+        request: http::Request<http_body_util::Full<bytes::Bytes>>,
+    ) -> BoxFuture<'_, anyhow::Result<(http::StatusCode, bytes::Bytes)>>;
+}
+
+/// The real network, checked against the public CAs.
+struct Internet;
+
+impl Web for Internet {
+    fn send(
+        &self,
+        request: http::Request<http_body_util::Full<bytes::Bytes>>,
+    ) -> BoxFuture<'_, anyhow::Result<(http::StatusCode, bytes::Bytes)>> {
+        Box::pin(moli_net::web(
+            API_HOST,
+            443,
+            true,
+            request,
+            TIMEOUT,
+            MAX_RESPONSE,
+        ))
+    }
+}
+
+async fn fetch(
+    web: &dyn Web,
+    ask: Ask,
+    prm: &str,
+    bearer: &HeaderValue,
+    now: &Zoned,
+) -> Result<Vec<u8>, Failure> {
     let today = now.date();
     let days = match ask {
         Ask::Curve => DAYS,
@@ -189,7 +222,8 @@ async fn fetch(ask: Ask, prm: &str, bearer: &HeaderValue, now: &Zoned) -> Result
     let built = moli_net::empty(builder)
         .map_err(|_| Failure::Other(moli_i18n::tr!("pilotes.enedis.reponse_illisible")))?;
     // Underlying errors are dropped on purpose: no request detail in a status.
-    let (status, body) = moli_net::web(API_HOST, 443, true, built, TIMEOUT, MAX_RESPONSE)
+    let (status, body) = web
+        .send(built)
         .await
         .map_err(|_| Failure::Other(moli_i18n::tr!("pilotes.enedis.reseau")))?;
     if matches!(status.as_u16(), 401 | 403) {
@@ -214,13 +248,19 @@ enum Got {
     Daily(Vec<Total>, Option<String>),
 }
 
-async fn read(prm: &str, bearer: &HeaderValue, now: &Zoned, tz: &TimeZone) -> Result<Got, Failure> {
-    match fetch(Ask::Curve, prm, bearer, now).await {
+async fn read(
+    web: &dyn Web,
+    prm: &str,
+    bearer: &HeaderValue,
+    now: &Zoned,
+    tz: &TimeZone,
+) -> Result<Got, Failure> {
+    match fetch(web, Ask::Curve, prm, bearer, now).await {
         Ok(body) => model::curve(&body, tz)
             .map(Got::Curve)
             .map_err(|_| unreadable()),
         Err(Failure::Missing(why)) => {
-            let body = fetch(Ask::Daily, prm, bearer, now)
+            let body = fetch(web, Ask::Daily, prm, bearer, now)
                 .await
                 .map_err(|e| match e {
                     Failure::Missing(daily) => Failure::Other(match daily.or(why.clone()) {
@@ -254,16 +294,24 @@ fn publish(ctx: &DriverCtx, id: &DeviceId, curve: &Curve) {
     }
 }
 
-/// The days' totals alone: each spread over its hours for the energy page
-/// (what is already filed stays: a real curve, once filed, is kept), and the
-/// last one shown, without its peak.
+/// The days' totals alone, for the energy page: each day whole (its start,
+/// its end, its kWh), which the energy recorder spreads over its hours only
+/// when it has none of them yet (a day a curve gave even in part is left as
+/// it is: nothing counts twice). The last one is shown, without its peak,
+/// unless a later day is already known.
 fn publish_totals(ctx: &DriverCtx, id: &DeviceId, totals: &[Total], tz: &TimeZone) {
-    for total in totals {
-        if let Ok(hours) = serde_json::to_string(&model::even_hours(total, tz)) {
-            ctx.set_state(id, "hours", Value::Text(hours.into()));
-        }
+    let days: Vec<_> = totals
+        .iter()
+        .filter_map(|t| model::whole_day(t, tz))
+        .collect();
+    if !days.is_empty()
+        && let Ok(text) = serde_json::to_string(&days)
+    {
+        ctx.set_state(id, "hours", Value::Text(text.into()));
     }
-    if let Some(total) = totals.last() {
+    if let Some(total) = totals.last()
+        && last_day(ctx, id).is_none_or(|known| known <= total.date)
+    {
         publish_total(ctx, id, total);
     }
 }
@@ -320,7 +368,7 @@ async fn run(driver: &Enedis, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     loop {
         let now = Zoned::now().with_time_zone(tz.clone());
         if due {
-            match read(prm, &bearer, &now, &tz).await {
+            match read(&Internet, prm, &bearer, &now, &tz).await {
                 Ok(Got::Daily(totals, why)) => {
                     publish_totals(ctx, &id, &totals, &tz);
                     let motif = why.unwrap_or_else(|| "404".to_owned());
@@ -379,5 +427,122 @@ mod tests {
         assert!(!valid_prm("0000000000000"));
         assert!(!valid_prm("0000000000000a"));
         assert!(!valid_prm("00000000000000&x=1"));
+    }
+}
+
+#[cfg(test)]
+mod fallback {
+    //! Without a curve: the 404, then the daily totals, in one reading.
+
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// A Conso API that answers from a script, in order, and keeps the paths.
+    struct Fake {
+        replies: Mutex<Vec<(u16, &'static str)>>,
+        asked: Mutex<Vec<String>>,
+    }
+
+    impl Web for Fake {
+        fn send(
+            &self,
+            request: http::Request<http_body_util::Full<bytes::Bytes>>,
+        ) -> BoxFuture<'_, anyhow::Result<(http::StatusCode, bytes::Bytes)>> {
+            self.asked.lock().unwrap().push(request.uri().to_string());
+            let (status, body) = self.replies.lock().unwrap().remove(0);
+            Box::pin(async move {
+                Ok((
+                    http::StatusCode::from_u16(status)?,
+                    bytes::Bytes::from(body),
+                ))
+            })
+        }
+    }
+
+    const MISSING: &str = r#"{"status":404,"error":{"error":"Not Found","error_description":"La sous-ressource demandée n existe pas."}}"#;
+    const DAILY: &str = r#"{"grandeur":[{"grandeurPhysique":"EA","unite":"Wh","points":[{"v":"9000","d":"2026-11-20"},{"v":"10625","d":"2026-11-22"}]}]}"#;
+
+    fn ask(replies: Vec<(u16, &'static str)>) -> (Result<Got, Failure>, Vec<String>) {
+        let fake = Fake {
+            replies: Mutex::new(replies),
+            asked: Mutex::new(Vec::new()),
+        };
+        let tz = TimeZone::get(ZONE).unwrap();
+        let now: Zoned = "2026-11-23T08:00:00+01:00[Europe/Paris]".parse().unwrap();
+        let bearer = HeaderValue::from_static("Bearer x");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let got = runtime.block_on(read(&fake, "00000000000000", &bearer, &now, &tz));
+        (got, fake.asked.into_inner().unwrap())
+    }
+
+    #[test]
+    fn a_missing_curve_brings_the_daily_totals_over_a_month() {
+        let (got, asked) = ask(vec![(404, MISSING), (200, DAILY)]);
+        let Ok(Got::Daily(totals, why)) = got else {
+            panic!("expected the daily totals");
+        };
+        assert_eq!(
+            totals
+                .iter()
+                .map(|t| t.date.to_string())
+                .collect::<Vec<_>>(),
+            ["2026-11-20", "2026-11-22"]
+        );
+        assert_eq!(
+            why.as_deref(),
+            Some("La sous-ressource demandée n existe pas")
+        );
+        assert!(
+            asked[0].starts_with("/api/courbe_de_charge_consommation?"),
+            "{asked:?}"
+        );
+        assert!(asked[0].contains("dateDebut=2026-11-16"), "{asked:?}");
+        assert!(
+            asked[1].starts_with("/api/consommation_quotidienne?"),
+            "{asked:?}"
+        );
+        assert!(asked[1].contains("dateDebut=2026-10-23"), "{asked:?}");
+        // What the energy recorder receives: each day whole, midnight to midnight.
+        let tz = TimeZone::get(ZONE).unwrap();
+        let days: Vec<_> = totals
+            .iter()
+            .filter_map(|t| model::whole_day(t, &tz))
+            .collect();
+        let text = serde_json::to_string(&days).unwrap();
+        assert!(
+            text.starts_with(r#"[{"day":"#) && text.contains(r#""kwh":10.625"#),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_curve_served_asks_nothing_more() {
+        let curve = r#"{"interval_reading":[]}"#;
+        let (got, asked) = ask(vec![(200, curve)]);
+        assert!(matches!(got, Ok(Got::Curve(_))) || got.is_err());
+        assert_eq!(asked.len(), 1);
+    }
+
+    #[test]
+    fn a_refused_token_stops_before_the_daily_totals() {
+        let (got, asked) = ask(vec![(401, "{}")]);
+        assert!(matches!(got, Err(Failure::Refused)));
+        assert_eq!(asked.len(), 1);
+    }
+
+    #[test]
+    fn no_daily_totals_either_says_why() {
+        let (got, asked) = ask(vec![(404, MISSING), (404, MISSING)]);
+        let Err(Failure::Other(text)) = got else {
+            panic!("expected a status");
+        };
+        assert!(
+            text.contains("404") && text.contains("n existe pas"),
+            "{text}"
+        );
+        assert_eq!(asked.len(), 2);
     }
 }

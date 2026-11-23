@@ -14,8 +14,10 @@
   distinguées.
 - Il faut que la courbe de charge soit activée dans l'espace client Enedis. Si Enedis ne la sert pas
   (404, « la sous-ressource demandée n'existe pas »), la même relève lit la consommation quotidienne :
-  le total de chaque jour (31 derniers jours, pour combler les trous) arrive, réparti également sur
-  ses heures pour `[energy]`, sans le pic, et l'avertissement donne le motif d'Enedis. Vu en novembre 2026 : la courbe en 404 même sur un seul jour, collecte horaire active,
+  le total de chaque jour (31 derniers jours, pour combler les trous) arrive, sans le pic, et
+  l'avertissement donne le motif d'Enedis. `[energy]` reçoit chaque jour entier et ne le répartit
+  sur ses heures que s'il n'en a encore aucune : un jour donné en partie par la courbe n'est pas
+  complété. Vu en novembre 2026 : la courbe en 404 même sur un seul jour, collecte horaire active,
   consentement valide ; la consommation quotidienne répondait.
 - Un jeton refusé (401, 403) arrête le pilote jusqu'à l'intervention d'un humain.
 - `fixtures/` : la forme d'une vraie réponse, avec un compteur, une date et des valeurs fictifs.

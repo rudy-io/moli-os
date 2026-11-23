@@ -9,7 +9,9 @@ rust-version.workspace = true
 [dependencies]
 moli-i18n.workspace = true
 anyhow.workspace = true
+bytes.workspace = true
 http.workspace = true
+http-body-util.workspace = true
 jiff.workspace = true
 moli-core.workspace = true
 moli-net.workspace = true

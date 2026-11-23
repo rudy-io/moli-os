@@ -50,7 +50,10 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   - `history = true` : `point` donne une consommation déjà découpée par heure, en texte JSON
     (`[{"hour": ms, "kwh": …}]`), pour un service qui répond un jour après (pilote `enedis`). Chaque
     heure est classée à sa place, jamais étalée sur le moment du relevé ; ce qui est déjà classé
-    reste. Le prix vient de `price`, pas de la période tarifaire. Si tous les compteurs `grid` et
+    reste. Une entrée peut aussi être un jour entier (`{"day": ms, "to": ms, "kwh": …}`, de minuit à
+    minuit, 23 à 25 heures) quand le service ne donne que le total du jour : il est réparti également
+    sur ses heures **seulement si aucune heure de ce compteur n'est déjà classée ce jour-là** (une
+    courbe reçue, même en partie, n'est jamais complétée : rien ne compte deux fois). Le prix vient de `price`, pas de la période tarifaire. Si tous les compteurs `grid` et
     `total` sont ainsi en retard, la projection du mois s'arrête à la dernière heure reçue.
   - `feeds = ["<device id>"]` : les appareils qu'un compteur alimente (par exemple le
     circuit d'une clim → cette clim) : leur carte montre sa puissance (« circuit partagé »
