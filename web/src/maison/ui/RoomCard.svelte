@@ -10,6 +10,7 @@
   import RadiatorTile from './RadiatorTile.svelte';
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
+  import StripTile from './StripTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { watts } from '../lib/energy-live.svelte.js';
   import AlarmCard from './AlarmCard.svelte';
@@ -225,17 +226,9 @@
     return 'light';
   }
 
-  /** A strip's pad for all its outlets (`ALL`), then one per outlet. */
-  const ALL = '*';
-  const plugPads = (d) => {
-    const outlets = outletsOf(d.id);
-    if (!outlets.length) return [{ d, point: null }];
-    return [{ d, point: ALL, outlets }, ...outlets.map((o) => ({ d, point: o.key, name: o.name }))];
-  };
-  const litCount = (outlets, id) => outlets.filter((o) => isOn(id, o.key)).length;
-  const canTap = (d, point, outlets) => outlets
-    ? outlets.some((o) => canWrite(d, o.key))
-    : canWrite(d, point ?? powerKey(d));
+  /** A power strip gets its own tile, drawn: a socket per outlet. */
+  const strips = $derived(room.plugs.filter((d) => outletsOf(d.id).length));
+  const canTap = (d, point) => canWrite(d, point ?? powerKey(d));
 
   /** A cover pad follows its tile's access rule: live, and the command it would
    *  send is writable (any command when the position is unknown). */
@@ -256,7 +249,7 @@
   const pads = $derived([
     ...room.lights.map((d) => ({ d, point: null })),
     ...room.media.map((d) => ({ d, point: deviceKind(d) === 'tv' ? 'power' : null, link: deviceKind(d) === 'speaker' ? '#/salon' : null })),
-    ...room.plugs.flatMap(plugPads),
+    ...room.plugs.filter((d) => !outletsOf(d.id).length).map((d) => ({ d, point: null })),
     ...room.covers.map((d) => ({ d, point: null, isCover: true })),
     ...room.impulses.filter(lonePulse).map((d) => ({ d, point: impulsePoints(d)[0].key, isPulse: true })),
     // A helper switch: a pad, Oui / Non (« Lave-linge en cours »).
@@ -293,7 +286,7 @@
     return p.unit === 'kW' ? v * 1000 : v;
   }
 
-  function stateOf(d, point, outlets, isCover) {
+  function stateOf(d, point, isCover) {
     if (isCover) {
       if (!reachable(d.id)) return t('commun.piece.injoignable');
       const pct = coverPosition(d.id);
@@ -303,7 +296,6 @@
     }
     if (unpowered(d.id) && !isFixture(d)) return t('commun.piece.coupee');
     if (!reachable(d.id)) return t('commun.piece.injoignable');
-    if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
     if (deviceKind(d) === 'speaker') return value(d.id, 'playing') === true ? t('commun.piece.lecture_en_cours') : t('commun.piece.a_l_arret');
     if (deviceKind(d) === 'helper') return t(isOn(d.id, point) ? 'commun.oui' : 'commun.non');
     if (!isOn(d.id, point)) return t('commun.piece.eteinte');
@@ -313,7 +305,7 @@
     return typeof b === 'number' && fine(d) ? t('commun.pourcent', { n: Math.round(b) }) : t('commun.piece.allumee');
   }
 
-  function tap(d, point, outlets, name, isCover) {
+  function tap(d, point, isCover) {
     if (isCover) {
       const pct = coverPosition(d.id);
       // Without a measured position, the pad opens the tile: open, stop, close.
@@ -328,18 +320,12 @@
       act(`${d.id}/${action.key}`, action.value, t('commun.action', { label: nameOf(d.id), action: actionLabel }));
       return;
     }
-    if (!canTap(d, point, outlets)) return;
+    if (!canTap(d, point)) return;
     if (unpowered(d.id) && !isFixture(d)) {
       note(t('commun.lampe.coupee_note', { label: nameOf(d.id) }));
       return;
     }
-    if (outlets) {
-      // All on → all off; otherwise everything on.
-      const on = litCount(outlets, d.id) < outlets.length;
-      for (const o of outlets) if (canWrite(d, o.key) && isOn(d.id, o.key) !== on) act(`${d.id}/${o.key}`, on, `${nameOf(d.id)} · ${o.name}`);
-      return;
-    }
-    toggle(d.id, name ? `${nameOf(d.id)} · ${name}` : nameOf(d.id), point);
+    toggle(d.id, nameOf(d.id), point);
   }
 
   function climateState(on, mode) {
@@ -385,12 +371,12 @@
 
   {#if pads.length}
     <div class="pads" class:icons>
-      {#each pads as { d, point, link, outlets, name, isCover, isPulse } (`${d.id}/${point}`)}
+      {#each pads as { d, point, link, isCover, isPulse } (`${d.id}/${point}`)}
         {@const coverPct = isCover ? coverPosition(d.id) : null}
-        {@const lit = isPulse ? pulses[d.id] === 'sending' || pulses[d.id] === 'sent' : isCover ? (coverPct ?? 0) > 0 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
+        {@const lit = isPulse ? pulses[d.id] === 'sending' || pulses[d.id] === 'sent' : isCover ? (coverPct ?? 0) > 0 : link ? value(d.id, 'playing') === true : isOn(d.id, point)}
         {@const cut = !isPulse && unpowered(d.id) && !isFixture(d)}
         {@const more = isPulse ? false : isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
-        {@const label = name ?? nameOf(d.id)}
+        {@const label = nameOf(d.id)}
         {@const coverCommand = coverPct != null ? coverCommands(d).find((c) => c.command === (lit ? 'close' : 'open'))?.command : undefined}
         <div class="pad-wrap">
           {#if link}
@@ -405,9 +391,9 @@
               {#if !icons}<b>{label}</b><small>{said}</small>{/if}
             </button>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:helper={deviceKind(d) === 'helper'} class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={deviceKind(d) === 'helper' ? `${label} · ${t('commun.piece.aide')}` : isCover || (lit && !outlets && !point && drawOf(d) != null) ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
-              <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
-              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
+            <button class="pad" class:on={lit} class:cut class:helper={deviceKind(d) === 'helper'} class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point)} onclick={() => tap(d, point, isCover)} title={deviceKind(d) === 'helper' ? `${label} · ${t('commun.piece.aide')}` : isCover || (lit && !point && drawOf(d) != null) ? [label, stateOf(d, point, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, isCover) })}>
+              <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
+              {#if !icons}<b>{label}</b><small>{stateOf(d, point, isCover)}</small>{/if}
             </button>
           {/if}
           {#if more}
@@ -430,6 +416,10 @@
 
   {#each room.alarms as d (d.id)}
     <AlarmCard id={d.id} compact />
+  {/each}
+
+  {#each strips as d (d.id)}
+    <StripTile id={d.id} {icons} />
   {/each}
 
   {#each pulseTiles as d (d.id)}

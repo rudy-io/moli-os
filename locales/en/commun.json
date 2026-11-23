@@ -233,7 +233,11 @@
   "commun.piece.lecture": "{name} · {label}: {value}",
   "commun.piece.consomme": "{name} · {watts} W",
   "commun.piece.au_repos": "{name} · idle",
-  "commun.piece.prises_allumees": "{on} of {count}",
+  "commun.multiprise.tout_eteint": "All off",
+  "commun.multiprise.tout_allume": "All on",
+  "commun.multiprise.allumees": "{on} of {count} on",
+  "commun.multiprise.tout_allumer": "Switch all on",
+  "commun.multiprise.tout_eteindre": "Switch all off",
 
   "commun.clim.label_consigne": "{name}: target",
   "commun.clim.label_arret": "{name}: off",

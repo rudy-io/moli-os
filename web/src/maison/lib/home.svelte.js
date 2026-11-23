@@ -4,7 +4,7 @@
 import { orderError } from './errors.js';
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints, alarmPoint } from './capabilities.js';
+import { canWrite, enumChoice, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints, alarmPoint } from './capabilities.js';
 import { coverPositionTarget } from './cover-controls.js';
 
 export { hub };
@@ -274,15 +274,32 @@ export function quiet(id) {
   return (home.config?.quiet ?? []).includes(id);
 }
 
-/** A power strip's outlets, each its own pad: `home.json` `outlets`
- *  `{ "<id>": { "switch_1": "Écran", … } }`, in that order. */
+/** An outlet's switch: a numbered on/off point (`on_1`, `switch_2`, `state_l3`). */
+const OUTLET = /^(?:on|switch|state|outlet|relay)_l?(\d+)$/;
+const onOff = (p) => p.kind?.type === 'binary'
+  || (p.kind?.type === 'enum' && enumChoice(p.kind.values, 'on') && enumChoice(p.kind.values, 'off'));
+
+/** A power strip's outlets, each its own socket on the strip's tile. By
+ *  default, every writable numbered on/off point the device reports, when
+ *  there are two or more (a Meross MSS425's `on_1`…`on_5`), in their order,
+ *  named by their label.
+ *  `home.json` `outlets` `{ "<id>": { "on_1": "Écran", … } }` names them and
+ *  chooses which show, in that order; `{ "<id>": {} }`: a single switch. */
 export function outletsOf(id) {
   const names = home.config?.outlets?.[id];
   const d = device(id);
-  if (!names || !d) return [];
-  return Object.entries(names)
-    .filter(([key]) => d.points.some((p) => p.key === key && p.access?.write))
-    .map(([key, name]) => ({ key, name }));
+  if (!d) return [];
+  if (names) {
+    return Object.entries(names)
+      .filter(([key]) => d.points.some((p) => p.key === key && p.access?.write))
+      .map(([key, name]) => ({ key, name }));
+  }
+  const numbered = d.points
+    // An outlet the device has never reported is one it does not have (a double plug).
+    .filter((p) => p.access?.write && OUTLET.test(p.key) && onOff(p) && value(id, p.key) != null)
+    .map((p) => ({ key: p.key, name: p.label || p.key, n: Number(OUTLET.exec(p.key)[1]) }))
+    .sort((a, b) => a.n - b.n);
+  return numbered.length >= 2 ? numbered.map(({ key, name }) => ({ key, name })) : [];
 }
 
 const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge|éclairage|eclairage|néon|neon|\bleds?\b|veilleuse|guirlande|phare/i;

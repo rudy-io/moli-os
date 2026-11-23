@@ -132,9 +132,16 @@ telles que les appareils les nomment).
   recharge de la voiture : un appui de travers coupe un cycle). La carte de la pièce dit ce qu'il
   consomme (« Lave-vaisselle · 1 850 W », dès 3 W) ; débranché, il ne dit rien (sauf dans une
   vue filtrée). Moli et les automatismes peuvent toujours le commander.
-- `outlets` : une multiprise dont chaque prise a son bouton, dans l'ordre donné, plus un bouton
-  pour toute la multiprise (« 2 sur 3 » ; un appui allume tout, ou éteint tout si tout est
-  allumé). Seuls les points inscriptibles comptent.
+- `outlets` : une multiprise a sa propre carte dans sa pièce, dessinée : une prise par sortie,
+  allumée (ambre, son voyant) ou éteinte, qu'un appui bascule ; une sortie nommée « USB » est
+  dessinée en ports USB. L'interrupteur de la carte allume tout, ou éteint tout si tout est
+  allumé, sortie par sortie (jamais le canal « toutes les sorties » de l'appareil : celui d'une
+  Meross se lit allumé quand des sorties sont éteintes). **Sans réglage**, un appareil rangé
+  parmi les prises qui a au moins deux points marche/arrêt inscriptibles et numérotés (`on_1`,
+  `switch_2`, `state_l3`…) et déjà lus est une multiprise, ses sorties dans l'ordre de leur
+  numéro, sous le nom de leur point. `outlets` les nomme et choisit lesquelles montrer, dans
+  l'ordre donné (`{ "meross-multi-1:…": { "on_1": "Écran", "on_5": "USB" } }`) ; `{}` en fait
+  un simple bouton. Seuls les points inscriptibles comptent.
 
 ## Conception visuelle
 
