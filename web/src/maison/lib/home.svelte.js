@@ -284,22 +284,25 @@ const onOff = (p) => p.kind?.type === 'binary'
  *  there are two or more (a Meross MSS425's `on_1`…`on_5`), in their order,
  *  named by their label.
  *  `home.json` `outlets` `{ "<id>": { "on_1": "Écran", … } }` names them and
- *  chooses which show, in that order; `{ "<id>": {} }`: a single switch. */
+ *  chooses which show, in that order; `{ "<id>": {} }`: a single switch.
+ *  A name the family gave on the dashboard (the device's label, `points`)
+ *  comes first. */
 export function outletsOf(id) {
   const names = home.config?.outlets?.[id];
   const d = device(id);
   if (!d) return [];
+  const given = d.label?.points ?? {};
   if (names) {
     return Object.entries(names)
       .filter(([key]) => d.points.some((p) => p.key === key && p.access?.write))
-      .map(([key, name]) => ({ key, name }));
+      .map(([key, name]) => ({ key, name: given[key] || name, fallback: name }));
   }
   const numbered = d.points
     // An outlet the device has never reported is one it does not have (a double plug).
     .filter((p) => p.access?.write && OUTLET.test(p.key) && onOff(p) && value(id, p.key) != null)
-    .map((p) => ({ key: p.key, name: p.label || p.key, n: Number(OUTLET.exec(p.key)[1]) }))
+    .map((p) => ({ key: p.key, name: given[p.key] || p.label || p.key, fallback: p.label || p.key, n: Number(OUTLET.exec(p.key)[1]) }))
     .sort((a, b) => a.n - b.n);
-  return numbered.length >= 2 ? numbered.map(({ key, name }) => ({ key, name })) : [];
+  return numbered.length >= 2 ? numbered.map(({ key, name, fallback }) => ({ key, name, fallback })) : [];
 }
 
 const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge|éclairage|eclairage|néon|neon|\bleds?\b|veilleuse|guirlande|phare/i;

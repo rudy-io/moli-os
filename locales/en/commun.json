@@ -238,6 +238,10 @@
   "commun.multiprise.allumees": "{on} of {count} on",
   "commun.multiprise.tout_allumer": "Switch all on",
   "commun.multiprise.tout_eteindre": "Switch all off",
+  "commun.multiprise.nommer": "Name the outlets",
+  "commun.multiprise.noms_finis": "Done",
+  "commun.multiprise.nom_de": "Name of outlet {n}",
+  "commun.multiprise.nom_aide": "A cleared name gives back the original one; “USB” draws USB ports.",
 
   "commun.clim.label_consigne": "{name}: target",
   "commun.clim.label_arret": "{name}: off",

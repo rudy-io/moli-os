@@ -605,7 +605,7 @@ test('mixed power strip summary counts only writable outlets', () => {
     points: [point('switch_1', { type: 'binary' }, true, 'on_off'), point('switch_2', { type: 'binary' }, false, 'on_off')],
     values: { switch_1: true, switch_2: false },
   }]);
-  const [all, ...sockets] = buttons(html);
+  const [, all, ...sockets] = buttons(html);
   assert.doesNotMatch(all, /disabled/);
   assert.match(all, /aria-pressed="true"/);
   assert.equal(sockets.length, 1);
@@ -623,7 +623,7 @@ const meross = (values) => ({
 test('a strip with numbered outlets gets a socket for each, none for its every-outlet channel', () => {
   home.home.config = {};
   const html = showRoom([meross({ on: true, on_1: true, on_2: false, on_3: true, on_4: false, on_5: false })]);
-  const [all, ...sockets] = buttons(html);
+  const [, all, ...sockets] = buttons(html);
   assert.equal(sockets.length, 5);
   assert.match(all, /aria-pressed="false"/);
   assert.match(html, /2 sur 5 allumées/);
@@ -639,7 +639,7 @@ test('a strip with numbered outlets gets a socket for each, none for its every-o
 test('home.json outlets name and pick a strip\'s sockets, or make it one switch', () => {
   home.home.config = { outlets: { 'fixture:strip': { on_3: 'Écran', on_1: 'Lampe' } } };
   let html = showRoom([meross({ on: true, on_1: true, on_2: true, on_3: true, on_4: true, on_5: true })]);
-  const sockets = buttons(html).slice(1);
+  const sockets = buttons(html).slice(2);
   assert.equal(sockets.length, 2);
   assert.match(sockets[0], /Écran/);
   assert.match(sockets[1], /Lampe/);
@@ -651,17 +651,35 @@ test('home.json outlets name and pick a strip\'s sockets, or make it one switch'
   home.home.config = {};
 });
 
+test('a name given on the dashboard comes before the point\'s and home.json\'s', () => {
+  home.home.config = {};
+  let html = showRoom([{ ...meross({ on_1: true, on_2: true, on_3: true, on_4: true, on_5: false }), label: { room: 'Workshop', points: { on_2: 'Écran', on_4: 'USB' } } }]);
+  let sockets = buttons(html).slice(2);
+  assert.match(sockets[1], /Écran/);
+  assert.match(sockets[0], /Sortie 1/);
+  // Named USB: drawn as ports, as is the outlet the device calls USB.
+  assert.equal((html.match(/class="port\b/g) ?? []).length, 4);
+  home.home.config = { outlets: { 'fixture:strip': { on_2: 'Box', on_1: 'Lampe' } } };
+  html = showRoom([{ ...meross({ on_1: true, on_2: true }), label: { room: 'Workshop', points: { on_2: 'Écran' } } }]);
+  sockets = buttons(html).slice(2);
+  assert.match(sockets[0], /Écran/);
+  assert.match(sockets[1], /Lampe/);
+  home.home.config = {};
+});
+
 test('a double plug shows only the outlets it reports', () => {
   home.home.config = {};
   const html = showRoom([meross({ on: true, on_1: true, on_2: false })]);
-  assert.equal(buttons(html).length, 3);
+  assert.equal(buttons(html).length, 4);
   assert.match(html, /1 sur 2 allumées/);
 });
 
 test('an unreachable strip shows its sockets but takes no order', () => {
   home.home.config = {};
   const html = showRoom([{ ...meross({ on_1: true, on_2: true, on_3: true, on_4: true, on_5: true }), online: false }]);
-  assert.ok(buttons(html).every((b) => /disabled/.test(b)));
+  // Only its names can still be changed.
+  assert.ok(buttons(html).slice(1).every((b) => /disabled/.test(b)));
+  assert.doesNotMatch(buttons(html)[0], /disabled/);
   assert.match(html, /Injoignable/);
 });
 

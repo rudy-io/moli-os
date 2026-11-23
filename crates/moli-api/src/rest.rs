@@ -297,6 +297,35 @@ pub(crate) async fn set_label(
     }
 }
 
+#[derive(Deserialize)]
+pub(crate) struct PointName {
+    name: String,
+}
+
+/// A point's own name (a power strip's outlet): `{"name": "Écran"}`, `""`
+/// forgets it.
+pub(crate) async fn set_point_label(
+    State(hub): State<Hub>,
+    Extension(humans): Humans,
+    caller: Caller,
+    Path((id, key)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PointName>,
+) -> Response {
+    let origin = origin(&hub, &headers, &humans, &caller);
+    let actor = journal_actor(origin, None, &caller);
+    match hub
+        .set_point_label(&DeviceId::from(id), &key, &body.name, origin, actor)
+        .await
+    {
+        Ok(label) => Json(label).into_response(),
+        Err(LabelError::UnknownDevice) => error(StatusCode::NOT_FOUND, "unknown device"),
+        Err(LabelError::UnknownPoint) => error(StatusCode::NOT_FOUND, "unknown point"),
+        Err(e @ LabelError::Guarded(_)) => error(StatusCode::FORBIDDEN, &e.to_string()),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
 // ---- human sessions ---------------------------------------------------------
 
 pub(crate) async fn session(

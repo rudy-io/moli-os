@@ -141,7 +141,10 @@ telles que les appareils les nomment).
   `switch_2`, `state_l3`…) et déjà lus est une multiprise, ses sorties dans l'ordre de leur
   numéro, sous le nom de leur point. `outlets` les nomme et choisit lesquelles montrer, dans
   l'ordre donné (`{ "meross-multi-1:…": { "on_1": "Écran", "on_5": "USB" } }`) ; `{}` en fait
-  un simple bouton. Seuls les points inscriptibles comptent.
+  un simple bouton. Seuls les points inscriptibles comptent. Le crayon de la carte nomme les
+  prises depuis le tableau de bord : chaque nom est gardé dans l'étiquette de l'appareil
+  (`labels.toml`, `points`, par `PUT /api/labels/{id}/points/{clé}`) et passe avant ceux de
+  `outlets` et du pilote ; un nom effacé redonne celui d'origine.
 
 ## Conception visuelle
 

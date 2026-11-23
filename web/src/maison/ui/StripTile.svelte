@@ -1,4 +1,5 @@
 <script>
+  import { setPointLabel } from '../../lib/hub.svelte.js';
   import { device, isOn, pending, reachable, act, nameOf, outletsOf, unpowered, note } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import { canWrite } from '../lib/capabilities.js';
@@ -9,7 +10,10 @@
    *  all off; otherwise everything on), one outlet after the other: the
    *  device's own « every outlet » channel is never sent (on a Meross it
    *  reads on while outlets are off). A USB outlet (its name says so) is
-   *  drawn as ports. `icons`: no names under the sockets (in their tooltip). */
+   *  drawn as ports. `icons`: no names under the sockets (in their tooltip).
+   *  The pencil names the outlets (kept in the device's label, `points`);
+   *  meanwhile the sockets take no order. An empty name gives back the
+   *  outlet's own. */
   let { id, icons = false } = $props();
 
   const d = $derived(device(id));
@@ -42,6 +46,27 @@
     act(`${id}/${o.key}`, !isOn(id, o.key), `${label} · ${o.name}`);
   }
 
+  let naming = $state(false);
+  let saving = $state(null);
+
+  async function rename(o, input) {
+    const name = input.value.trim();
+    // Its own name typed back: the name it has without one.
+    const next = name === o.fallback ? '' : name;
+    if ((next || o.fallback) === o.name) return;
+    saving = o.key;
+    if (!(await setPointLabel(id, o.key, next))) input.value = o.name;
+    saving = null;
+  }
+
+  function keys(e, o) {
+    if (e.key === 'Enter') e.currentTarget.blur();
+    if (e.key === 'Escape') {
+      e.currentTarget.value = o.name;
+      e.currentTarget.blur();
+    }
+  }
+
   function all() {
     if (!live || !writable.length) return;
     if (cut) return note(t('commun.lampe.coupee_note', { label }));
@@ -57,6 +82,17 @@
       <b>{label}</b>
       <small>{state}</small>
     </span>
+    {#if d}
+      <button
+        class="round"
+        class:open={naming}
+        onclick={() => (naming = !naming)}
+        aria-expanded={naming}
+        title={naming ? t('commun.multiprise.noms_finis') : t('commun.multiprise.nommer')}
+        aria-label={t('commun.action', { label, action: naming ? t('commun.multiprise.noms_finis') : t('commun.multiprise.nommer') })}>
+        <Icon name={naming ? 'ok' : 'pencil'} size={17} />
+      </button>
+    {/if}
     <button
       class="switch"
       class:on={allOn && reachable(id)}
@@ -74,7 +110,7 @@
         class="outlet"
         class:on
         class:busy={pending(id, o.key)}
-        disabled={!live || !canWrite(d, o.key)}
+        disabled={naming || !live || !canWrite(d, o.key)}
         onclick={() => one(o)}
         aria-pressed={on}
         title={`${o.name} · ${said(o)}`}
@@ -99,6 +135,25 @@
       </button>
     {/each}
   </div>
+  {#if naming}
+    <div class="names">
+      {#each outlets as o, i (o.key)}
+        <label class:saving={saving === o.key}>
+          <span class="num">{i + 1}</span>
+          <input
+            type="text"
+            maxlength="60"
+            value={o.name}
+            placeholder={o.fallback}
+            autocomplete="off"
+            onchange={(e) => rename(o, e.currentTarget)}
+            onkeydown={(e) => keys(e, o)}
+            aria-label={t('commun.multiprise.nom_de', { n: i + 1 })} />
+        </label>
+      {/each}
+      <small class="hint">{t('commun.multiprise.nom_aide')}</small>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -166,6 +221,78 @@
 
   .on .text small {
     color: var(--warm-ink);
+  }
+
+  .round {
+    all: unset;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface);
+    color: var(--ink-3);
+    cursor: pointer;
+    transition: all 0.25s var(--ease);
+  }
+
+  .round.open {
+    background: var(--warm);
+    color: var(--warm-deep);
+  }
+
+  .round:focus-visible,
+  .names input:focus-visible {
+    outline: 3px solid var(--cool);
+    outline-offset: 2px;
+  }
+
+  /* Naming: one line per outlet, its number then its name. */
+  .names {
+    display: grid;
+    gap: 8px;
+  }
+
+  .names label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .names .num {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface);
+    color: var(--ink-3);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .names input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 15px;
+  }
+
+  .names .saving input {
+    opacity: 0.6;
+  }
+
+  .hint {
+    color: var(--ink-3);
+    font-size: 12px;
   }
 
   /* The rocker: every outlet at once. */
