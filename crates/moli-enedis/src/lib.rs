@@ -8,8 +8,9 @@
 //! stops the driver until a human renews the consent.
 //!
 //! When Enedis does not serve the hourly curve (404, « la sous-ressource
-//! demandée n'existe pas »), the same request asks the daily totals instead:
-//! the day's consumption is still read, without its hours or its peak. The
+//! demandée n'existe pas »), the same request asks the daily totals instead,
+//! over a month so that the gaps heal: each day's consumption is still read,
+//! spread evenly over its hours for the energy page, without its peak. The
 //! warning says why, in Enedis's own words.
 
 mod model;
@@ -32,6 +33,8 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 const ZONE: &str = "Europe/Paris";
 /// Days asked for each time.
 const DAYS: i64 = 7;
+/// Days asked for the daily totals: one request, a month of gaps healed.
+const DAILY_DAYS: i64 = 31;
 /// Hours in one value of the `hours` point.
 const HOURS_AT_ONCE: usize = 24;
 /// Days without news before the meter is shown as unreachable.
@@ -163,8 +166,12 @@ fn said(status: u16, body: &[u8]) -> String {
 
 async fn fetch(ask: Ask, prm: &str, bearer: &HeaderValue, now: &Zoned) -> Result<Vec<u8>, Failure> {
     let today = now.date();
+    let days = match ask {
+        Ask::Curve => DAYS,
+        Ask::Daily => DAILY_DAYS,
+    };
     let first = today
-        .checked_sub(DAYS.days())
+        .checked_sub(days.days())
         .map_err(|_| Failure::Other(moli_i18n::tr!("pilotes.enedis.reponse_illisible")))?;
     let kind = match ask {
         Ask::Curve => "courbe_de_charge_consommation",
@@ -204,7 +211,7 @@ fn unreadable() -> Failure {
 /// The hourly curve, or, when Enedis has none, the day's total.
 enum Got {
     Curve(Curve),
-    Daily(Option<Total>, Option<String>),
+    Daily(Vec<Total>, Option<String>),
 }
 
 async fn read(prm: &str, bearer: &HeaderValue, now: &Zoned, tz: &TimeZone) -> Result<Got, Failure> {
@@ -226,8 +233,8 @@ async fn read(prm: &str, bearer: &HeaderValue, now: &Zoned, tz: &TimeZone) -> Re
                     }),
                     other => other,
                 })?;
-            let total = model::last_total(&body).map_err(|_| unreadable())?;
-            Ok(Got::Daily(total, why))
+            let totals = model::totals(&body).map_err(|_| unreadable())?;
+            Ok(Got::Daily(totals, why))
         }
         Err(e) => Err(e),
     }
@@ -244,6 +251,20 @@ fn publish(ctx: &DriverCtx, id: &DeviceId, curve: &Curve) {
         ctx.set_state(id, "last_day_kwh", Value::Float(day.kwh));
         ctx.set_state(id, "last_day_peak", Value::Float(day.peak_w));
         ctx.set_state(id, "last_day", Value::Text(day.date.to_string().into()));
+    }
+}
+
+/// The days' totals alone: each spread over its hours for the energy page
+/// (what is already filed stays: a real curve, once filed, is kept), and the
+/// last one shown, without its peak.
+fn publish_totals(ctx: &DriverCtx, id: &DeviceId, totals: &[Total], tz: &TimeZone) {
+    for total in totals {
+        if let Ok(hours) = serde_json::to_string(&model::even_hours(total, tz)) {
+            ctx.set_state(id, "hours", Value::Text(hours.into()));
+        }
+    }
+    if let Some(total) = totals.last() {
+        publish_total(ctx, id, total);
     }
 }
 
@@ -300,10 +321,8 @@ async fn run(driver: &Enedis, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         let now = Zoned::now().with_time_zone(tz.clone());
         if due {
             match read(prm, &bearer, &now, &tz).await {
-                Ok(Got::Daily(total, why)) => {
-                    if let Some(total) = &total {
-                        publish_total(ctx, &id, total);
-                    }
+                Ok(Got::Daily(totals, why)) => {
+                    publish_totals(ctx, &id, &totals, &tz);
                     let motif = why.unwrap_or_else(|| "404".to_owned());
                     ctx.warn(moli_i18n::tr!(
                         "pilotes.enedis.sans_courbe",
