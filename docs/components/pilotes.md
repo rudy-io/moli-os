@@ -802,7 +802,8 @@ host = "192.168.1.x"
 - **Points** : `last_day` (date du dernier jour complet), `last_day_kwh`, `last_day_peak`, `hours` (les heures reçues, en JSON, pour un compteur `history = true` de `[energy]`).
 - **Identité** : un appareil `linky` par instance.
 - **Pièges** : service gratuit, non officiel, au quota partagé : une requête par jour à une heure propre au compteur, une seconde vers 14 h si la veille manque, aucune de plus au redémarrage (sauf au tout premier). Une mesure manquante écarte son heure et son jour. Les heures sont locales et nomment la fin de la mesure ; au passage à l'heure d'hiver, la même heure revient deux fois. Un jeton refusé arrête le pilote jusqu'à l'intervention d'un humain.
-- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes et le calendrier des requêtes.
+- **Sans courbe horaire** : quand Enedis répond 404 à la courbe de charge (« la sous-ressource demandée n'existe pas »), la même relève demande la consommation quotidienne (`consommation_quotidienne`) : `last_day` et `last_day_kwh` avancent, `last_day_peak` devient inconnu, `hours` ne reçoit rien. L'avertissement le dit, avec le motif d'Enedis. Vu en novembre 2026 sur un compteur dont la collecte horaire était pourtant active. Toute erreur reprend aussi le motif d'Enedis quand la réponse en donne un : une ligne courte, sans numéro de compteur.
+- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes, le calendrier des requêtes, la réponse quotidienne et le motif d'un refus.
 
 ## `solcast` : prévision solaire des toitures (`crates/moli-solcast`)
 

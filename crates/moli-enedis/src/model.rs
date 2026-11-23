@@ -159,6 +159,99 @@ pub fn curve(body: &[u8], tz: &TimeZone) -> Result<Curve, serde_json::Error> {
     })
 }
 
+#[derive(Deserialize)]
+struct DailyAnswer {
+    #[serde(default)]
+    grandeur: Vec<DailyQuantity>,
+}
+
+#[derive(Deserialize)]
+struct DailyQuantity {
+    #[serde(rename = "grandeurPhysique")]
+    physical: String,
+    unite: String,
+    #[serde(default)]
+    points: Vec<DailyPoint>,
+}
+
+#[derive(Deserialize)]
+struct DailyPoint {
+    v: Option<String>,
+    d: String,
+}
+
+/// One day's consumption, from the daily totals: no peak, no hours.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Total {
+    pub date: Date,
+    pub kwh: f64,
+}
+
+/// The last day of a `consommation_quotidienne` answer (energy, in Wh, one
+/// point a day): what is left when Enedis does not serve the hourly curve.
+pub fn last_total(body: &[u8]) -> Result<Option<Total>, serde_json::Error> {
+    let answer: DailyAnswer = serde_json::from_slice(body)?;
+    Ok(answer
+        .grandeur
+        .iter()
+        .filter(|q| q.physical == "EA" && q.unite == "Wh")
+        .flat_map(|q| &q.points)
+        .filter_map(|point| {
+            let date: Date = point.d.parse().ok()?;
+            let wh = point.v.as_deref()?.parse::<f64>().ok()?;
+            (wh.is_finite() && wh >= 0.0).then(|| Total {
+                date,
+                kwh: (wh).round() / 1000.0,
+            })
+        })
+        .max_by_key(|total| total.date))
+}
+
+/// Why Enedis refused, as the Conso API relays it (`error.error_description`,
+/// or `error.description`): one short line, without any meter number, to be
+/// shown in a warning.
+#[must_use]
+pub fn reason(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: Option<Detail>,
+    }
+    #[derive(Deserialize)]
+    struct Detail {
+        error_description: Option<String>,
+        description: Option<String>,
+        error: Option<String>,
+    }
+    let detail = serde_json::from_slice::<Refusal>(body).ok()?.error?;
+    let text = detail
+        .error_description
+        .or(detail.description)
+        .or(detail.error)?;
+    let mut line = String::new();
+    let mut digits = 0;
+    for c in text.chars().filter(|c| !c.is_control()) {
+        // A run of digits as long as a meter number is no reason: dropped.
+        digits = if c.is_ascii_digit() { digits + 1 } else { 0 };
+        line.push(c);
+        if digits == 10 {
+            line.truncate(line.len() - 10);
+            line.push('…');
+        } else if digits > 10 {
+            line.pop();
+        }
+    }
+    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = line.trim_end_matches(['.', ' ']);
+    if line.is_empty() {
+        return None;
+    }
+    Some(if line.chars().count() > 160 {
+        line.chars().take(159).chain(['…']).collect()
+    } else {
+        line.to_owned()
+    })
+}
+
 /// A number proper to this meter: homes do not all ask at the same second.
 #[must_use]
 pub fn spread(prm: &str) -> u32 {
@@ -334,5 +427,50 @@ mod tests {
             let next = next_try(&now, None, spread(prm)).unwrap();
             assert!((6..10).contains(&next.hour()), "{next}");
         }
+    }
+
+    #[test]
+    fn a_daily_answer_gives_its_last_day() {
+        let body = br#"{"pas":"P1D","grandeur":[{"grandeurMetier":"CONS","grandeurPhysique":"EA","unite":"Wh","points":[{"v":"13838","d":"2026-11-15"},{"v":"11789","d":"2026-11-21"},{"v":"9237","d":"2026-11-19"}],"calendrier":[]}],"contexte":[]}"#;
+        assert_eq!(
+            last_total(body).unwrap(),
+            Some(Total {
+                date: date(2026, 11, 21),
+                kwh: 11.789
+            })
+        );
+        assert_eq!(last_total(b"{}").unwrap(), None);
+        let bad = br#"{"grandeur":[{"grandeurPhysique":"EA","unite":"Wh","points":[{"v":"-1","d":"2026-11-21"},{"v":null,"d":"2026-11-22"},{"v":"5","d":"hier"}]}]}"#;
+        assert_eq!(last_total(bad).unwrap(), None);
+        let power = br#"{"grandeur":[{"grandeurPhysique":"PMA","unite":"VA","points":[{"v":"5000","d":"2026-11-21"}]}]}"#;
+        assert_eq!(last_total(power).unwrap(), None);
+        assert!(last_total(b"nope").is_err());
+    }
+
+    #[test]
+    fn a_refusal_says_why_in_one_short_line_without_a_meter_number() {
+        let missing = br#"{"status":404,"message":"The Enedis API returned an error","error":{"error":"Not Found","error_description":"La sous-ressource demand\u00e9e n existe pas."}}"#;
+        assert_eq!(
+            reason(missing).as_deref(),
+            Some("La sous-ressource demandée n existe pas")
+        );
+        let quota = br#"{"status":429,"error":{"code":"900804","message":"Message throttled out","description":"You have exceeded your quota .You can access API after 2026-Jul-20 05:00:00+0000 UTC"}}"#;
+        assert!(
+            reason(quota)
+                .unwrap()
+                .starts_with("You have exceeded your quota")
+        );
+        let bare = br#"{"error":{"error":"no_data_found"}}"#;
+        assert_eq!(reason(bare).as_deref(), Some("no_data_found"));
+        let prm = br#"{"error":{"error_description":"Point 12345678901234 inconnu\n"}}"#;
+        assert_eq!(reason(prm).as_deref(), Some("Point … inconnu"));
+        let long = format!(
+            r#"{{"error":{{"error_description":"{}"}}}}"#,
+            "a".repeat(400)
+        );
+        assert_eq!(reason(long.as_bytes()).unwrap().chars().count(), 160);
+        assert_eq!(reason(b"{}"), None);
+        assert_eq!(reason(b"<html>"), None);
+        assert_eq!(reason(br#"{"error":"text"}"#), None);
     }
 }

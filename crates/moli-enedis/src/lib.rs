@@ -6,6 +6,11 @@
 //! to the meter, and one more in the afternoon if the day is still missing. Each
 //! request covers the last days, so that a gap heals by itself. A refused token
 //! stops the driver until a human renews the consent.
+//!
+//! When Enedis does not serve the hourly curve (404, « la sous-ressource
+//! demandée n'existe pas »), the same request asks the daily totals instead:
+//! the day's consumption is still read, without its hours or its peak. The
+//! warning says why, in Enedis's own words.
 
 mod model;
 
@@ -14,7 +19,7 @@ use std::time::Duration;
 use http::header::{ACCEPT, AUTHORIZATION, HOST, HeaderValue, USER_AGENT};
 use jiff::tz::TimeZone;
 use jiff::{ToSpan, Zoned};
-use model::Curve;
+use model::{Curve, Total};
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use serde::Deserialize;
@@ -132,22 +137,40 @@ fn describe(ctx: &DriverCtx, id: &DeviceId) -> Device {
 enum Failure {
     /// 401 or 403: the token ended, or does not cover this meter.
     Refused,
+    /// 404: Enedis has nothing of this kind for the meter, and why.
+    Missing(Option<String>),
     Other(String),
 }
 
-async fn fetch(
-    prm: &str,
-    bearer: &HeaderValue,
-    now: &Zoned,
-    tz: &TimeZone,
-) -> Result<Curve, Failure> {
+/// What is asked: the hourly curve, or the daily totals when there is none.
+#[derive(Clone, Copy)]
+enum Ask {
+    Curve,
+    Daily,
+}
+
+/// The status, with Enedis's own reason when the answer gives one.
+fn said(status: u16, body: &[u8]) -> String {
+    match model::reason(body) {
+        Some(motif) => moli_i18n::tr!(
+            "pilotes.enedis.statut_motif",
+            status = status,
+            motif = &*motif
+        ),
+        None => moli_i18n::tr!("pilotes.enedis.statut", status = status),
+    }
+}
+
+async fn fetch(ask: Ask, prm: &str, bearer: &HeaderValue, now: &Zoned) -> Result<Vec<u8>, Failure> {
     let today = now.date();
     let first = today
         .checked_sub(DAYS.days())
         .map_err(|_| Failure::Other(moli_i18n::tr!("pilotes.enedis.reponse_illisible")))?;
-    let path = format!(
-        "/api/courbe_de_charge_consommation?pointId={prm}&dateDebut={first}&dateFin={today}"
-    );
+    let kind = match ask {
+        Ask::Curve => "courbe_de_charge_consommation",
+        Ask::Daily => "consommation_quotidienne",
+    };
+    let path = format!("/api/{kind}?pointId={prm}&dateDebut={first}&dateFin={today}");
     let builder = http::Request::builder()
         .method(http::Method::GET)
         .uri(path)
@@ -165,14 +188,49 @@ async fn fetch(
     if matches!(status.as_u16(), 401 | 403) {
         return Err(Failure::Refused);
     }
-    if !status.is_success() {
-        return Err(Failure::Other(moli_i18n::tr!(
-            "pilotes.enedis.statut",
-            status = status.as_u16()
-        )));
+    if status.as_u16() == 404 {
+        return Err(Failure::Missing(model::reason(&body)));
     }
-    model::curve(&body, tz)
-        .map_err(|_| Failure::Other(moli_i18n::tr!("pilotes.enedis.reponse_illisible")))
+    if !status.is_success() {
+        return Err(Failure::Other(said(status.as_u16(), &body)));
+    }
+    Ok(body.to_vec())
+}
+
+fn unreadable() -> Failure {
+    Failure::Other(moli_i18n::tr!("pilotes.enedis.reponse_illisible"))
+}
+
+/// The hourly curve, or, when Enedis has none, the day's total.
+enum Got {
+    Curve(Curve),
+    Daily(Option<Total>, Option<String>),
+}
+
+async fn read(prm: &str, bearer: &HeaderValue, now: &Zoned, tz: &TimeZone) -> Result<Got, Failure> {
+    match fetch(Ask::Curve, prm, bearer, now).await {
+        Ok(body) => model::curve(&body, tz)
+            .map(Got::Curve)
+            .map_err(|_| unreadable()),
+        Err(Failure::Missing(why)) => {
+            let body = fetch(Ask::Daily, prm, bearer, now)
+                .await
+                .map_err(|e| match e {
+                    Failure::Missing(daily) => Failure::Other(match daily.or(why.clone()) {
+                        Some(motif) => moli_i18n::tr!(
+                            "pilotes.enedis.statut_motif",
+                            status = 404,
+                            motif = &*motif
+                        ),
+                        None => moli_i18n::tr!("pilotes.enedis.statut", status = 404),
+                    }),
+                    other => other,
+                })?;
+            let total = model::last_total(&body).map_err(|_| unreadable())?;
+            Ok(Got::Daily(total, why))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn publish(ctx: &DriverCtx, id: &DeviceId, curve: &Curve) {
@@ -187,6 +245,13 @@ fn publish(ctx: &DriverCtx, id: &DeviceId, curve: &Curve) {
         ctx.set_state(id, "last_day_peak", Value::Float(day.peak_w));
         ctx.set_state(id, "last_day", Value::Text(day.date.to_string().into()));
     }
+}
+
+/// The day's total alone: its hours and its peak are not known.
+fn publish_total(ctx: &DriverCtx, id: &DeviceId, total: &Total) {
+    ctx.set_state(id, "last_day_kwh", Value::Float(total.kwh));
+    ctx.set_state(id, "last_day_peak", Value::Null);
+    ctx.set_state(id, "last_day", Value::Text(total.date.to_string().into()));
 }
 
 fn last_day(ctx: &DriverCtx, id: &DeviceId) -> Option<jiff::civil::Date> {
@@ -234,8 +299,18 @@ async fn run(driver: &Enedis, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     loop {
         let now = Zoned::now().with_time_zone(tz.clone());
         if due {
-            match fetch(prm, &bearer, &now, &tz).await {
-                Ok(curve) => {
+            match read(prm, &bearer, &now, &tz).await {
+                Ok(Got::Daily(total, why)) => {
+                    if let Some(total) = &total {
+                        publish_total(ctx, &id, total);
+                    }
+                    let motif = why.unwrap_or_else(|| "404".to_owned());
+                    ctx.warn(moli_i18n::tr!(
+                        "pilotes.enedis.sans_courbe",
+                        motif = &*motif
+                    ));
+                }
+                Ok(Got::Curve(curve)) => {
                     publish(ctx, &id, &curve);
                     // A week without a measure is not a late meter: say why.
                     if curve.hours.is_empty() {
@@ -251,6 +326,9 @@ async fn run(driver: &Enedis, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     tracing::warn!(instance = %ctx.instance(), error = %error, "Enedis");
                     ctx.warn(error);
                 }
+                // `read` turns a missing curve into the daily totals, and a
+                // missing daily answer into `Other`: never here.
+                Err(Failure::Missing(_)) => {}
             }
         }
         let now = Zoned::now().with_time_zone(tz.clone());
