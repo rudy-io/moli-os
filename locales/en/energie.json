@@ -449,5 +449,6 @@
   "energie.carte.cout_le": "Cost on {day}",
   "energie.prix.tous_toml": "Each meter has its price in moli.toml: a price chosen here would only count for a meter without one.",
   "energie.prix.toml": "In moli.toml: {list}",
-  "energie.prix.compteur": "{name} {price} {cur}/kWh"
+  "energie.prix.compteur": "{name} {price} {cur}/kWh",
+  "energie.histo.note_compteurs": "What the meters read."
 }

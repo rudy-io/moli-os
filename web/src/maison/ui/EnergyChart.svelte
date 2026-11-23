@@ -50,7 +50,9 @@
   // The gas meters, on top of the electricity (the total is then both).
   const gas = $derived(meters.filter((m) => m.role === 'gas').map((m) => ({ id: m.id, name: m.name, color: GAS, gas: true })));
   const electricity = $derived.by(() => {
-    if (by === 'devices' && parts.length) return parts;
+    // Without circuits nor measured appliances, the parts would be the whole
+    // house as « the rest », in grey: the meter itself says it better.
+    if (by === 'devices' && parts.some((p) => !p.rest)) return parts;
     if (byCircuit && circuits.length) {
       const parts = circuits.map((m, i) => ({ id: m.id, name: m.name, color: PALETTE[i % PALETTE.length] }));
       return whole ? [...parts, { id: '__rest', name: t('energie.reste'), color: 'var(--surface-3)', rest: true }] : parts;

@@ -252,8 +252,18 @@
       : [],
   );
 
-  let range = $state('hour');
-  let by = $state('devices');
+  // The history: the last 24 hours for a house measured live, the last 30
+  // days for one whose meters report a day late (its last 24 hours are
+  // always empty); 24 h stays a click away. Chosen by hand, kept.
+  let picked = $state(null);
+  const range = $derived(picked ?? (late ? 'day' : 'hour'));
+  let pickedBy = $state('devices');
+  // « Appareils » and « Tarif » say the same thing without circuits, measured
+  // appliances nor more than one billed meter (peak / off-peak): no switch.
+  const splits = $derived(
+    hasCircuits || (s?.meters ?? []).filter((m) => m.role === 'grid' || m.role === 'total').length > 1,
+  );
+  const by = $derived(splits ? pickedBy : 'tariff');
   const RANGES = [
     ['hour', 'energie.range.hour'],
     ['day', 'energie.range.day'],
@@ -513,19 +523,21 @@
     <section class="card">
       <div class="card-head">
         <h2><Icon name="tune" size={18} />{t('energie.histo.titre')}</h2>
+        {#if splits}
         <div class="seg" role="group" aria-label={t('energie.histo.empile')}>
-          <button class:on={by === 'devices'} onclick={() => (by = 'devices')}>{t('energie.histo.appareils')}</button>
-          <button class:on={by === 'tariff'} onclick={() => (by = 'tariff')}>{t('energie.histo.tarif')}</button>
+          <button class:on={by === 'devices'} onclick={() => (pickedBy = 'devices')}>{t('energie.histo.appareils')}</button>
+          <button class:on={by === 'tariff'} onclick={() => (pickedBy = 'tariff')}>{t('energie.histo.tarif')}</button>
         </div>
+        {/if}
         <div class="seg" role="group" aria-label={t('energie.periode')}>
           {#each RANGES as [key, label] (key)}
-            <button class:on={range === key} onclick={() => (range = key)}>{t(label)}</button>
+            <button class:on={range === key} onclick={() => (picked = key)}>{t(label)}</button>
           {/each}
         </div>
       </div>
       <EnergyChart {range} {by} />
       <p class="foot muted">
-        {by === 'devices' ? t('energie.histo.note_appareils') : t('energie.histo.note_tarif')}
+        {!splits ? t('energie.histo.note_compteurs') : by === 'devices' ? t('energie.histo.note_appareils') : t('energie.histo.note_tarif')}
         {#if gasDay}{t('energie.histo.note_gaz')}{/if}
         {t('energie.histo.avant_moli')}
       </p>
