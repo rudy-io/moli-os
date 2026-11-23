@@ -264,8 +264,14 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   l'arrêt, bleus et traversés d'un courant d'air pendant une aération (`valve_override`) ; une
   petite molette dit une vanne réglée à la main. En mots : ce qu'il fait, « 18,2° pour 19° », puis
   le prochain changement du programme (« Programme · 17° à 22:00 ») ou la fin du réglage à la main,
-  avec **Reprendre le programme**. Toucher la tuile ouvre la carte de la vanne (consigne, modes),
-  sans son en-tête. Animations coupées avec `prefers-reduced-motion`.
+  avec **Reprendre le programme**, ou un boost (« Boost +2° · jusqu’à 15:30 ») ou une consigne
+  maintenue (« Consigne maintenue · programme repris à 18:00 »). Toucher la tuile ouvre la carte
+  de la vanne (consigne, modes), sans son en-tête. Animations coupées avec `prefers-reduced-motion`.
+  Un thermostat de pièce de Moli (point `boost` en écriture) a en plus, hors `off`, **+1 · +2**
+  (dans la limite de `max_boost`) ; pendant un boost, **1 h · 2 h** (`boost_minutes`), le compte à
+  rebours tiré de `boost_until` et **Annuler** (`boost` à 0). Une consigne maintenue (`hold_until`)
+  dit son échéance et son compte à rebours, avec **Reprendre le programme** (`system_mode` à `auto`,
+  qui annule aussi le boost). Calcul pur dans `lib/temporary.js`.
   La page **Chauffage** (`pages/Chauffage.svelte`) réunit, au-dessus de la pompe à chaleur, chaque
   thermostat qui a une table horaire (thermostats de pièce de Moli, `crates/moli-heating`, et vannes
   Zigbee2MQTT) : la carte de la vanne sans son repli de table horaire, la correction appliquée aux

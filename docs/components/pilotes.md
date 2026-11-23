@@ -233,6 +233,10 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 #   consigne + 0,3 ; entre les deux, rien ne change (0 à 2 °C)
 # min = 5.0, max = 25.0 : les consignes que la pièce accepte
 # initial = 19.0 : la consigne et le programme avant qu'on les règle
+# max_boost = 3.0 : le boost le plus haut (°C, au demi-degré, de 0,5 à 10)
+# boost_default_minutes = 60 : la durée d'un boost quand seul `boost` est écrit
+# hold_default_minutes = 0 : en `auto`, combien de temps tient une consigne changée à la main
+#   (0 : jusqu'au créneau suivant)
 ```
 
 - **Points**, ceux d'une vanne Zigbee2MQTT, si bien que le tableau de bord en fait une carte de
@@ -243,7 +247,34 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
   `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
   l'autre), `heat_demand` (la pièce demande de la chaleur, en lecture : voir plus bas). En
-  `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
+  `auto`, une consigne changée à la main tient jusqu'au créneau suivant, ou
+  `hold_default_minutes` quand il est réglé.
+- **Changements temporaires** (`crates/moli-heating/src/temporary.rs`), qui finissent seuls :
+  - **Le boost** : `boost` (°C, réglable, de 0 à `max_boost`, au demi-degré ; 0 = aucun)
+    **s'ajoute** à la consigne en vigueur, programme compris : si un créneau change pendant le
+    boost, l'écart suit. La pièce vise consigne + boost (sans dépasser son `max`), la correction
+    apprend sur cette cible ; en `force`, la demande de chaleur et la consigne forcée en partent
+    aussi. Un `boost` écrit seul dure `boost_default_minutes` ; réécrit
+    pendant un boost, il change l'écart sans toucher à l'échéance. `boost_minutes` (réglable,
+    0 à 720) relance le boost en cours pour cette durée à partir de maintenant (0 l'arrête ;
+    refusé sans boost en cours : écrire d'abord `boost`) et se relit comme la durée demandée.
+    `boost_until` (lecture, RFC 3339, vide sans boost) donne l'échéance, pour un compte à
+    rebours. En `off`, pas de boost : le hors-gel reste le hors-gel.
+  - **La consigne maintenue** : en `auto`, `hold_minutes` (réglable, 0 à 720) fait tenir la
+    consigne actuelle ce temps-là, créneaux compris, puis le programme reprend (le créneau en
+    vigueur à ce moment). 0 : jusqu'au créneau suivant, comme sans maintien. Une consigne changée
+    pendant un maintien garde son échéance, si bien qu'une scène peut écrire la consigne et
+    `hold_minutes` dans l'ordre qu'elle veut : `orders = [{ point =
+    "chauffage:sport/occupied_heating_setpoint", value = 18.0 }, { point =
+    "chauffage:sport/hold_minutes", value = 180 }]`. `hold_until` (lecture, RFC 3339) donne
+    l'échéance. Refusé hors de `auto` (en `heat`, la consigne tient déjà).
+  - Les échéances sont gardées d'un redémarrage à l'autre (une échéance passée pendant l'arrêt
+    finit au premier coup d'œil). Écrire `system_mode` (même `auto` à nouveau : « reprendre le
+    programme ») annule le boost et le maintien. Chaque début et chaque fin que la pièce décide
+    seule (durée par défaut, échéance, changement de mode) est au journal, acteur
+    « Chauffage · <pièce> » ; ceux qu'on demande y sont déjà comme ordres.
+  - À ne pas confondre avec `valve_override` : celui-là dit qu'une **vanne** a été tournée à la
+    main, le boost et le maintien portent sur la consigne de la **pièce**.
 - **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
   reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
   chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
@@ -297,7 +328,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   d'agent admis par la garde, envoyé à la vanne elle-même, compte aussi comme une main (tenu
   jusqu'à 2 h au lieu d'être corrigé au tour suivant). Moli la laisse telle
   quelle au lieu de remettre la sienne (`crates/moli-heating/src/hand.rs`) : **2 h au plus**, et
-  seulement jusqu'au créneau suivant du programme. Tournée à son minimum (à un demi-degré près) ou
+  seulement jusqu'au prochain changement de la consigne de la pièce (créneau suivant du programme,
+  fin d'un maintien ou d'un boost). Tournée à son minimum (à un demi-degré près) ou
   3 °C ou plus sous la température de la pièce, c'est une **aération** : 30 min au plus, finie dès
   que la vanne est remontée (la pièce reprend alors sa consigne). La pièce le dit par
   `valve_override` (`none`, `manual`, `airing` ; écrire `none` reprend le programme) et
