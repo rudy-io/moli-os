@@ -1102,6 +1102,7 @@
   "pilotes.chauffage.mode": "Mode",
   "pilotes.chauffage.programme": "{jour} schedule",
   "pilotes.chauffage.correction": "Valve correction",
+  "pilotes.chauffage.demande": "Heat demand",
   "pilotes.chauffage.acteur": "Heating · {piece}",
   "pilotes.chauffage.consigne_refusee": "Setpoint outside the room's limits",
   "pilotes.chauffage.mode_refuse": "Unknown mode: auto, heat or off",

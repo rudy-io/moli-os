@@ -1102,6 +1102,7 @@
   "pilotes.chauffage.mode": "Mode",
   "pilotes.chauffage.programme": "Programme du {jour}",
   "pilotes.chauffage.correction": "Correction des vannes",
+  "pilotes.chauffage.demande": "Demande de chaleur",
   "pilotes.chauffage.acteur": "Chauffage · {piece}",
   "pilotes.chauffage.consigne_refusee": "Consigne hors des limites de la pièce",
   "pilotes.chauffage.mode_refuse": "Mode inconnu : auto, heat ou off",

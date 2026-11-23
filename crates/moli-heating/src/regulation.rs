@@ -104,6 +104,30 @@ impl Shift {
     }
 }
 
+/// Whether the room asks for heat: its error (`setpoint − temperature`)
+/// over `hysteresis`, it does; under `−hysteresis`, it does not; in between,
+/// as `before` (none yet: whether it is under its setpoint). The sensor's
+/// noise does not make it go back and forth.
+#[must_use]
+pub fn demand(before: Option<bool>, error: f64, hysteresis: f64) -> bool {
+    if error > hysteresis {
+        true
+    } else if error < -hysteresis {
+        false
+    } else {
+        before.unwrap_or(error > 0.0)
+    }
+}
+
+/// `force`: the setpoint that opens the valve wide while the room asks for
+/// heat (the room's plus `offset`), or shuts it (minus `offset`), on the
+/// half degree, within the valve's bounds.
+#[must_use]
+pub fn forced_setpoint(room: f64, offset: f64, demand: bool, bounds: (f64, f64)) -> f64 {
+    let target = if demand { room + offset } else { room - offset };
+    half_degree(target).clamp(bounds.0, bounds.1)
+}
+
 /// On the half degree.
 #[must_use]
 pub fn half_degree(temp: f64) -> f64 {
@@ -220,6 +244,35 @@ mod tests {
         // No thermometer on the valve: the room's.
         assert!(valve_heats(19.0, None, 18.8));
         assert!(!valve_heats(19.0, None, 19.3));
+    }
+
+    #[test]
+    fn the_demand_goes_back_and_forth_only_past_the_hysteresis() {
+        assert!(demand(None, 0.1, 0.3), "under its setpoint");
+        assert!(!demand(None, -0.1, 0.3), "over it");
+        assert!(demand(Some(false), 0.4, 0.3));
+        assert!(!demand(Some(false), 0.3, 0.3), "inside: as before");
+        assert!(demand(Some(true), -0.3, 0.3), "inside: as before");
+        assert!(!demand(Some(true), -0.4, 0.3));
+        assert!(demand(Some(false), 0.01, 0.0));
+    }
+
+    #[test]
+    fn a_forced_valve_is_sent_far_over_or_under_the_room() {
+        let bounds = (5.0, 30.0);
+        assert_eq!(forced_setpoint(20.0, 4.0, true, bounds), 24.0);
+        assert_eq!(forced_setpoint(20.0, 4.0, false, bounds), 16.0);
+        assert_eq!(forced_setpoint(19.5, 2.2, true, bounds), 21.5);
+        assert_eq!(
+            forced_setpoint(28.0, 4.0, true, bounds),
+            30.0,
+            "valve bounds"
+        );
+        assert_eq!(
+            forced_setpoint(7.0, 4.0, false, bounds),
+            5.0,
+            "valve bounds"
+        );
     }
 
     #[test]
