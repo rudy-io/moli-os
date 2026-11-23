@@ -20,6 +20,11 @@
   const s = $derived(energy.summary);
   const cur = $derived(s?.currency ?? '€');
   const prices = $derived([...(s?.house_prices ?? [])].reverse());
+  // The meters priced in moli.toml: their price wins over the house's, which
+  // then only serves the meters without one.
+  const own = $derived((s?.meters ?? []).filter((m) => m.price != null));
+  const billed = $derived((s?.meters ?? []).filter((m) => ['grid', 'total', 'gas'].includes(m.role)));
+  const allOwn = $derived(billed.length > 0 && billed.every((m) => m.price != null));
   const amount = (v) => v.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   const day = (ts) => new Date(ts).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' });
   const parsed = $derived(Number(typed.trim().replace(',', '.')));
@@ -105,8 +110,15 @@
         <span class="muted">
           {s.house_price != null
             ? t('energie.prix.actuel', { price: amount(s.house_price), cur, since: day(prices[0].since) })
-            : t('energie.prix.aucun')}
+            : allOwn
+              ? t('energie.prix.tous_toml')
+              : t('energie.prix.aucun')}
         </span>
+        {#if own.length}
+          <span class="muted">
+            {t('energie.prix.toml', { list: own.map((m) => t('energie.prix.compteur', { name: m.name, price: amount(m.price), cur })).join(' · ') })}
+          </span>
+        {/if}
       </div>
       <div class="actions">
         <button class="btn" onclick={start} aria-expanded={open}>{s.house_price != null ? t('energie.prix.changer') : t('energie.prix.choisir')}</button>

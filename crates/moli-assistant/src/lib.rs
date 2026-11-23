@@ -4283,6 +4283,7 @@ mod tests {
             feeds: Vec::new(),
             estimated: false,
             history: false,
+            price: None,
         };
         let period = |kwh, cost| Period {
             from: 0,

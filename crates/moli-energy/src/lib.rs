@@ -78,6 +78,9 @@ pub struct MeterInfo {
     /// Reports its hours a day late (Linky, GRDF): nothing for today yet.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub history: bool,
+    /// Its own price of a kWh (`price` in moli.toml).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<f64>,
 }
 
 /// The supplier's meter right now (`[energy.live]`).
@@ -457,6 +460,7 @@ impl Energy {
                     feeds: m.feeds.clone(),
                     estimated: m.estimate,
                     history: m.history,
+                    price: m.price,
                 }
             })
             .collect()
@@ -1359,6 +1363,7 @@ mod tests {
             feeds: Vec::new(),
             estimated: false,
             history: false,
+            price: None,
         };
         let meters = [
             meter(Role::Solar, Some(3000.0)),
@@ -1418,6 +1423,7 @@ mod tests {
             feeds: Vec::new(),
             estimated: false,
             history: false,
+            price: None,
         };
         // Two positive powers (integrated meters): 1.2 kW in, nothing out.
         let meters = [

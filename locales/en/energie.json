@@ -446,5 +446,8 @@
   "energie.carte.elec_mois": "Elec. this month",
   "energie.carte.gaz_mois": "Gas this month",
   "energie.carte.vs_habituel": "vs a usual day",
-  "energie.carte.cout_le": "Cost on {day}"
+  "energie.carte.cout_le": "Cost on {day}",
+  "energie.prix.tous_toml": "Each meter has its price in moli.toml: a price chosen here would only count for a meter without one.",
+  "energie.prix.toml": "In moli.toml: {list}",
+  "energie.prix.compteur": "{name} {price} {cur}/kWh"
 }
