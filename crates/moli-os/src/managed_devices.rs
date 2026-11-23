@@ -44,20 +44,19 @@ struct Added {
     host: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     empty_secret: bool,
-    /// Tests only: their fake device listens elsewhere than port 80.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    port: Option<u16>,
 }
 
 impl Added {
-    fn driver(&self) -> DriverConfig {
+    /// `port`: tests only (their fake device listens elsewhere than port
+    /// 80), never read from the file.
+    fn driver(&self, port: Option<u16>) -> DriverConfig {
         let mut options = toml::Table::new();
         options.insert("profile".into(), self.profile.clone().into());
         options.insert("host".into(), self.host.clone().into());
         if self.empty_secret {
             options.insert("empty_secret".into(), true.into());
         }
-        if let Some(port) = self.port {
+        if let Some(port) = port {
             options.insert("port".into(), i64::from(port).into());
         }
         DriverConfig {
@@ -250,7 +249,7 @@ impl Manager {
     }
 
     fn spawn(&self, added: &Added) -> anyhow::Result<JoinHandle<()>> {
-        let options = added.driver().options.try_into()?;
+        let options = added.driver(self.0.port).options.try_into()?;
         let driver = moli_profile::ProfileDriver::new(options, self.0.trust_file.clone())?;
         Ok(spawn_driver(
             &self.0.hub,
@@ -413,7 +412,13 @@ impl Manager {
 
     async fn probe_now(&self, request: DeviceProbe) -> Result<DevicePreview, SetupError> {
         let host = private_host(&request.host).ok_or_else(|| SetupError::new("invalid_host"))?;
-        let devices = self.0.state.lock().await.devices.clone();
+        // An addition holds the state while it asks the device again: a
+        // probe meanwhile answers « busy » rather than wait for it.
+        let Ok(state) = self.0.state.try_lock() else {
+            return Err(SetupError::new("busy"));
+        };
+        let devices = state.devices.clone();
+        drop(state);
         let (recognition, _, held) = self
             .recognize(host, &devices, request.key.as_deref())
             .await?;
@@ -484,7 +489,6 @@ impl Manager {
             profile: found.profile.to_owned(),
             host: request.host.trim().to_owned(),
             empty_secret: found.key == KeyUse::Empty,
-            port: self.0.port,
         };
         // The key first: the driver reads it as it starts.
         let secret = secret_of(found.profile);
@@ -510,11 +514,34 @@ impl Manager {
             );
             return Err(SetupError::new("persistence_failed"));
         }
+        let task = match self.spawn(&added) {
+            Ok(task) => task,
+            Err(e) => {
+                // Not started: nothing stays of it, and the journal says so.
+                tracing::warn!(instance = %instance, error = %e, "cannot start the device just added");
+                match write_store(&self.0.path, &state.devices) {
+                    Ok(()) => {
+                        if let (KeyUse::Known(_), Some(secret)) = (found.key, &secret) {
+                            let _ = self.0.hub.take_secret(&id, secret).await;
+                        }
+                    }
+                    Err(e) => {
+                        // Still listed, key kept: it starts with Moli next time.
+                        tracing::warn!(error = %e, "cannot take back the device that did not start");
+                        state.devices = devices;
+                    }
+                }
+                self.0.hub.record_driver_added(
+                    id,
+                    "profile",
+                    false,
+                    Some(actor),
+                    Outcome::Err("not started".into()),
+                );
+                return Err(SetupError::new("probe_failed"));
+            }
+        };
         state.devices = devices;
-        let task = self.spawn(&added).map_err(|e| {
-            tracing::warn!(instance = %instance, error = %e, "cannot start the device just added");
-            SetupError::new("probe_failed")
-        })?;
         state.tasks.push(task);
         drop(state);
         self.0.hub.record_driver_added(

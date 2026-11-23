@@ -70,7 +70,9 @@
       return;
     }
     if (intent.kind === 'probe') {
-      found = { ...result.data, host: intent.host, key: intent.key };
+      // The server's `key` says how the device is reached (none, empty, known, given); the
+      // typed key stays apart, never shown.
+      found = { ...result.data, host: intent.host, typedKey: intent.key };
       if (found.status === 'needs_key' && intent.key) failure = { error: 'wrong_key' };
       focus();
     } else {
@@ -92,7 +94,7 @@
     event?.preventDefault();
     if (busy || found?.status !== 'recognized' || found.existing_instance) return;
     if (!name.trim()) { failure = { error: 'invalid_name' }; return; }
-    await perform({ kind: 'install', host: found.host, identity: found.identity, name: name.trim(), room, key: found.key, revision });
+    await perform({ kind: 'install', host: found.host, identity: found.identity, name: name.trim(), room, key: found.typedKey, revision });
   }
 
   function again() {
