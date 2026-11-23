@@ -4,6 +4,7 @@
 //! version, uptime, inference speed, detection rate, GPU and CPU load). No
 //! HTTP, no credentials: the same broker Zigbee2MQTT uses.
 
+mod alerts;
 mod go2rtc;
 mod review;
 
@@ -416,6 +417,13 @@ fn camera_device(ctx: &DriverCtx, camera: &str) -> Device {
             Kind::Text,
             false,
         ),
+        // A review of severity « alert » going on (`frigate/reviews`).
+        spec(
+            "alert",
+            &moli_i18n::tr!("pilotes.frigate.alerte"),
+            Kind::Binary,
+            false,
+        ),
     ];
     points.extend(OBJECTS.iter().map(|(key, label)| {
         spec(
@@ -469,7 +477,7 @@ fn is_zone_device(instance: &str, id: &str) -> bool {
 /// it now (Frigate's counts for the zone). A sensor for the alarm (a count
 /// above 0 is active).
 fn zone_device(ctx: &DriverCtx, zone: &str, of: &review::ZoneOf) -> Device {
-    let points = OBJECTS
+    let mut points: Vec<PointSpec> = OBJECTS
         .iter()
         .map(|(key, label)| {
             let mut p = spec(
@@ -486,6 +494,14 @@ fn zone_device(ctx: &DriverCtx, zone: &str, of: &review::ZoneOf) -> Device {
             p
         })
         .collect();
+    // An alert going on that reached the zone: one rise per intrusion,
+    // where the counts blink while a person moves.
+    points.push(spec(
+        "alert",
+        &moli_i18n::tr!("pilotes.frigate.alerte"),
+        Kind::Binary,
+        false,
+    ));
     Device {
         id: ctx.device_id(&zone_id(zone)),
         instance: ctx.instance().clone(),
@@ -687,9 +703,10 @@ fn parse<'a>(rest: &'a str, payload: &str) -> Option<Update<'a>> {
 
 /// Topics that carry what the driver uses — never the retained JPEG
 /// snapshots (`<cam>/<label>/snapshot`).
-fn subscriptions(base: &str) -> [String; 6] {
+fn subscriptions(base: &str) -> [String; 7] {
     [
         format!("{base}/available"),
+        format!("{base}/reviews"),
         format!("{base}/stats"),
         format!("{base}/+/motion"),
         format!("{base}/+/+"),
@@ -760,7 +777,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 }
                 for (zone, of) in &found {
                     ctx.upsert_device(zone_device(ctx, zone, of));
-                    ctx.set_availability(&ctx.device_id(&zone_id(zone)), seen.available && connected);
+                    let id = ctx.device_id(&zone_id(zone));
+                    ctx.set_availability(&id, seen.available && connected);
+                    at_rest(ctx, &id);
+                    ctx.set_state(&id, "alert", Value::Bool(seen.alerts.in_zone(zone)));
                 }
                 seen.zones = found;
             }
@@ -788,6 +808,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 Err(e) => {
                     connected = false;
                     tracing::debug!(instance = %ctx.instance(), error = %e, "frigate broker unreachable");
+                    // The `end`s sent meanwhile are lost: no alert stays on.
+                    seen.alerts.clear();
+                    seen.show_alerts(ctx);
                     for id in device_ids(&seen.cameras, &seen.zones) {
                         ctx.set_availability(&ctx.device_id(&id), false);
                     }
@@ -808,6 +831,18 @@ struct Seen {
     available: bool,
     /// The server's device, declared at the first `stats`.
     server: bool,
+    /// The alerts going on (`frigate/reviews`).
+    alerts: alerts::Alerts,
+}
+
+/// A camera or a zone just declared: nothing counted until Frigate says so.
+/// Frigate publishes a count only when it changes; a count kept from before
+/// a restart is stale, and an unknown one would make the first person seen
+/// no rise for an automation (`above 0` needs a value below first).
+fn at_rest(ctx: &DriverCtx, id: &moli_core::DeviceId) {
+    for (key, _) in OBJECTS {
+        ctx.set_state(id, key, Value::Int(0));
+    }
 }
 
 impl Seen {
@@ -821,8 +856,19 @@ impl Seen {
         api: Option<&moli_net::upnp::Location>,
         review: Option<&std::sync::Arc<review::Api>>,
     ) {
+        if rest == "reviews" {
+            if let Some(review) = alerts::read(payload) {
+                self.alerts.apply(review);
+                self.show_alerts(ctx);
+            }
+            return;
+        }
         if rest == "available" {
             self.available = payload == "online";
+            if !self.available {
+                self.alerts.clear();
+                self.show_alerts(ctx);
+            }
             for id in device_ids(&self.cameras, &self.zones) {
                 ctx.set_availability(&ctx.device_id(&id), self.available);
             }
@@ -862,9 +908,26 @@ impl Seen {
             self.cameras.insert(camera.to_owned());
             ctx.upsert_device(camera_device(ctx, camera));
             provide_media(ctx, config, camera, api, review);
-            ctx.set_availability(&ctx.device_id(camera), self.available);
+            let id = ctx.device_id(camera);
+            ctx.set_availability(&id, self.available);
+            at_rest(ctx, &id);
+            ctx.set_state(&id, "alert", Value::Bool(self.alerts.on_camera(camera)));
         }
         ctx.set_state(&ctx.device_id(camera), key, value);
+    }
+}
+
+impl Seen {
+    /// The `alert` point of every camera and zone, as the alerts going on say.
+    fn show_alerts(&self, ctx: &DriverCtx) {
+        for camera in &self.cameras {
+            let on = self.alerts.on_camera(camera);
+            ctx.set_state(&ctx.device_id(camera), "alert", Value::Bool(on));
+        }
+        for zone in self.zones.keys() {
+            let on = self.alerts.in_zone(zone);
+            ctx.set_state(&ctx.device_id(&zone_id(zone)), "alert", Value::Bool(on));
+        }
     }
 }
 

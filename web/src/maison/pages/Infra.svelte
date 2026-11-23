@@ -6,8 +6,11 @@
   import Icon from '../ui/Icon.svelte';
   import Gauge from '../ui/infra/Gauge.svelte';
   import Spark from '../ui/infra/Spark.svelte';
+  import HistoryChart from '../ui/HistoryChart.svelte';
   import PcCard from '../ui/infra/PcCard.svelte';
   import NasCard from '../ui/infra/NasCard.svelte';
+  import ProxmoxCard from '../ui/infra/ProxmoxCard.svelte';
+  import { proxmoxNodes, proxmoxIssues } from '../lib/proxmox.js';
 
   /** The house's machines, the digital side of « is everything fine at
    *  home? »: the server (live from Moli), its disks and containers (the host
@@ -36,6 +39,8 @@
   const box = $derived(devices.find((d) => d.points.some((p) => p.key === 'external_ip')));
   const nases = $derived(nasGroups(devices));
   const sv = (k) => (server ? value(server.id, k) : null);
+  // Proxmox nodes (the `proxmox` driver): their parts and their problems.
+  const nodes = $derived(proxmoxNodes(devices));
 
   // ---- words and numbers ----
   const GB = 1024 ** 3;
@@ -80,9 +85,19 @@
         if (value(d.id, 'problem') === true) out.push(t('systeme.infra.alerte.nas', { name: nameOf(d.id), detail: value(d.id, 'detail') || '—' }));
       }
     }
+    // A Proxmox part in trouble, in the driver's words.
+    for (const g of nodes) {
+      for (const p of proxmoxIssues(g, value)) out.push(t('systeme.infra.alerte.proxmox', { name: nameOf(p.id), detail: p.detail || '—' }));
+    }
     return out;
   });
   const stale = $derived(infra && home.now - infra.ts > 5 * 60_000);
+  // The last day of each Proxmox server's guests, as charts (8 at most a chart).
+  const guestCharts = $derived(
+    nodes
+      .filter((g) => g.guests.length)
+      .map((g) => ({ instance: g.instance, ids: g.guests.slice(0, 8).map((d) => d.id) })),
+  );
 </script>
 
 <div class="infra">
@@ -105,6 +120,10 @@
   {/if}
 
   <div class="grid">
+    {#each nodes as group (group.instance)}
+      <ProxmoxCard {group} />
+    {/each}
+
     {#if server}
       <section class="card server">
         <div class="card-head">
@@ -131,6 +150,7 @@
       </section>
     {/if}
 
+    {#if !(infraMissing && nodes.length)}
     <section class="card">
       <div class="card-head">
         <h2><Icon name="docker" size={18} />{t('systeme.infra.conteneurs')}</h2>
@@ -168,6 +188,7 @@
         {#if stale}<p class="muted small">{t('systeme.infra.releve_ancien', { when: relative(infra.ts, home.now) })}</p>{/if}
       {/if}
     </section>
+    {/if}
 
     {#if infra}
       <section class="card">
@@ -201,6 +222,11 @@
 
     {#each pcs as pc (pc.id)}
       <PcCard {pc} />
+    {/each}
+
+    {#each guestCharts as c (c.instance)}
+      <HistoryChart title={t('systeme.infra.historique.processeur')} minutes={1440} points={c.ids.map((id) => `${id}/cpu`)} />
+      <HistoryChart title={t('systeme.infra.historique.memoire')} minutes={1440} points={c.ids.map((id) => `${id}/memory`)} />
     {/each}
 
     {#if box}

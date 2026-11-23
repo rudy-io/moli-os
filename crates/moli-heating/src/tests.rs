@@ -151,6 +151,19 @@ async fn until(hub: &Hub, at: &str, value: f64) {
     );
 }
 
+async fn until_bool(hub: &Hub, at: &str, value: bool) {
+    for _ in 0..300 {
+        if hub.state(&point(at)).map(|s| s.value) == Some(Value::Bool(value)) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "{at}: {:?}, {value} expected",
+        hub.state(&point(at)).map(|s| s.value)
+    );
+}
+
 async fn until_text(hub: &Hub, at: &str, value: &str) {
     for _ in 0..300 {
         if hub.state(&point(at)).map(|s| s.value) == Some(Value::from(value)) {
@@ -391,10 +404,133 @@ async fn a_valve_that_rounds_what_it_is_given_is_not_turned_by_hand() {
     cancel.cancel();
 }
 
+#[tokio::test]
+async fn a_forced_valve_opens_wide_or_shuts_on_the_room_sensor() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let rooms = toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 20.0
+        regulation = "force"
+        "#,
+    )
+    .unwrap()
+    .heating;
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+    })
+    .await;
+    let room = |key: &str| format!("chauffage:bureau/{key}");
+    let sensor = |value: f64| {
+        let hub = hub.clone();
+        async move {
+            hub.command(
+                &point("maison:piece/value"),
+                Value::Float(value),
+                Origin::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+    };
+    // 20.9 for 20: over it, the valve is shut (20 − 4), no heat asked for.
+    until_bool(&hub, &room("heat_demand"), false).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+    until(&hub, &room("valve_correction"), 0.0).await;
+
+    // 19.5: under it by more than 0.3, the valve opens wide (20 + 4).
+    sensor(19.5).await;
+    until(&hub, "vannes:v/sp", 24.0).await;
+    until_bool(&hub, &room("heat_demand"), true).await;
+
+    // 20.2: inside the hysteresis, nothing changes.
+    sensor(20.2).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    until(&hub, "vannes:v/sp", 24.0).await;
+    until_bool(&hub, &room("heat_demand"), true).await;
+
+    // 20.4: over it by more than 0.3, shut again.
+    sensor(20.4).await;
+    until_bool(&hub, &room("heat_demand"), false).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+
+    // A new setpoint moves the forced one with it: 22 for a room at 20.4.
+    hub.command(
+        &point(&room("system_mode")),
+        Value::from("heat"),
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    hub.command(
+        &point(&room("occupied_heating_setpoint")),
+        Value::Float(22.0),
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    until(&hub, "vannes:v/sp", 26.0).await;
+
+    // Off: the valve's lowest, no heat asked for.
+    hub.command(
+        &point(&room("system_mode")),
+        Value::from("off"),
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, &room("heat_demand"), false).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_forced_room_whose_sensor_went_quiet_gives_its_setpoint_as_it_is() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let rooms = toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 20.0
+        regulation = "force"
+        force_offset = 3.0
+        "#,
+    )
+    .unwrap()
+    .heating;
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+        h.fresh = Duration::from_millis(500);
+    })
+    .await;
+    // 20.9 for 20: shut. Then nothing more from the sensor: the room's 20.
+    until(&hub, "vannes:v/sp", 17.0).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_bool(&hub, "chauffage:bureau/heat_demand", false).await;
+    cancel.cancel();
+}
+
 #[test]
 fn bad_rooms_are_refused() {
     assert!(check(&rooms()).is_ok());
-    let cases: [fn(&mut Room); 9] = [
+    let cases: [fn(&mut Room); 13] = [
         |r| r.id = "a:b".into(),
         |r| r.name = " ".into(),
         |r| r.sensor = "piece".into(),
@@ -404,6 +540,13 @@ fn bad_rooms_are_refused() {
         |r| r.min = 26.0,
         |r| r.initial = 20.3,
         |r| r.initial = 26.0,
+        |r| {
+            r.correction = false;
+            r.regulation = Some(Regulation::Force);
+        },
+        |r| r.force_offset = 0.0,
+        |r| r.force_offset = 12.0,
+        |r| r.hysteresis = -0.1,
     ];
     for (i, change) in cases.iter().enumerate() {
         let mut list = rooms();
