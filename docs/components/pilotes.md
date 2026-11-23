@@ -1127,7 +1127,9 @@ kind = "frigate"
   `SECURITY-MODEL.md`). Appareil `review: true`.
 - **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
   (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
-- **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
+- **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `alert` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
+- **Compteurs au repos** : une caméra ou une zone déclarée part de 0 objet. Frigate ne publie un compte que quand il change : sans cela, un compte resté inconnu après un redémarrage ne donnait pas de franchissement pour un automatisme (« dépasse 0 »), et la première personne vue était ratée ; un compte gardé d'avant le redémarrage serait de toute façon périmé.
+- **Alertes** (`frigate/reviews`) : `alert` est vrai tant qu'une revue de gravité « alerte » est en cours sur la caméra, et sur chaque zone qu'elle a atteinte (de son `new`, ou de l'`update` qui la fait passer en alerte, jusqu'à son `end`). Une intrusion fait **une seule** montée, quand les compteurs clignotent entre 0 et 1 tant que la personne bouge : c'est le déclencheur d'une alerte d'intrusion. Frigate ou le broker qui s'en va remet tout à faux (les `end` seraient perdus) ; 64 alertes suivies au plus. Seuls les noms de caméra et de zone que Frigate accepte sont pris.
 - **Zones** (avec `review` seulement) : chaque zone de la configuration de Frigate (`/api/config`, lue en tâche de
   fond, nouvel essai de 5 s à 5 min tant que Frigate ne répond pas) devient un appareil « Zone <nom> (<caméra>) »,
   `<instance>:zone.<zone>` : compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` (sens `occupancy`), tenus à jour
@@ -1139,7 +1141,7 @@ kind = "frigate"
 - **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : sans `review`, elles sont ignorées). Disponibilité globale via `frigate/available`, zones comprises.
 - **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate) ; zone : `zone.<nom>` (un point, que Frigate refuse dans un nom de caméra : jamais le même id qu'une caméra).
 - **Pièges** : abonnements ciblés, jamais les JPEG retenus (`…/snapshot`) ni `stats`. Broker injoignable : commandes refusées (pas mises en file), nouvel essai après 5 s.
-- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra.
+- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra ; revues lues ou refusées (noms, id), une alerte de son début à sa fin malgré ses mises à jour, deux alertes qui se chevauchent, la borne des alertes suivies.
 
 ## `bambu` : imprimante Bambu Lab (`crates/moli-bambu`)
 
