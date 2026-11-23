@@ -3,7 +3,7 @@
 //! of a « today » that stays empty until tomorrow; and how far the month's
 //! figures reach, for an honest projection.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::tz::TimeZone;
 use serde::Serialize;
@@ -79,9 +79,19 @@ pub(crate) fn last_days(
         let Some(ids) = late_meters(config, energy) else {
             continue;
         };
-        let mut days = BTreeSet::new();
+        // Only whole days: a gas day runs from 6:00 to 6:00 (GRDF), so the
+        // last calendar day holds a few of its hours, not the day.
+        let mut hours: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
         for row in rows.iter().filter(|r| ids.contains(&r.meter.as_str())) {
-            days.insert(report::floor(row.hour, Step::Day, tz)?);
+            let day = report::floor(row.hour, Step::Day, tz)?;
+            hours.entry(day).or_default().insert(row.hour);
+        }
+        let mut days = BTreeSet::new();
+        for (day, told) in hours {
+            let length = report::next(day, Step::Day, tz)? - day;
+            if told.len() as u64 * HOUR_MS >= length {
+                days.insert(day);
+            }
         }
         let Some(&day) = days.last() else { continue };
         let amount_of = |from: u64| -> Result<Option<Amount>, EnergyError> {
@@ -206,6 +216,17 @@ mod tests {
         assert_eq!(gas.day, NOV + 8 * DAY);
         assert!((gas.amount.kwh - 48.0).abs() < 1e-9);
         assert_eq!(gas.amount.cost, None);
+    }
+
+    #[test]
+    fn a_day_known_only_in_part_is_not_the_last_day() {
+        // A gas day from 6:00 to 6:00: the next calendar day holds 6 of its hours.
+        let mut rows = day_of("gaz", 0, 2.0, None);
+        rows.extend(day_of("gaz", 1, 2.0, None).into_iter().take(6));
+        let days = last_days(&config(""), &rows, &paris()).unwrap();
+        let gas = days.iter().find(|d| d.energy == Energy::Gas).unwrap();
+        assert_eq!(gas.day, NOV);
+        assert!((gas.amount.kwh - 48.0).abs() < 1e-9);
     }
 
     #[test]
