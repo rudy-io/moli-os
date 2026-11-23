@@ -513,7 +513,14 @@ async fn a_point_keeps_the_name_the_family_gives_it() {
 
     // An agent may name a point nobody named, cleaned like any label.
     let label = hub
-        .set_point_label(&device, "state", "  Écran\n bureau ", Origin::Mcp, None)
+        .set_point_label(
+            &device,
+            "state",
+            "  Écran\n bureau ",
+            false,
+            Origin::Mcp,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -522,19 +529,31 @@ async fn a_point_keeps_the_name_the_family_gives_it() {
     );
     // Never rename it: a person does.
     let refused = hub
-        .set_point_label(&device, "state", "Autre", Origin::Mcp, None)
+        .set_point_label(&device, "state", "Autre", false, Origin::Mcp, None)
         .await;
     assert!(matches!(refused, Err(LabelError::Guarded(_))));
-    hub.set_point_label(&device, "state", "Lampe", Origin::Ui, None)
+    hub.set_point_label(&device, "state", "Lampe", false, Origin::Ui, None)
+        .await
+        .unwrap();
+    // A name home.json gives it counts too: an agent does not cover it,
+    // a person does.
+    hub.set_point_label(&device, "state", "", false, Origin::Ui, None)
+        .await
+        .unwrap();
+    let covered = hub
+        .set_point_label(&device, "state", "Lampe", true, Origin::Mcp, None)
+        .await;
+    assert!(matches!(covered, Err(LabelError::Guarded(_))));
+    hub.set_point_label(&device, "state", "Lampe", true, Origin::Ui, None)
         .await
         .unwrap();
     // A point the device does not have, a device Moli does not know.
     let ghost = hub
-        .set_point_label(&device, "ghost", "X", Origin::Ui, None)
+        .set_point_label(&device, "ghost", "X", false, Origin::Ui, None)
         .await;
     assert!(matches!(ghost, Err(LabelError::UnknownPoint)));
     let nobody = hub
-        .set_point_label(&"fake:ghost".into(), "state", "X", Origin::Ui, None)
+        .set_point_label(&"fake:ghost".into(), "state", "X", false, Origin::Ui, None)
         .await;
     assert!(matches!(nobody, Err(LabelError::UnknownDevice)));
     // The device's own name is untouched by its points', and the other way round.
@@ -574,7 +593,7 @@ async fn a_point_keeps_the_name_the_family_gives_it() {
         Some("Lampe")
     );
     let forgot = reloaded
-        .set_point_label(&device, "state", " ", Origin::Ui, None)
+        .set_point_label(&device, "state", " ", false, Origin::Ui, None)
         .await
         .unwrap();
     assert!(forgot.points.is_empty());

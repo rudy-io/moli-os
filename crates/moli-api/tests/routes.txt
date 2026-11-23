@@ -94,6 +94,7 @@ POST   /api/command                        foyer   oui
 GET    /api/ambiances                      foyer   oui
 POST   /api/ambiance                       foyer   oui
 PUT    /api/labels/{id}                    foyer   oui
+PUT    /api/labels/{id}/points/{key}       foyer   oui
 GET    /api/journal                        foyer   oui
 GET    /api/approvals                      foyer   oui
 POST   /api/approvals/{id}                 foyer   oui

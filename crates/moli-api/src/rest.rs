@@ -303,10 +303,12 @@ pub(crate) struct PointName {
 }
 
 /// A point's own name (a power strip's outlet): `{"name": "Écran"}`, `""`
-/// forgets it.
+/// forgets it. A name `home.json` gives it (`outlets`) counts as one: an
+/// agent may not cover it with its own.
 pub(crate) async fn set_point_label(
     State(hub): State<Hub>,
     Extension(humans): Humans,
+    Extension(HomeFile(home)): Extension<HomeFile>,
     caller: Caller,
     Path((id, key)): Path<(String, String)>,
     headers: HeaderMap,
@@ -314,8 +316,19 @@ pub(crate) async fn set_point_label(
 ) -> Response {
     let origin = origin(&hub, &headers, &humans, &caller);
     let actor = journal_actor(origin, None, &caller);
+    let named_elsewhere = match &home {
+        Some(path) => named_in_home(path, &id, &key).await,
+        None => false,
+    };
     match hub
-        .set_point_label(&DeviceId::from(id), &key, &body.name, origin, actor)
+        .set_point_label(
+            &DeviceId::from(id),
+            &key,
+            &body.name,
+            named_elsewhere,
+            origin,
+            actor,
+        )
         .await
     {
         Ok(label) => Json(label).into_response(),
@@ -324,6 +337,25 @@ pub(crate) async fn set_point_label(
         Err(e @ LabelError::Guarded(_)) => error(StatusCode::FORBIDDEN, &e.to_string()),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
+}
+
+/// `home.json` names this point (`outlets.<id>.<key>`, a non-empty name).
+/// A file that cannot be read or parsed counts as a name: an agent then
+/// waits for a person rather than guess.
+async fn named_in_home(path: &std::path::Path, id: &str, key: &str) -> bool {
+    let bytes = match tokio::fs::read(path).await {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    let Ok(home) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return true;
+    };
+    home.get("outlets")
+        .and_then(|o| o.get(id))
+        .and_then(|d| d.get(key))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| !name.trim().is_empty())
 }
 
 // ---- human sessions ---------------------------------------------------------
@@ -1210,6 +1242,27 @@ fn error(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod home_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_outlet_named_in_home_json_counts_as_named() {
+        let dir = std::env::temp_dir().join(format!("moli-outlets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("home.json");
+        assert!(!named_in_home(&path, "m:strip", "on_1").await, "no file");
+        std::fs::write(
+            &path,
+            r#"{"outlets":{"m:strip":{"on_1":"Congélateur","on_2":" "}}}"#,
+        )
+        .unwrap();
+        assert!(named_in_home(&path, "m:strip", "on_1").await);
+        assert!(!named_in_home(&path, "m:strip", "on_2").await, "blank");
+        assert!(!named_in_home(&path, "m:strip", "on_3").await);
+        assert!(!named_in_home(&path, "m:other", "on_1").await);
+        // Unreadable: an agent waits for a person.
+        std::fs::write(&path, "{").unwrap();
+        assert!(named_in_home(&path, "m:strip", "on_1").await);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn the_layout_is_served_without_the_position_of_the_house() {

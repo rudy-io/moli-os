@@ -1648,29 +1648,23 @@ impl Hub {
 
     /// Names one point of a device (a power strip's outlet); `""` forgets
     /// the name. Like a device's name: an agent may name a point nobody
-    /// named yet, never rename one.
+    /// named yet, never rename one. `named_elsewhere`: the family already
+    /// named it outside Moli's labels (`home.json` `outlets`), which counts
+    /// as a name.
     pub async fn set_point_label(
         &self,
         device: &DeviceId,
         key: &str,
         name: &str,
+        named_elsewhere: bool,
         origin: Origin,
         actor: Option<String>,
     ) -> Result<Label, LabelError> {
         let started = Instant::now();
-        let named = self
-            .read()
-            .labels
-            .get(device)
-            .is_some_and(|l| l.points.contains_key(key));
-        let result = if named && !matches!(origin, Origin::Ui | Origin::System | Origin::Household)
-        {
-            Err(LabelError::Guarded(moli_i18n::tr!(
-                "serveur.garde.renommer_humain"
-            )))
-        } else {
-            self.write_point_label(device, key, name).await
-        };
+        let renames = matches!(origin, Origin::Ui | Origin::System | Origin::Household);
+        let result = self
+            .write_point_label(device, key, name, renames || !named_elsewhere, renames)
+            .await;
         let outcome = match &result {
             Ok(_) => Outcome::Ok,
             Err(e) => Outcome::Err(e.to_string()),
@@ -1689,11 +1683,16 @@ impl Hub {
         result
     }
 
+    /// `may_name`: the caller may name a point that has no name yet;
+    /// `may_rename`: also one that has. Judged under the write lock, so a
+    /// name a person gives at the same moment is never overwritten.
     async fn write_point_label(
         &self,
         device: &DeviceId,
         key: &str,
         name: &str,
+        may_name: bool,
+        may_rename: bool,
     ) -> Result<Label, LabelError> {
         let _guard = self.0.label_write.lock().await;
         let mut next = {
@@ -1701,6 +1700,15 @@ impl Hub {
             let known = model.devices.get(device).ok_or(LabelError::UnknownDevice)?;
             if known.point(key).is_none() {
                 return Err(LabelError::UnknownPoint);
+            }
+            let named = model
+                .labels
+                .get(device)
+                .is_some_and(|l| l.points.contains_key(key));
+            if !may_name || (named && !may_rename) {
+                return Err(LabelError::Guarded(moli_i18n::tr!(
+                    "serveur.garde.renommer_humain"
+                )));
             }
             model.labels.clone()
         };
