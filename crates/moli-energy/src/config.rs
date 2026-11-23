@@ -330,10 +330,17 @@ impl Config {
                     m.id
                 ));
             }
-            if m.history && (!m.role.consumes() || m.integrate || m.estimate || m.period.is_some())
+            // A gas meter read a day late (GRDF) files its hours like a Linky.
+            let late = m.role.consumes() || m.role == Role::Gas;
+            if m.history
+                && (!late
+                    || m.integrate
+                    || m.estimate
+                    || m.period.is_some()
+                    || m.kwh_per_unit.is_some())
             {
                 return Err(format!(
-                    "meter {:?}: `history` is for a meter that consumes, without `integrate`, `estimate` nor `period`",
+                    "meter {:?}: `history` is for a meter that consumes or a gas meter, in kWh, without `integrate`, `estimate`, `period` nor `kwh_per_unit`",
                     m.id
                 ));
             }
@@ -514,6 +521,16 @@ mod tests {
         let late = "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\n";
         assert!(parse(&format!("{ok}{late}")).is_ok());
         assert!(parse(&format!("{ok}{late}integrate = true\n")).is_err());
+        let gas = "[[meter]]\nid = \"gaz\"\nname = \"Gaz\"\npoint = \"grdf:gazpar/hours\"\nrole = \"gas\"\nhistory = true\nprice = 0.12\n";
+        assert!(parse(&format!("{ok}{gas}")).is_ok());
+        assert!(parse(&format!("{ok}{gas}kwh_per_unit = 11.3\n")).is_err());
+        let made = gas
+            .replace("\"gas\"", "\"solar\"")
+            .replace("price = 0.12\n", "");
+        assert!(
+            parse(&format!("{ok}{made}")).is_err(),
+            "production is never late hours"
+        );
         let lamp = "[[meter]]\nid = \"lampe\"\nname = \"Lampe\"\npoint = \"hue:l/on\"\nrole = \"appliance\"\nestimate = true\n";
         parse(&format!("{ok}{lamp}")).unwrap();
         assert!(parse(&format!("{ok}{}", lamp.replace("appliance", "circuit"))).is_err());

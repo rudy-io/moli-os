@@ -1413,6 +1413,7 @@ const KINDS: &[&str] = &[
     "overkiz",
     "dirigera",
     "enedis",
+    "grdf",
     "solcast",
     "linky-tic",
     "homeassistant",
@@ -1676,6 +1677,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "enedis" => Arc::new(moli_enedis::Enedis::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "grdf" => Arc::new(moli_grdf::Grdf::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "linky-tic" => Arc::new(moli_linky_tic::LinkyTic::new(

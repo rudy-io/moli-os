@@ -829,6 +829,15 @@ host = "192.168.1.x"
 - **Pièges** : service gratuit, non officiel, au quota partagé : une requête par jour à une heure propre au compteur, une seconde vers 14 h si la veille manque, aucune de plus au redémarrage (sauf au tout premier). Une mesure manquante écarte son heure et son jour. Les heures sont locales et nomment la fin de la mesure ; au passage à l'heure d'hiver, la même heure revient deux fois. Un jeton refusé arrête le pilote jusqu'à l'intervention d'un humain.
 - **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes et le calendrier des requêtes.
 
+## `grdf` : compteur gaz Gazpar par l'espace client GRDF (`crates/moli-grdf`)
+
+- **Couvre** : la consommation d'un compteur Gazpar, jour par jour (journée gazière de 6 h à 6 h), avec un jour de retard ou plus. Lecture seule.
+- **Config** : `kind = "grdf"`, `pce` (les 14 chiffres du compteur). Secrets `email` et `password` : ceux de l'espace client `monespace.grdf.fr`.
+- **Points** : `last_day` (date du dernier jour reçu), `last_day_kwh`, `last_day_m3`, `index` (m³), `factor` (kWh/m³), `hours` (les jours reçus, répartis également sur leurs heures, en JSON, pour un compteur `role = "gas"`, `history = true` de `[energy]`).
+- **Identité** : un appareil `gazpar` par instance.
+- **Pièges** : pas d'API publique : connexion Okta comme la page de l'espace client (`session.rs`), jamais hors de `grdf.fr`, cookies rangés par hôte. Deux connexions par jour au plus, à des heures propres au compteur, aucune de plus au redémarrage (sauf au tout premier, qui remonte un an). Un mot de passe refusé ou une étape de plus (code) arrête le pilote : insister verrouillerait le compte. Une page HTML au lieu des données = session perdue.
+- **Tests** : `src/model.rs` et `src/session.rs` sur `integrations/grdf/fixtures/` et un faux GRDF scripté : connexion complète, cookies, mot de passe refusé, étape de plus, redirection hors de GRDF, session perdue, répartition par heure, calendrier.
+
 ## `solcast` : prévision solaire des toitures (`crates/moli-solcast`)
 
 - **Couvre** : la production attendue des toitures déclarées chez Solcast, par demi-heure (estimation, basse, haute), pour aujourd'hui et demain. Lecture seule.
@@ -1857,6 +1866,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `voltalis` | `moli-voltalis` | HTTPS vers le service, compte puis jeton de session | oui : marche, mode, consigne, programme | quatre radiateurs `VX_WIRE` (lecture) ; commandes sur l'un |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `enedis` | `moli-enedis` | HTTPS vers la Conso API, jeton du client | non | un compteur Linky (lecture, pas de 15 minutes) |
+| `grdf` | `moli-grdf` | HTTPS vers l'espace client GRDF, e-mail et mot de passe du client | non | aucun encore par le pilote ; connexion vérifiée sur un compte réel avec PyGazpar, réponses reconstituées |
 | `solcast` | `moli-solcast` | HTTPS vers l'API Solcast, clé du compte | non | aucun matériel ; réponses reconstituées d'après la documentation (vrai compte : à confirmer) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
