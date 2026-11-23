@@ -226,6 +226,7 @@
   "pilotes.frigate.empreinte_inconnue": "unknown",
   "pilotes.frigate.aucune_image": "Frigate sent no image ({status})",
   "pilotes.frigate.mouvement": "Motion",
+  "pilotes.frigate.alerte": "Alert in progress",
   "pilotes.frigate.detection_active": "Detection active",
   "pilotes.frigate.camera": "Camera",
   "pilotes.frigate.serveur": "Frigate server",
