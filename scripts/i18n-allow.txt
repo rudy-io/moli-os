@@ -12,3 +12,5 @@ web/src/maison/ui/PaperPrinterCard.svelte  STUCK = /papier
 web/src/maison/ui/PaperPrinterCard.svelte  /envoi\|en attente
 web/src/maison/ui/PaperPrinterCard.svelte  /(couleur|noire|jaune)
 web/src/maison/lib/paper.js  /pleine\|full/
+# Les noms de polices d'un thème (piles CSS), pas du texte affiché.
+web/src/maison/lib/themes.js  (sans-serif|serif|monospace)",$

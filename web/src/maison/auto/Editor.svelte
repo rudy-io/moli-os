@@ -864,7 +864,7 @@
     border-radius: 999px;
     padding: 8px 14px;
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     font-weight: 700;
   }
 

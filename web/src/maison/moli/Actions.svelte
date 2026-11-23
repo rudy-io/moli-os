@@ -103,7 +103,7 @@
     border-radius: 999px;
     padding: 7px 14px;
     background: var(--cool);
-    color: #fff;
+    color: var(--on-cool);
     font-weight: 700;
     font-size: 13px;
   }

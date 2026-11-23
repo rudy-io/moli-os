@@ -1,15 +1,41 @@
 <script>
-  import { t } from '../../lib/i18n.svelte.js';
+  import { t, i18n } from '../../lib/i18n.svelte.js';
+  import { applyTheme, themeName } from '../lib/themes.js';
   import { mdiThemeLightDark, mdiWhiteBalanceSunny, mdiMoonWaningCrescent } from '@mdi/js';
   import Icon from './Icon.svelte';
   import SegmentedControl from './SegmentedControl.svelte';
   import Orb from '../moli/Orb.svelte';
   import { KEPT } from '../lib/tabs.js';
 
-  /** This screen's theme: day or night, and which tabs the menu keeps.
+  /** This screen's theme: day or night, its colours, and which tabs the menu keeps.
    *  `tabs` are those the house has something for; a tab it has nothing for
-   *  (no camera yet) is not listed and comes back on its own. */
-  let { tabs, hidden, theme, ontheme, ontoggle, onclose } = $props();
+   *  (no camera yet) is not listed and comes back on its own. `themes` are
+   *  Moli's and the house's (home.json); `worn` the one this screen wears,
+   *  `side` 'day' or 'night' (what the previews show), `problems` what Moli
+   *  ignored or adjusted in it. */
+  let {
+    tabs,
+    hidden,
+    theme,
+    ontheme,
+    ontoggle,
+    onclose,
+    themes = [],
+    worn = 'porcelaine',
+    side = 'day',
+    houseTheme = null,
+    problems = [],
+    onpalette = () => {},
+  } = $props();
+
+  const label = (item) => (item.builtin ? t(item.builtin) : themeName(item, i18n.language));
+  const previews = $derived(themes.map((item) => ({ item, look: applyTheme(item, side) })));
+
+  /** One line for whoever wrote the theme: what Moli did not take as written. */
+  function say(p) {
+    if (p.code === 'contrast') return t('commun.theme_sheet.probleme.contrast', { key: p.key, against: p.against });
+    return t(`commun.theme_sheet.probleme.${p.code}`, { key: p.key, value: p.value ?? '' });
+  }
 
   function onkey(e) {
     if (e.key === 'Escape') onclose();
@@ -39,6 +65,43 @@
     />
     <p class="hint">{theme === 'light' ? t('commun.theme.titre_jour') : theme === 'dark' ? t('commun.theme.titre_nuit') : t('commun.theme.titre_auto')}</p>
   </section>
+
+  {#if themes.length > 1}
+    <section>
+      <h3>{t('commun.theme_sheet.couleurs')}</h3>
+      <div class="palettes" role="radiogroup" aria-label={t('commun.theme_sheet.couleurs')}>
+        {#each previews as { item, look } (item.id)}
+          {@const k = look.tokens}
+          <button
+            class="palette"
+            role="radio"
+            aria-checked={item.id === worn}
+            onclick={() => onpalette(item.id)}
+          >
+            <span class="mini" style:background={look.wallpaper ?? k.bg}>
+              <span class="card" style:background={k.surface} style:border-radius="{Math.round(9 * look.corners)}px">
+                <span class="line" style:background={k.ink}></span>
+                <span class="line short" style:background={k['ink-3']}></span>
+                <span class="dots">
+                  <i style:background={k.warm}></i><i style:background={k.cool}></i><i style:background={k.good}></i><i style:background={k.alert}></i>
+                </span>
+              </span>
+            </span>
+            <span class="pname" style:font-family={look.font}>{label(item)}</span>
+            {#if item.id === houseTheme}<span class="house">{t('commun.theme_sheet.de_la_maison')}</span>{/if}
+          </button>
+        {/each}
+      </div>
+      {#if problems.length}
+        <details class="problems">
+          <summary>{t('commun.theme_sheet.ajuste', { count: problems.length })}</summary>
+          <ul>
+            {#each problems as p, i (i)}<li>{say(p)}</li>{/each}
+          </ul>
+        </details>
+      {/if}
+    </section>
+  {/if}
 
   <section>
     <h3>{t('commun.theme_sheet.onglets')}</h3>
@@ -212,6 +275,106 @@
 
   .switch[aria-checked='true'] .knob {
     transform: translateX(20px);
+  }
+
+  .palettes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 10px;
+  }
+
+  .palette {
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    padding: 4px;
+    border-radius: var(--r-md);
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .mini {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border-radius: var(--r-sm);
+    padding: 10px;
+    display: flex;
+    align-items: flex-end;
+    box-shadow: inset 0 0 0 1px var(--line);
+    transition: box-shadow 0.25s var(--ease);
+  }
+
+  .palette[aria-checked='true'] .mini {
+    box-shadow: 0 0 0 3px var(--warm);
+  }
+
+  .card {
+    width: 100%;
+    padding: 8px;
+    display: grid;
+    gap: 5px;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  }
+
+  .line {
+    height: 5px;
+    width: 70%;
+    border-radius: 3px;
+  }
+
+  .line.short {
+    width: 45%;
+  }
+
+  .dots {
+    display: flex;
+    gap: 4px;
+    margin-top: 2px;
+  }
+
+  .dots i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .pname {
+    font-weight: 600;
+    font-size: 14.5px;
+    padding: 0 2px;
+  }
+
+  .house {
+    color: var(--ink-3);
+    font-size: 12px;
+    margin-top: -4px;
+    padding: 0 2px;
+  }
+
+  .problems {
+    margin-top: 10px;
+    color: var(--ink-3);
+    font-size: 13px;
+  }
+
+  .problems summary {
+    cursor: pointer;
+  }
+
+  .problems ul {
+    display: block;
+    padding-left: 18px;
+    margin-top: 6px;
+    list-style: disc;
+  }
+
+  .problems li {
+    display: list-item;
+    min-height: 0;
+    padding: 2px 0;
   }
 
   @keyframes fade {

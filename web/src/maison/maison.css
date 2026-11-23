@@ -25,6 +25,11 @@
   --good-soft: #e1f3ef;
   --alert: #df5a40;
   --alert-soft: #fde8e3;
+  /* text on a solid accent (a button): a theme with a light accent darkens it */
+  --on-warm: #fff;
+  --on-cool: #fff;
+  --on-good: #fff;
+  --on-alert: #fff;
   --shadow: 0 1px 2px rgb(23 32 56 / 5%), 0 10px 30px -12px rgb(23 32 56 / 16%);
   --shadow-lift: 0 1px 2px rgb(23 32 56 / 6%), 0 16px 40px -14px rgb(23 32 56 / 24%);
   --r-xl: 32px;
@@ -37,6 +42,8 @@
 
   min-height: 100dvh;
   background: var(--bg);
+  /* the wallpaper (a theme's) is a layer under the pages, not above */
+  isolation: isolate;
   color: var(--ink);
   font-family: var(--font);
   font-size: 16px;
@@ -68,6 +75,14 @@
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 30px -14px rgb(0 0 0 / 60%);
   --shadow-lift: 0 1px 2px rgb(0 0 0 / 35%), 0 18px 40px -14px rgb(0 0 0 / 70%);
   color-scheme: dark;
+}
+
+/* A theme's wallpaper: still while the page scrolls, under everything. */
+.maison > .wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
 }
 
 .maison *,

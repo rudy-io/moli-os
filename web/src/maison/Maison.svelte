@@ -36,6 +36,7 @@
   import { mapUseful } from './lib/map-tab.js';
   import { isValve } from './lib/capabilities.js';
   import { scheduleSpec } from './lib/schedule.js';
+  import { themeList, pickTheme, applyTheme } from './lib/themes.js';
 
   let { route } = $props();
   $effect(() => {
@@ -156,9 +157,21 @@
               : 'day',
   );
 
+  // The theme this screen wears (Porcelaine, one of Moli's, or the house's from
+  // home.json): its own choice, else the house's. `theme` above stays the side, day or night.
+  let paletteChoice = $state(readPref('maison-palette', ''));
+  const themes = $derived(themeList(home.config));
+  const worn = $derived(pickTheme(themes.list, paletteChoice, home.config?.theme));
+  const look = $derived(applyTheme(worn, theme));
+
+  function setPalette(id) {
+    paletteChoice = id;
+    savePref('maison-palette', id);
+  }
+
   $effect(() => {
     const root = document.documentElement.style;
-    root.background = theme === 'night' ? '#0d1016' : '#edf0f5';
+    root.background = look.bg;
     document.body.style.background = 'transparent';
     return () => {
       root.background = '';
@@ -174,7 +187,8 @@
   const page = $derived(route.split('/')[0] ?? '');
 </script>
 
-<div class="maison" data-theme={theme}>
+<div class="maison" data-theme={theme} style={look.style || undefined}>
+  {#if look.wallpaper}<div class="wallpaper" style:background={look.wallpaper} aria-hidden="true"></div>{/if}
   <nav class="rail" aria-label={t('commun.nav.aria')}>
     <a class="brand" href="#/" aria-label={t('commun.nav.logo')}>
       <svg viewBox="0 0 32 32" aria-hidden="true">
@@ -303,6 +317,12 @@
       hidden={hiddenTabs}
       theme={home.theme}
       ontheme={setTheme}
+      themes={themes.list}
+      side={theme}
+      worn={worn.id}
+      houseTheme={home.config?.theme}
+      problems={[...(themes.problems[worn.id] ?? []), ...look.problems]}
+      onpalette={setPalette}
       ontoggle={toggleTab}
       onclose={() => (themeOpen = false)}
     />
@@ -616,7 +636,7 @@
 
   .note.error {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
   }
 
   /* Phones: the rail becomes a bottom bar. */

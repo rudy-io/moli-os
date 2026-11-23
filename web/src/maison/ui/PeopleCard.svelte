@@ -425,7 +425,7 @@
   .primary {
     border: none;
     background: var(--cool);
-    color: #fff;
+    color: var(--on-cool);
   }
 
   .ghost {

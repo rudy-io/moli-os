@@ -241,7 +241,7 @@
 
   .round.lit {
     background: var(--warm);
-    color: #fff;
+    color: var(--on-warm);
   }
 
   .job {
@@ -419,7 +419,7 @@
 
   .act.danger.confirm {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
   }
 
   .totals {
