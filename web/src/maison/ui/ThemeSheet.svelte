@@ -1,7 +1,20 @@
 <script>
   import { t, i18n } from '../../lib/i18n.svelte.js';
   import { applyTheme, themeName } from '../lib/themes.js';
-  import { mdiThemeLightDark, mdiWhiteBalanceSunny, mdiMoonWaningCrescent } from '@mdi/js';
+  import {
+    mdiThemeLightDark,
+    mdiWhiteBalanceSunny,
+    mdiMoonWaningCrescent,
+    mdiDockLeft,
+    mdiDockRight,
+    mdiDockTop,
+    mdiDockBottom,
+    mdiFormatListText,
+    mdiDotsGrid,
+    mdiCardOutline,
+    mdiChevronUp,
+    mdiChevronDown,
+  } from '@mdi/js';
   import Icon from './Icon.svelte';
   import SegmentedControl from './SegmentedControl.svelte';
   import Orb from '../moli/Orb.svelte';
@@ -26,7 +39,15 @@
     houseTheme = null,
     problems = [],
     onpalette = () => {},
+    menu = { position: 'left', shape: 'classic' },
+    onmenu = () => {},
+    onmove = () => {},
+    onresetorder = null,
   } = $props();
+
+  // A narrow screen: the menu's choices show their icons alone (the name stays for screen readers).
+  let width = $state(1024);
+  const narrow = $derived(width < 520);
 
   const label = (item) => (item.builtin ? t(item.builtin) : themeName(item, i18n.language));
   const previews = $derived(themes.map((item) => ({ item, look: applyTheme(item, side) })));
@@ -42,7 +63,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onkey} />
+<svelte:window onkeydown={onkey} bind:innerWidth={width} />
 
 <div class="scrim" onclick={onclose} aria-hidden="true"></div>
 <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="theme-title">
@@ -103,11 +124,41 @@
     </section>
   {/if}
 
+  <section class="menu">
+    <h3>{t('commun.theme_sheet.menu')}</h3>
+    <span class="sub">{t('commun.theme_sheet.position')}</span>
+    <SegmentedControl
+      label={t('commun.theme_sheet.position')}
+      compact={narrow}
+      value={menu.position}
+      onchange={(position) => onmenu({ position })}
+      segments={[
+        { value: 'left', label: t('commun.theme_sheet.positions.left'), icon: mdiDockLeft },
+        { value: 'right', label: t('commun.theme_sheet.positions.right'), icon: mdiDockRight },
+        { value: 'top', label: t('commun.theme_sheet.positions.top'), icon: mdiDockTop },
+        { value: 'bottom', label: t('commun.theme_sheet.positions.bottom'), icon: mdiDockBottom },
+      ]}
+    />
+    <span class="sub">{t('commun.theme_sheet.forme')}</span>
+    <SegmentedControl
+      label={t('commun.theme_sheet.forme')}
+      compact={narrow}
+      value={menu.shape}
+      onchange={(shape) => onmenu({ shape })}
+      segments={[
+        { value: 'classic', label: t('commun.theme_sheet.formes.classic'), icon: mdiFormatListText },
+        { value: 'compact', label: t('commun.theme_sheet.formes.compact'), icon: mdiDotsGrid },
+        { value: 'floating', label: t('commun.theme_sheet.formes.floating'), icon: mdiCardOutline },
+      ]}
+    />
+    <p class="hint">{t('commun.theme_sheet.menu_aide')}</p>
+  </section>
+
   <section>
     <h3>{t('commun.theme_sheet.onglets')}</h3>
     <p class="hint">{t('commun.theme_sheet.onglets_aide')}</p>
     <ul>
-      {#each tabs as tab (tab.path)}
+      {#each tabs as tab, i (tab.path)}
         {@const on = !hidden.includes(tab.path)}
         {@const name = tab.name ?? t(tab.label)}
         <li class:off={!on}>
@@ -118,6 +169,20 @@
           {#if tab.path === KEPT}
             <span class="kept">{t('commun.theme_sheet.toujours')}</span>
           {:else}
+            <span class="moves">
+              <button
+                class="move"
+                disabled={i <= 1}
+                aria-label={t('commun.theme_sheet.monter', { name })}
+                title={t('commun.theme_sheet.monter', { name })}
+                onclick={() => onmove(tab.path, -1)}><Icon path={mdiChevronUp} size={20} /></button>
+              <button
+                class="move"
+                disabled={i >= tabs.length - 1}
+                aria-label={t('commun.theme_sheet.descendre', { name })}
+                title={t('commun.theme_sheet.descendre', { name })}
+                onclick={() => onmove(tab.path, 1)}><Icon path={mdiChevronDown} size={20} /></button>
+            </span>
             <button
               class="switch"
               role="switch"
@@ -131,6 +196,9 @@
         </li>
       {/each}
     </ul>
+    {#if onresetorder}
+      <button class="reset" onclick={onresetorder}>{t('commun.theme_sheet.ordre_origine')}</button>
+    {/if}
   </section>
 </div>
 
@@ -159,6 +227,7 @@
     box-shadow: var(--shadow-lift);
     padding: 22px 22px 18px;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 22px;
     animation: rise 0.35s var(--ease) both;
   }
@@ -275,6 +344,61 @@
 
   .switch[aria-checked='true'] .knob {
     transform: translateX(20px);
+  }
+
+  .menu {
+    display: grid;
+    justify-items: start;
+  }
+
+  .sub {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+    margin: 4px 0 6px;
+  }
+
+  .sub ~ .sub {
+    margin-top: 14px;
+  }
+
+  .moves {
+    display: flex;
+    gap: 2px;
+    margin-right: 6px;
+  }
+
+  .move {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-3);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+
+  .move:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+
+  .move:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .reset {
+    margin-top: 10px;
+    border: 0;
+    background: none;
+    color: var(--ink-3);
+    font-size: 13.5px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 0;
   }
 
   .palettes {

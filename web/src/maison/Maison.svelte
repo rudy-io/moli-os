@@ -37,6 +37,7 @@
   import { isValve } from './lib/capabilities.js';
   import { scheduleSpec } from './lib/schedule.js';
   import { themeList, pickTheme, applyTheme } from './lib/themes.js';
+  import { readSaved, menuSettings, orderTabs, moveTab } from './lib/menu.js';
 
   let { route } = $props();
   $effect(() => {
@@ -82,8 +83,28 @@
   // The tabs the house has something for; the menu keeps those this screen did not turn off.
   const available = $derived(NAV.filter((item) => !item.shown || item.shown()));
   let hiddenTabs = $state(readHidden(readPref('maison-onglets', null)));
-  const nav = $derived(menuTabs(available, hiddenTabs));
+  // Where the menu sits, its shape and its order: this screen's, else the house's (home.json `menu`).
+  let menuSaved = $state(readSaved(readPref('maison-menu', null)));
+  const menu = $derived(menuSettings(menuSaved, home.config?.menu));
+  const ordered = $derived(orderTabs(available, menu.order));
+  const nav = $derived(menuTabs(ordered, hiddenTabs));
   let themeOpen = $state(false);
+
+  function setMenu(change) {
+    menuSaved = { ...menuSaved, ...change };
+    savePref('maison-menu', JSON.stringify(menuSaved));
+  }
+
+  function moveMenuTab(path, delta) {
+    setMenu({ order: moveTab(ordered, path, delta) });
+  }
+
+  /** Back to the house's order (or the natural one): this screen forgets its own. */
+  function resetOrder() {
+    const { order: _, ...rest } = menuSaved;
+    menuSaved = rest;
+    savePref('maison-menu', JSON.stringify(menuSaved));
+  }
 
   function toggleTab(path, on) {
     hiddenTabs = toggleHidden(hiddenTabs, path, on);
@@ -111,8 +132,8 @@
       shown: true,
       ready: pill.ready,
     };
-    // A phone's bar scrolls: the current tab comes into view.
-    if (tabList.scrollWidth > tabList.clientWidth) item.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    // A bar or a rail longer than the screen scrolls: the current tab comes into view.
+    if (tabList.scrollWidth > tabList.clientWidth || tabList.scrollHeight > tabList.clientHeight) item.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     // The first placement is put, not slid from the corner.
     if (!pill.ready) requestAnimationFrame(() => (pill = { ...pill, ready: true }));
   }
@@ -120,7 +141,12 @@
   $effect(() => {
     void page;
     void nav;
+    void menu.position;
+    void menu.shape;
+    // After the menu has moved or changed shape: measured once it is laid out.
+    const frame = requestAnimationFrame(() => placePill());
     untrack(placePill);
+    return () => cancelAnimationFrame(frame);
   });
   $effect(() => {
     if (!tabList) return;
@@ -187,7 +213,7 @@
   const page = $derived(route.split('/')[0] ?? '');
 </script>
 
-<div class="maison" data-theme={theme} style={look.style || undefined}>
+<div class="maison" data-theme={theme} data-menu={menu.position} data-shape={menu.shape} style={look.style || undefined}>
   {#if look.wallpaper}<div class="wallpaper" style:background={look.wallpaper} aria-hidden="true"></div>{/if}
   <nav class="rail" aria-label={t('commun.nav.aria')}>
     <a class="brand" href="#/" aria-label={t('commun.nav.logo')}>
@@ -208,7 +234,12 @@
       ></li>
       {#each nav as item (item.path)}
         <li animate:flip={{ duration: 320, easing: (x) => 1 - Math.pow(1 - x, 4) }} in:scale={{ start: 0.6, duration: 280 }}>
-          <a href="#/{item.path}" class:active={page === item.path} aria-current={page === item.path ? 'page' : undefined}>
+          <a
+            href="#/{item.path}"
+            class:active={page === item.path}
+            aria-current={page === item.path ? 'page' : undefined}
+            title={menu.shape === 'compact' ? (item.name ?? t(item.label)) : undefined}
+          >
             <span class="glyph">
               {#if item.orb}<Orb size={22} state={moli.busy ? 'thinking' : 'idle'} />{:else}<Icon name={item.icon} size={24} />{/if}
             </span>
@@ -313,7 +344,11 @@
 
   {#if themeOpen}
     <ThemeSheet
-      tabs={available}
+      tabs={ordered}
+      {menu}
+      onmenu={setMenu}
+      onmove={moveMenuTab}
+      onresetorder={menuSaved.order ? resetOrder : null}
       hidden={hiddenTabs}
       theme={home.theme}
       ontheme={setTheme}
@@ -368,8 +403,11 @@
 
 <style>
   .maison {
+    /* the menu's width, and its gap to the edge when it floats */
+    --rail-w: 104px;
+    --rail-gap: 0px;
     display: grid;
-    grid-template-columns: 104px minmax(0, 1fr);
+    grid-template-columns: calc(var(--rail-w) + var(--rail-gap)) minmax(0, 1fr);
   }
 
   .rail {
@@ -393,9 +431,22 @@
     position: relative;
     list-style: none;
     margin: 12px 0 0;
-    padding: 0;
+    padding: 6px 0 12px;
     display: grid;
+    align-content: start;
     gap: 6px;
+    /* More tabs than the screen is tall: the list scrolls on its own, and the
+       logo and the foot (Thème, Système, Atelier) stay in reach. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    mask-image: linear-gradient(transparent, #000 8px, #000 calc(100% - 18px), transparent);
+  }
+
+  .rail ul::-webkit-scrollbar {
+    display: none;
   }
 
   /* The current tab's pill: one element that glides, under the icons. */
@@ -494,6 +545,195 @@
     gap: 4px;
   }
 
+  /* Compact: icons alone; the name stays for screen readers and in the tooltip. */
+  .maison[data-shape='compact'] .rail .label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Floating: the menu is a card off the edge; the pill shows on its surface. */
+  .maison[data-shape='floating'] .rail .pill {
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  /* A short screen: tighter tabs, more of them in view. */
+  @media (min-width: 761px) and (max-height: 860px) {
+    .rail {
+      gap: 10px;
+      padding-top: 14px;
+    }
+
+    .rail ul {
+      gap: 2px;
+    }
+
+    .rail a,
+    .rail button {
+      padding: 6px 0 5px;
+    }
+  }
+
+  @media (min-width: 761px) {
+    /* On the right. */
+    .maison[data-menu='right'] {
+      grid-template-columns: minmax(0, 1fr) calc(var(--rail-w) + var(--rail-gap));
+    }
+
+    .maison[data-menu='right'] .rail {
+      grid-column: 2;
+      grid-row: 1;
+      padding-left: 0;
+      padding-right: env(safe-area-inset-right);
+    }
+
+    .maison[data-menu='right'] .content {
+      grid-column: 1;
+      grid-row: 1;
+      padding-left: 36px;
+      padding-right: 8px;
+    }
+
+    .maison[data-menu='right'] .orb {
+      right: calc(var(--rail-w) + var(--rail-gap) + 20px);
+    }
+
+    /* A bar along the top or the bottom. */
+    .maison[data-menu='top'],
+    .maison[data-menu='bottom'] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .maison[data-menu='top'] .rail,
+    .maison[data-menu='bottom'] .rail {
+      flex-direction: row;
+      height: auto;
+      width: 100%;
+      padding: 8px max(24px, env(safe-area-inset-right)) 8px max(24px, env(safe-area-inset-left));
+      gap: 14px;
+      z-index: 25;
+    }
+
+    .maison[data-menu='top'] .rail {
+      position: sticky;
+      top: 0;
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(14px);
+    }
+
+    .maison[data-menu='bottom'] .rail {
+      position: fixed;
+      inset: auto 0 0 0;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom));
+      background: var(--surface);
+      box-shadow: var(--shadow-lift);
+    }
+
+    .maison[data-menu='top'] .rail ul,
+    .maison[data-menu='bottom'] .rail ul {
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      justify-content: safe center;
+      margin: 0;
+      padding: 0 10px;
+      gap: 2px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+    }
+
+    .maison[data-menu='top'] .rail a,
+    .maison[data-menu='top'] .rail button,
+    .maison[data-menu='bottom'] .rail a,
+    .maison[data-menu='bottom'] .rail button {
+      width: 76px;
+      padding: 6px 0 5px;
+    }
+
+    .maison[data-menu='top'] .rail-foot,
+    .maison[data-menu='bottom'] .rail-foot {
+      margin: 0;
+      display: flex;
+      gap: 2px;
+    }
+
+    .maison[data-menu='top'] .content,
+    .maison[data-menu='bottom'] .content {
+      padding: 24px 36px 120px;
+      margin: 0 auto;
+    }
+
+    .maison[data-menu='bottom'] .content {
+      padding-bottom: 160px;
+    }
+
+    .maison[data-menu='bottom'] .orb,
+    .maison[data-menu='bottom'] .notes {
+      bottom: 112px;
+    }
+
+    /* Compact. */
+    .maison[data-shape='compact'] {
+      --rail-w: 80px;
+    }
+
+    .maison[data-shape='compact'] .rail a,
+    .maison[data-shape='compact'] .rail button {
+      width: 60px;
+      padding: 7px 0;
+    }
+
+    .maison[data-shape='compact'] .rail .glyph {
+      width: 48px;
+      height: 40px;
+    }
+
+    /* Floating. */
+    .maison[data-shape='floating'] {
+      --rail-gap: 14px;
+    }
+
+    .maison[data-shape='floating'] .rail {
+      top: 14px;
+      height: calc(100dvh - 28px);
+      margin: 14px 0 14px 14px;
+      padding: 16px 0 12px;
+      border-radius: var(--r-xl);
+      background: var(--surface);
+      box-shadow: var(--shadow-lift);
+    }
+
+    .maison[data-shape='floating'][data-menu='right'] .rail {
+      margin: 14px 14px 14px 0;
+    }
+
+    .maison[data-shape='floating'][data-menu='top'] .rail {
+      top: 12px;
+      width: auto;
+      height: auto;
+      margin: 12px 16px 0;
+      padding: 6px 18px;
+      backdrop-filter: none;
+    }
+
+    .maison[data-shape='floating'][data-menu='bottom'] .rail {
+      inset: auto 16px calc(16px + env(safe-area-inset-bottom)) 16px;
+      width: auto;
+      height: auto;
+      margin: 0;
+      padding: 6px 18px;
+    }
+
+    .maison[data-shape='floating'][data-menu='bottom'] .orb,
+    .maison[data-shape='floating'][data-menu='bottom'] .notes {
+      bottom: 124px;
+    }
+  }
+
   .rail-foot a,
   .rail-foot button {
     padding: 8px 0;
@@ -553,7 +793,7 @@
     padding: 8px 14px;
     border-radius: 999px;
     background: var(--warm);
-    color: #1c1407;
+    color: var(--warm-deep);
     font-size: 13.5px;
     font-weight: 600;
     box-shadow: var(--shadow);
@@ -674,9 +914,47 @@
       margin: 0;
       gap: 0;
       overflow-x: auto;
+      overflow-y: hidden;
       overscroll-behavior-x: contain;
       scrollbar-width: none;
       justify-content: safe center;
+      padding: 0;
+      mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+    }
+
+    .maison[data-shape='compact'] .rail ul {
+      grid-auto-columns: 54px;
+    }
+
+    /* The bar at the top of a phone. */
+    .maison[data-menu='top'] .rail {
+      inset: 0 0 auto 0;
+      padding-top: calc(8px + env(safe-area-inset-top));
+      padding-bottom: 8px;
+    }
+
+    .maison[data-menu='top'] .content {
+      padding-top: calc(84px + env(safe-area-inset-top));
+      padding-bottom: calc(110px + env(safe-area-inset-bottom));
+    }
+
+    .maison[data-menu='top'] .orb {
+      bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+
+    .maison[data-menu='top'] .notes {
+      bottom: calc(90px + env(safe-area-inset-bottom));
+    }
+
+    /* A floating bar, off the screen's edges. */
+    .maison[data-shape='floating'] .rail {
+      inset: auto 10px calc(10px + env(safe-area-inset-bottom)) 10px;
+      padding: 6px 6px;
+      border-radius: var(--r-xl);
+    }
+
+    .maison[data-shape='floating'][data-menu='top'] .rail {
+      inset: calc(10px + env(safe-area-inset-top)) 10px auto 10px;
     }
 
     .rail a {
