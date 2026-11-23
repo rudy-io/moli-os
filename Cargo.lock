@@ -2257,6 +2257,7 @@ dependencies = [
  "clap",
  "http",
  "jiff",
+ "md-5",
  "moli-airplay",
  "moli-airzone",
  "moli-alarm",

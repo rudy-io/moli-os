@@ -111,6 +111,13 @@ pub struct Meta {
     /// a signing transport needs: `moli-os secrets set <instance> <name>`.
     #[serde(default)]
     pub secret: Option<String>,
+    /// The models this profile is the one for, as the device names itself
+    /// at `name_from` (`"mss310"`, lowercase). Listed, a person can add the
+    /// device from the dashboard by its address alone: Moli asks it who it
+    /// is (one read) and picks the profile. Only for devices of the home
+    /// network (no `host` of its own).
+    #[serde(default)]
+    pub recognize: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -242,6 +249,31 @@ pub struct Compiled {
     /// Placeholders the driver configuration must fill (`vars`).
     pub vars: BTreeSet<String>,
     pub source: Source,
+}
+
+/// `recognize`: what a device of the home network calls itself, in lowercase.
+fn check_recognize(meta: &Meta) -> Result<(), String> {
+    if meta.recognize.is_empty() {
+        return Ok(());
+    }
+    if meta.name_from.is_none() || meta.identity.is_none() {
+        return Err(
+            "`recognize` needs `name_from` (what the device calls itself) and `identity`".into(),
+        );
+    }
+    if meta.host.is_some() {
+        return Err("`recognize` is for devices of the home network: no `host` of its own".into());
+    }
+    if meta
+        .recognize
+        .iter()
+        .any(|model| model.is_empty() || model.len() > 32 || *model != model.trim().to_lowercase())
+    {
+        return Err(
+            "`recognize`: models in lowercase, without spaces around, 32 characters at most".into(),
+        );
+    }
+    Ok(())
 }
 
 /// A validated write.
@@ -412,6 +444,7 @@ impl Profile {
                 answers.reference(what, path).map_err(fail)?;
             }
         }
+        check_recognize(&self.profile).map_err(fail)?;
         if self.points.is_empty() {
             return Err(fail("at least one [[point]] is required".into()));
         }
@@ -2138,8 +2171,10 @@ kind = \"numeric\"
         .unwrap_err();
         assert!(err.message.contains("only apply to transport"), "{err}");
         // A file may write this way too, but only to a host of its own.
+        // (Not one recognized on the home network, then.)
         let file = |text: &str| Profile::parse(text).and_then(|p| p.compile(Source::File));
         assert!(file(base).is_err());
+        let base = base.replace("recognize = [\"mss310\", \"mss315\"]\n", "");
         assert!(
             file(&base.replace(
                 "secret = \"key\"",
