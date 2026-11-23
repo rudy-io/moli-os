@@ -1631,15 +1631,21 @@ mod tests {
         }
 
         async fn keyed(stubborn: bool, key: &'static str) -> Self {
-            Self::serve(stubborn, key, false).await
+            Self::serve(stubborn, key, false, false).await
         }
 
         async fn encrypting() -> Self {
-            Self::serve(false, PLUG_KEY, true).await
+            Self::serve(false, PLUG_KEY, true, false).await
         }
 
-        #[allow(clippy::too_many_lines)]
-        async fn serve(stubborn: bool, key: &'static str, encrypting: bool) -> Self {
+        /// Like a real MSS110 re-added through Matter: it answers a read in
+        /// clear whatever signs it, and only what its own key encrypts.
+        async fn lax() -> Self {
+            Self::serve(false, PLUG_KEY, true, true).await
+        }
+
+        #[allow(clippy::too_many_lines, clippy::fn_params_excessive_bools)]
+        async fn serve(stubborn: bool, key: &'static str, encrypting: bool, lax: bool) -> Self {
             use std::sync::atomic::Ordering::Relaxed;
             use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
             let cipher =
@@ -1683,11 +1689,18 @@ mod tests {
                             encrypting,
                             "only an encrypting plug is sent sealed messages"
                         );
-                        cipher.open(&body).expect("sealed with this plug's key")
+                        // Sealed with another key: dropped, without a byte.
+                        let Some(body) = cipher.open(&body) else {
+                            continue;
+                        };
+                        body
                     } else {
                         body
                     };
-                    let message: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    // Garbage once opened: another key sealed it.
+                    let Ok(message) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                        continue;
+                    };
                     let header = &message["header"];
                     let signed = hex(&Md5::digest(
                         format!(
@@ -1706,7 +1719,8 @@ mod tests {
                             .push(message);
                         continue;
                     }
-                    let answer = if header["sign"] != signed {
+                    let unchecked = lax && !sealed && method == "GET";
+                    let answer = if header["sign"] != signed && !unchecked {
                         serde_json::json!({"header": {"method": "ERROR"},
                             "payload": {"error": {"code": 5001, "detail": "sign error"}}})
                     } else if (method, namespace) == ("GET", "Appliance.System.All") {
@@ -2381,5 +2395,22 @@ mod tests {
             .and_then(|p| p.compile(Source::Builtin))
             .unwrap_err();
         assert!(err.message.contains("lowercase"), "{}", err.message);
+    }
+
+    /// A plug that reads with any key is asked its own: the encrypted read
+    /// only its key opens. Without it, Moli asks for the key.
+    #[tokio::test]
+    async fn a_plug_that_reads_with_any_key_is_recognized_by_its_own() {
+        let plug = Plug::lax().await;
+        let keys = ["not-this-one".to_owned(), PLUG_KEY.to_owned()];
+        let found = recognize(Ipv4Addr::LOCALHOST, Some(plug.port), &keys).await;
+        let Recognition::Recognized(found) = found else {
+            panic!("{found:?}");
+        };
+        assert_eq!(found.key, KeyUse::Known(1));
+        let locked = recognize(Ipv4Addr::LOCALHOST, Some(plug.port), &keys[..1]).await;
+        assert!(matches!(locked, Recognition::NeedsKey { .. }), "{locked:?}");
+        assert!(plug.orders().is_empty(), "only reads");
+        plug.task.abort();
     }
 }

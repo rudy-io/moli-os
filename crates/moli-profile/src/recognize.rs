@@ -7,11 +7,16 @@
 //! asked with an empty key first (a plug set up through Matter or HomeKit,
 //! never bound to an account), then with each key the house already holds
 //! for that kind of device; a key is never sent in clear, only used to sign.
+//!
+//! A signed read is not proof of the key: some plugs answer one whatever
+//! signs it, then drop any order not encrypted with their real key. A plug
+//! that lists `Appliance.Encrypt.ECDHE` is therefore asked once more, the
+//! same read encrypted with the key tried: only the key it answers counts.
 
 use std::net::Ipv4Addr;
 
 use crate::profile::{Answer, Call, Compiled, CompiledRequest, Format, Profile, Source};
-use crate::{MAX_BODY, Target, exchange, meross_message, unreachable};
+use crate::{MAX_BODY, Target, exchange, meross, meross_ask, meross_message, unreachable};
 
 /// The key a recognized device took.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,6 +206,23 @@ pub async fn recognize(host: Ipv4Addr, port: Option<u16>, keys: &[String]) -> Re
                 }
                 Asked::Answer(answer) => {
                     anyone = true;
+                    if let (Some(key), Call::Meross { .. }) = (
+                        profile
+                            .meta
+                            .secret
+                            .as_ref()
+                            .map(|_| attempt.map_or("", |i| keys[i].as_str())),
+                        &request.call,
+                    ) && !takes_orders_with(&target, &request.path, key, &answer).await
+                    {
+                        // It reads with any key: this one is not its own.
+                        if let Some(secret) = &profile.meta.secret {
+                            needs_key.get_or_insert_with(|| {
+                                (profile.meta.manufacturer.clone(), secret.clone())
+                            });
+                        }
+                        continue;
+                    }
                     let found = read_answer(id, profile, request_id, &model_path, &answer, attempt);
                     match found {
                         Some(found) => return Recognition::Recognized(found),
@@ -218,6 +240,43 @@ pub async fn recognize(host: Ipv4Addr, port: Option<u16>, keys: &[String]) -> Re
         None if anyone => Recognition::Unknown,
         None => Recognition::Silent,
     }
+}
+
+/// Whether a Meross device would take orders signed with `key`: one that
+/// encrypts them must answer the same read encrypted with that key (a read:
+/// `Appliance.System.Ability`, nothing changes). `all` is its answer to
+/// `Appliance.System.All`, for its uuid and MAC.
+async fn takes_orders_with(target: &Target, path: &str, key: &str, all: &Answer) -> bool {
+    let Ok(ability) = meross_ask(target, path, "Appliance.System.Ability", key).await else {
+        return false;
+    };
+    if ability["payload"]["ability"]
+        .get(meross::ENCRYPTED)
+        .is_none()
+    {
+        return true;
+    }
+    let Answer::Json(all) = all else { return false };
+    let hardware = &all["payload"]["all"]["system"]["hardware"];
+    let (Some(uuid), Some(mac)) = (hardware["uuid"].as_str(), hardware["macAddress"].as_str())
+    else {
+        return false;
+    };
+    let cipher = meross::Cipher::new(uuid, key, mac);
+    let message = meross_message(
+        "GET",
+        "Appliance.System.Ability",
+        &serde_json::json!({}),
+        key,
+    );
+    let sealed = cipher.seal(message.to_string().as_bytes());
+    let Ok(body) = exchange(target, path, &[], path, Some(sealed), MAX_BODY).await else {
+        return false; // a wrong key: the connection dropped, nothing said
+    };
+    cipher
+        .open(&body)
+        .and_then(|clear| serde_json::from_slice::<serde_json::Value>(&clear).ok())
+        .is_some_and(|answer| answer["header"]["method"] == "GETACK")
 }
 
 /// The device in `answer`, when its model is one `profile` recognizes.
