@@ -2,6 +2,7 @@
   import { kwh, euros } from '../lib/energy-live.svelte.js';
   import { deviceSeries } from '../lib/energy-series.js';
   import { ownUse } from '../lib/energy-own.js';
+  import { gaps } from '../lib/energy-late.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
   /** Bars over 24 h / 30 days / 12 months, stacked by what drew it
@@ -16,6 +17,8 @@
     month: { step: 'month', count: 12 },
   };
   const PALETTE = ['#e9a23b', '#5b8def', '#3fae7c', '#c46ad8', '#e0705a', '#2fb3b8'];
+  /** Gas, on top of the electricity, whatever the stacking. */
+  const GAS = '#e0705a';
 
   let report = $state(null);
   let error = $state('');
@@ -44,7 +47,9 @@
   // What the circuits ran on without it being bought (panels, battery).
   const own = $derived(ownUse(meters));
 
-  const series = $derived.by(() => {
+  // The gas meters, on top of the electricity (the total is then both).
+  const gas = $derived(meters.filter((m) => m.role === 'gas').map((m) => ({ id: m.id, name: m.name, color: GAS, gas: true })));
+  const electricity = $derived.by(() => {
     if (by === 'devices' && parts.length) return parts;
     if (byCircuit && circuits.length) {
       const parts = circuits.map((m, i) => ({ id: m.id, name: m.name, color: PALETTE[i % PALETTE.length] }));
@@ -57,6 +62,7 @@
       color: /hc|creuse/i.test(m.id + m.name) ? 'var(--cool)' : 'var(--warm)',
     }));
   });
+  const series = $derived([...electricity, ...gas]);
 
   const amount = (bucket, s) => {
     if (s.kwh) return { kwh: s.kwh(bucket), cost: s.cost(bucket) ?? undefined };
@@ -123,6 +129,13 @@
   });
 
   const shown = $derived(hover != null ? bars[hover] : null);
+
+  // Days a late meter never told (Enedis or GRDF down): marked, and named
+  // under the chart, rather than a silent hole.
+  const holes = $derived(gaps(report));
+  const HOLE = 0.12;
+  const shortDay = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', timeZone: tz });
+  const runText = (r) => (r.days === 1 ? shortDay(r.from) : t('energie.chart.du_au', { from: shortDay(r.from), to: shortDay(r.to), n: r.days }));
 </script>
 
 {#if error}
@@ -152,6 +165,9 @@
       {@const w = slot * 0.68}
       <g class:dim={hover != null && hover !== i}>
         <rect x={i * slot} y="0" width={slot} height={H} class="hit" role="presentation" onpointerenter={() => (hover = i)} />
+        {#if holes.missing.has(i)}
+          <rect {x} width={w} y={y(bar.total + max * HOLE)} height={Math.max(0, y(bar.total) - y(bar.total + max * HOLE) - 1.5)} rx={Math.min(5, w / 3)} class="hole"><title>{t('energie.chart.sans_releve')}</title></rect>
+        {/if}
         {#each bar.parts.reduce((acc, p) => [...acc, { p, base: acc.at(-1)?.top ?? 0, top: (acc.at(-1)?.top ?? 0) + p.a.kwh }], []) as seg, k (seg.p.s.id)}
           {#if seg.p.a.kwh > 0}
             <rect {x} width={w} y={y(seg.top)} height={Math.max(0, y(seg.base) - y(seg.top) - (k ? 1.5 : 0))} rx={Math.min(5, w / 3)} fill={seg.p.s.color} />
@@ -178,6 +194,12 @@
       {/if}
     {/each}
   </ul>
+  {#if holes.meters.length}
+    <p class="holes muted small">
+      <i aria-hidden="true"></i>
+      {holes.meters.map((m) => t('energie.chart.trous', { name: m.name, days: m.runs.map(runText).join(', ') })).join(' · ')}
+    </p>
+  {/if}
 {/if}
 
 <style>
@@ -277,5 +299,29 @@
 
   .legend b {
     font-weight: 650;
+  }
+
+  /* A day never told: an outline, not a bar. */
+  .hole {
+    fill: none;
+    stroke: var(--ink-3);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    opacity: 0.6;
+  }
+
+  .holes {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0 0;
+  }
+
+  .holes i {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    border: 1px dashed var(--ink-3);
   }
 </style>

@@ -8,6 +8,7 @@
 
 pub mod config;
 mod estimate;
+pub mod latest;
 pub mod load;
 pub mod meter;
 pub mod points;
@@ -74,6 +75,9 @@ pub struct MeterInfo {
     /// Estimated from the light's model, not measured.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub estimated: bool,
+    /// Reports its hours a day late (Linky, GRDF): nothing for today yet.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub history: bool,
 }
 
 /// The supplier's meter right now (`[energy.live]`).
@@ -274,6 +278,13 @@ pub struct Summary {
     /// This month at the pace so far.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub month_projection: Option<Amount>,
+    /// The gas this month at the pace so far.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_projection: Option<Amount>,
+    /// For each energy read a day late, its last day known: what a house
+    /// without a live measure looks at instead of « today ».
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub last_days: Vec<latest::LastDay>,
     /// The subscription per month, for an estimated bill.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monthly_fee: Option<f64>,
@@ -445,6 +456,7 @@ impl Energy {
                     within: m.within.clone(),
                     feeds: m.feeds.clone(),
                     estimated: m.estimate,
+                    history: m.history,
                 }
             })
             .collect()
@@ -542,10 +554,20 @@ impl Energy {
             today: Period::of(config, &rows, today, tomorrow),
             yesterday: Period::of(config, &rows, yesterday, today),
             month_projection: report::projection(
-                &month_period,
-                pace_until(config, &rows, month, now),
+                &month_period.total,
+                month,
+                latest::reach(config, &rows, month, now, latest::Energy::Electricity),
                 month_end,
             ),
+            gas_projection: month_period.gas.as_ref().and_then(|gas| {
+                report::projection(
+                    gas,
+                    month,
+                    latest::reach(config, &rows, month, now, latest::Energy::Gas),
+                    month_end,
+                )
+            }),
+            last_days: latest::last_days(config, &rows, tz)?,
             month: month_period,
             last_month: Period::of(config, &rows, last_month, month),
             monthly_fee: config.monthly_fee,
@@ -758,24 +780,6 @@ fn price_rows(
         })
         .collect();
     (priced, invalid)
-}
-
-/// How far the month's figures reach. Meters that report a day late have nothing
-/// yet for the last hours: counted as empty, they would make the pace too low.
-fn pace_until(config: &Config, rows: &[HourRow], month: u64, now: u64) -> u64 {
-    let mut main = config
-        .meters
-        .iter()
-        .filter(|m| matches!(m.role, Role::Grid | Role::Total))
-        .peekable();
-    if main.peek().is_none() || !main.clone().all(|m| m.history) {
-        return now;
-    }
-    rows.iter()
-        .filter(|r| r.hour >= month && main.clone().any(|m| m.id == r.meter))
-        .map(|r| r.hour + meter::HOUR_MS)
-        .max()
-        .unwrap_or(month)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -1354,6 +1358,7 @@ mod tests {
             within: None,
             feeds: Vec::new(),
             estimated: false,
+            history: false,
         };
         let meters = [
             meter(Role::Solar, Some(3000.0)),
@@ -1412,6 +1417,7 @@ mod tests {
             within: None,
             feeds: Vec::new(),
             estimated: false,
+            history: false,
         };
         // Two positive powers (integrated meters): 1.2 kW in, nothing out.
         let meters = [
@@ -1515,7 +1521,8 @@ mod tests {
     }
 
     #[test]
-    fn a_late_meter_paces_the_month_on_what_it_has_reported() {
+    fn a_late_meter_paces_the_month_on_the_hours_it_has_told() {
+        const E: latest::Energy = latest::Energy::Electricity;
         let row = |meter: &str, hour| HourRow {
             meter: meter.to_owned(),
             hour,
@@ -1534,18 +1541,21 @@ mod tests {
             row("linky", 130 * H),
             row("old", 90 * H),
         ];
-        assert_eq!(pace_until(&late, &rows, 100 * H, 150 * H), 131 * H);
+        assert_eq!(latest::reach(&late, &rows, 100 * H, 150 * H, E), 102 * H);
         // Nothing reported this month: no pace at all, not a pace of zero.
-        assert_eq!(pace_until(&late, &rows[2..], 100 * H, 150 * H), 100 * H);
+        assert_eq!(
+            latest::reach(&late, &rows[2..], 100 * H, 150 * H, E),
+            100 * H
+        );
         // A meter read live says the present.
         let live = config(format!(
             "{}{}",
             meter("linky", "grid", true),
             meter("em", "total", false)
         ));
-        assert_eq!(pace_until(&live, &rows, 100 * H, 150 * H), 150 * H);
+        assert_eq!(latest::reach(&live, &rows, 100 * H, 150 * H, E), 150 * H);
         assert_eq!(
-            pace_until(&config(String::new()), &rows, 100 * H, 150 * H),
+            latest::reach(&config(String::new()), &rows, 100 * H, 150 * H, E),
             150 * H
         );
     }

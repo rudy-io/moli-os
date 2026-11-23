@@ -650,8 +650,9 @@ changements tiennent dans `points`, sinon `buckets` pour un point numérique (ou
 changements les plus récents et `truncated:true` pour un point non numérique).
 
 **`Summary`** (`/api/energy`) : `{currency, timezone, since?, period?, price_now?, period_point?,
-meters:[{id, name, role:"grid"|"total"|"circuit", point, power?, power_w?, power_ts?}],
-live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?,
+meters:[{id, name, role:"grid"|"total"|"circuit"|…, point, power?, power_w?, power_ts?, history?}],
+live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, gas_projection?,
+last_days?:[{energy:"electricity"|"gas", day, amount, usual?, usual_days}], monthly_fee?, budget_point?,
 house_price?, house_prices?:[{since, price}]}` (`price_now` : le prix de la période tarifaire, sinon celui de la maison) ; chaque période =
 `{from, to, total:{kwh, cost?}, meters:{<id>:{kwh, cost?}}, unmeasured?}`.
 

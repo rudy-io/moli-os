@@ -4282,6 +4282,7 @@ mod tests {
             within: None,
             feeds: Vec::new(),
             estimated: false,
+            history: false,
         };
         let period = |kwh, cost| Period {
             from: 0,
@@ -4312,6 +4313,8 @@ mod tests {
             month: period(0.0, None),
             last_month: period(0.0, None),
             month_projection: None,
+            gas_projection: None,
+            last_days: Vec::new(),
             monthly_fee: None,
             budget_point: None,
             house_price: None,

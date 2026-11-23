@@ -429,5 +429,22 @@
   "energie.jour.legende_habitude": "une journée habituelle (7 jours)",
   "energie.jour.legende_a_venir": "conso attendue (comme d'habitude)",
   "energie.jour.legende_prevision": "prévision Solcast",
-  "energie.jour.unite": "kWh par heure"
+  "energie.jour.unite": "kWh par heure",
+  "energie.dernier.elec": "Dernier jour connu · électricité",
+  "energie.dernier.gaz": "Dernier jour connu · gaz",
+  "energie.dernier.vs_habituel": "{n} % vs un jour habituel",
+  "energie.dernier.habituel_aide": "Comparé à la moyenne des {n} jours précédents qui ont un relevé ({kwh} kWh)",
+  "energie.dernier.jusqu_au": "Relevés jusqu'au {day}",
+  "energie.gaz.detail_mois": "{kwh} kWh ce mois",
+  "energie.histo.note_gaz": "Le gaz s'empile au-dessus de l'électricité ; chaque journée de gaz est répartie également sur ses heures.",
+  "energie.chart.sans_releve": "Pas de relevé ce jour-là",
+  "energie.chart.trous": "Sans relevé pour {name} : {days}",
+  "energie.chart.du_au": "{from} → {to} ({n} j)",
+  "energie.carte.titre_energie": "Énergie",
+  "energie.carte.kwh_le": "kWh le {day}",
+  "energie.carte.kwh_gaz_le": "kWh de gaz le {day}",
+  "energie.carte.elec_mois": "Élec. ce mois",
+  "energie.carte.gaz_mois": "Gaz ce mois",
+  "energie.carte.vs_habituel": "vs un jour habituel",
+  "energie.carte.cout_le": "Coût le {day}"
 }

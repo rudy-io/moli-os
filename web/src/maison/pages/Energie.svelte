@@ -13,6 +13,7 @@
   import DayEnergy from '../ui/DayEnergy.svelte';
   import { batteryNow } from '../lib/battery.js';
   import { yearOverYear, trendTone } from '../lib/year-compare.js';
+  import { noLiveMeasure, lastDay, vsUsual } from '../lib/energy-late.js';
 
   onMount(useEnergy);
 
@@ -35,6 +36,18 @@
     if (next !== budget) act(budgetAt.point, next, t('energie.budget.libelle'));
   }
   const cur = $derived(s?.currency ?? '€');
+
+  // Meters a day late and nothing live (a Linky through Enedis, a Gazpar
+  // through GRDF): the last day known instead of « now » and « today ».
+  const late = $derived(noLiveMeasure(s));
+  const elecDay = $derived(late ? lastDay(s, 'electricity') : null);
+  const gasDay = $derived(lastDay(s, 'gas'));
+  const hasCircuits = $derived((s?.meters ?? []).some((m) => m.role === 'circuit' || m.role === 'appliance'));
+  const dayText = (ms) => {
+    const text = new Date(ms).toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: s?.timezone });
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+  const shortDay = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', timeZone: s?.timezone });
 
   const livePower = (point, fallback) => {
     if (!point) return fallback ?? null;
@@ -261,6 +274,24 @@
     <p class="muted">{energy.missing ? t('energie.aucun_compteur') : t('energie.chargement')}</p>
   {:else}
     <div class="heads">
+      {#if late}
+        {#each [elecDay, gasDay].filter(Boolean) as d (d.energy)}
+          {@const vs = vsUsual(d)}
+          <section class="card">
+            <span class="eyebrow">{t(d.energy === 'gas' ? 'energie.dernier.gaz' : 'energie.dernier.elec')}</span>
+            <strong class="big num">{kwh(d.amount.kwh)} <small>kWh</small></strong>
+            <span class="muted small">{dayText(d.day)}</span>
+            <div class="row">
+              {#if d.amount.cost != null}<b class="num">{euros(d.amount.cost, cur)}</b>{/if}
+              {#if vs != null}
+                <span class="chip {trendTone(vs)}" title={t('energie.dernier.habituel_aide', { n: d.usual_days, kwh: kwh(d.usual.kwh) })}>
+                  {t('energie.dernier.vs_habituel', { n: `${vs > 0 ? '+' : ''}${vs}` })}
+                </span>
+              {/if}
+            </div>
+          </section>
+        {/each}
+      {:else}
       <section class="card now" class:hued={look.hue != null} style:--h={look.hue}>
         <span class="eyebrow">{t('energie.now.titre')}</span>
         {#if s.live}
@@ -291,6 +322,7 @@
           {/if}
         </div>
       </section>
+      {/if}
 
       <section class="card">
         <span class="eyebrow">{t('energie.mois.titre')}</span>
@@ -313,6 +345,7 @@
             >{t('energie.mois.vs_an', { n: `${yearBought.pct > 0 ? '+' : ''}${yearBought.pct}`, mois: monthName(yearBought.month) })}</span>
           {/if}
           {#if offShare != null}<span class="muted small">{t('energie.mois.creuses', { n: offShare })}</span>{/if}
+          {#if elecDay}<span class="muted small">{t('energie.dernier.jusqu_au', { day: shortDay(elecDay.day) })}</span>{/if}
         </div>
         {#if typeof budget === 'number'}
           <div class="budget" class:over={bill != null && bill > budget}>
@@ -360,9 +393,19 @@
       {#if s.month.gas}
         <section class="card">
           <span class="eyebrow">{t('energie.gaz.titre')}</span>
-          <strong class="big num">{euros(s.month.gas.cost, cur)}</strong>
+          {#if s.month.gas.cost != null}
+            <strong class="big num">{euros(s.month.gas.cost, cur)}</strong>
+          {:else}
+            <strong class="big num">{kwh(s.month.gas.kwh)} <small>kWh</small></strong>
+          {/if}
           <div class="row">
-            <span class="muted num small">{t('energie.gaz.detail', { kwh: kwh(s.month.gas.kwh), today: euros(s.today.gas?.cost, cur) })}</span>
+            {#if gasDay}
+              <span class="muted num small">{t('energie.gaz.detail_mois', { kwh: kwh(s.month.gas.kwh) })}</span>
+              {#if s.gas_projection?.cost != null}<span class="muted num small">{t('energie.mois.fin', { cost: euros(s.gas_projection.cost, cur) })}</span>{/if}
+              <span class="muted small">{t('energie.dernier.jusqu_au', { day: shortDay(gasDay.day) })}</span>
+            {:else}
+              <span class="muted num small">{t('energie.gaz.detail', { kwh: kwh(s.month.gas.kwh), today: euros(s.today.gas?.cost, cur) })}</span>
+            {/if}
           </div>
         </section>
       {/if}
@@ -373,7 +416,7 @@
 
     <!-- The day hour by hour: used, from the sun, bought, the usual day, and
          with panels what they made against the forecast (solcast driver). -->
-    {#if week}
+    {#if week && !(late && !hasCircuits)}
       <DayEnergy
         {week}
         {windows}
@@ -401,6 +444,9 @@
       </section>
     {/if}
 
+    <!-- Who draws now and where it went: nothing to say without a live
+         measure nor circuits (the house's meters report a day late). -->
+    {#if !(late && !hasCircuits)}
     <div class="split">
       <section class="card">
         <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.direct.titre')}</h2></div>
@@ -459,6 +505,7 @@
         {/if}
       </section>
     </div>
+    {/if}
 
     <!-- Peak and off-peak only for a house with such a tariff ([energy.tariff]). -->
     {#if s?.period_point}<TariffPie {windows} />{/if}
@@ -479,6 +526,7 @@
       <EnergyChart {range} {by} />
       <p class="foot muted">
         {by === 'devices' ? t('energie.histo.note_appareils') : t('energie.histo.note_tarif')}
+        {#if gasDay}{t('energie.histo.note_gaz')}{/if}
         {t('energie.histo.avant_moli')}
       </p>
     </section>

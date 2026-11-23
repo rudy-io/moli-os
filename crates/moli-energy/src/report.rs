@@ -312,18 +312,20 @@ impl Period {
     }
 }
 
-/// This month at the pace so far (after a full day of data).
+/// This month at the pace so far (after a full day of data): `so_far` from
+/// `from` (the month's start) up to `reach` (now, or how far the late
+/// meters told), stretched to `month_end`.
 #[allow(clippy::cast_precision_loss)] // ms spans
-pub(crate) fn projection(month: &Period, now: u64, month_end: u64) -> Option<Amount> {
-    let elapsed = now.saturating_sub(month.from);
-    if elapsed < 24 * HOUR_MS || month_end <= month.from {
+pub(crate) fn projection(so_far: &Amount, from: u64, reach: u64, month_end: u64) -> Option<Amount> {
+    let elapsed = reach.saturating_sub(from);
+    if elapsed < 24 * HOUR_MS || month_end <= from {
         return None;
     }
-    let factor = (month_end - month.from) as f64 / elapsed as f64;
+    let factor = (month_end - from) as f64 / elapsed as f64;
     Some(
         Amount {
-            kwh: month.total.kwh * factor,
-            cost: month.total.cost.map(|c| c * factor),
+            kwh: so_far.kwh * factor,
+            cost: so_far.cost.map(|c| c * factor),
         }
         .rounded(),
     )
@@ -490,8 +492,11 @@ mod tests {
         );
 
         let month = Period::of(&config, &rows, 0, 2 * 24 * HOUR_MS);
-        assert_eq!(projection(&month, HOUR_MS, 30 * 24 * HOUR_MS), None);
-        let pace = projection(&month, 2 * 24 * HOUR_MS, 30 * 24 * HOUR_MS).unwrap();
+        assert_eq!(
+            projection(&month.total, 0, HOUR_MS, 30 * 24 * HOUR_MS),
+            None
+        );
+        let pace = projection(&month.total, 0, 2 * 24 * HOUR_MS, 30 * 24 * HOUR_MS).unwrap();
         assert!((pace.kwh - 150.0).abs() < 1e-9, "pace.kwh={}", pace.kwh);
     }
 

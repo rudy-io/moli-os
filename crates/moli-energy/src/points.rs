@@ -355,6 +355,8 @@ mod tests {
             month: period(month_from, 120.0, Some(20.0)),
             last_month: period(0, 0.0, None),
             month_projection: projection,
+            gas_projection: None,
+            last_days: Vec::new(),
             monthly_fee: Some(19.56),
             budget_point: None,
             house_price: None,

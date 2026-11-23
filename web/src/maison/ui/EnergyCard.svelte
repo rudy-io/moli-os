@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { hub } from '../lib/home.svelte.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
-  import { t } from '../../lib/i18n.svelte.js';
+  import { t, locale } from '../../lib/i18n.svelte.js';
+  import { noLiveMeasure, lastDay, vsUsual, usualFrac } from '../lib/energy-late.js';
   import Icon from './Icon.svelte';
 
   onMount(useEnergy);
@@ -42,6 +43,15 @@
       .slice(0, 3),
   );
 
+  // Meters a day late and nothing live (Linky through Enedis, Gazpar through
+  // GRDF): the last day known against its usual day, not a « today » at 0.
+  const late = $derived(noLiveMeasure(s));
+  const days = $derived(late ? [lastDay(s, 'electricity'), lastDay(s, 'gas')].filter(Boolean) : []);
+  const elecDay = $derived(days.find((d) => d.energy === 'electricity'));
+  const hasGas = $derived(!!s?.month?.gas || (s?.meters ?? []).some((m) => m.role === 'gas'));
+  const shortDay = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', timeZone: s?.timezone });
+  const signed = (n) => `${n > 0 ? '+' : ''}${n} %`;
+
   const R = 70;
   const C = Math.PI * R;
   const isHc = $derived(/hc/i.test(s?.period ?? ''));
@@ -49,10 +59,45 @@
 
 <a class="card energy" href="#/energie" aria-label={t('energie.carte.detail')}>
   <div class="card-head">
-    <h2><Icon name="bolt" size={18} />{t('energie.carte.titre')}</h2>
+    <h2><Icon name="bolt" size={18} />{t(hasGas ? 'energie.carte.titre_energie' : 'energie.carte.titre')}</h2>
     <span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span>
   </div>
-  {#if s}
+  {#if s && days.length}
+    <div class="gauges" class:pair={days.length > 1}>
+      {#each days as d (d.energy)}
+        <div class="gauge">
+          <svg viewBox="0 0 180 104" aria-hidden="true">
+            <path class="track" d="M 20 92 A {R} {R} 0 0 1 160 92" />
+            <path class="fill" class:gas={d.energy === 'gas'} d="M 20 92 A {R} {R} 0 0 1 160 92" stroke-dasharray="{C * usualFrac(d)} {C}" />
+          </svg>
+          <div class="value">
+            <strong class="num">{kwh(d.amount.kwh)}</strong>
+            <span>{t(d.energy === 'gas' ? 'energie.carte.kwh_gaz_le' : 'energie.carte.kwh_le', { day: shortDay(d.day) })}</span>
+          </div>
+        </div>
+      {/each}
+    </div>
+    <div class="facts">
+      <div title={billOf(s) != null ? t('energie.carte.facture', { bill: euros(billOf(s), s.currency) }) : null}>
+        <small>{t('energie.carte.elec_mois')}</small><b class="num">{euros(s.month.total.cost, s.currency)}</b>
+        {#if billOf(s) != null}<em class="num">→ ~{Math.round(billOf(s))} {s.currency}</em>{/if}
+      </div>
+      {#if s.month.gas}
+        <div>
+          <small>{t('energie.carte.gaz_mois')}</small>
+          <b class="num">{s.month.gas.cost != null ? euros(s.month.gas.cost, s.currency) : `${kwh(s.month.gas.kwh)} kWh`}</b>
+          {#if s.gas_projection?.cost != null}<em class="num">→ ~{Math.round(s.gas_projection.cost)} {s.currency}</em>{/if}
+        </div>
+      {/if}
+      {#if elecDay && vsUsual(elecDay) != null}
+        <div title={t('energie.dernier.habituel_aide', { n: elecDay.usual_days, kwh: kwh(elecDay.usual.kwh) })}>
+          <small>{t('energie.carte.vs_habituel')}</small><b class="num">{signed(vsUsual(elecDay))}</b>
+        </div>
+      {:else if elecDay?.amount.cost != null}
+        <div><small>{t('energie.carte.cout_le', { day: shortDay(elecDay.day) })}</small><b class="num">{euros(elecDay.amount.cost, s.currency)}</b></div>
+      {/if}
+    </div>
+  {:else if s}
     <div class="gauges" class:pair={s.live}>
       <div class="gauge">
         <svg viewBox="0 0 180 104" aria-hidden="true">
@@ -147,6 +192,10 @@
 
   .track {
     stroke: var(--surface-3);
+  }
+
+  .fill.gas {
+    stroke: #e0705a;
   }
 
   .fill {
