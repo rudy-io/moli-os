@@ -33,6 +33,10 @@ fn stand_ins() -> moli_helpers::Config {
         min = 5.0
         max = 30.0
         initial = 16.0
+        [[helper]]
+        id = "absent"
+        name = "Personne à la maison"
+        kind = "switch"
         "#,
     )
     .unwrap()
@@ -186,6 +190,12 @@ async fn house_with(tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken)
 }
 
 async fn house_of(rooms: Vec<Room>, tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken) {
+    let (hub, cancel) = stand_ins_running().await;
+    start(&hub, rooms, None, tune, &cancel);
+    (hub, cancel)
+}
+
+async fn stand_ins_running() -> (Hub, CancellationToken) {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let cancel = CancellationToken::new();
     spawn_driver(
@@ -202,17 +212,27 @@ async fn house_of(rooms: Vec<Room>, tune: impl FnOnce(&mut Heating)) -> (Hub, Ca
     );
     until(&hub, "maison:volume/value", 16.0).await;
     until(&hub, "vannes:v/sp", 16.0).await;
-    let mut heating = Heating::new(hub.clone(), rooms, jiff::tz::TimeZone::UTC);
+    (hub, cancel)
+}
+
+/// The heating, stopped by `cancel`.
+fn start(
+    hub: &Hub,
+    rooms: Vec<Room>,
+    house: Option<House>,
+    tune: impl FnOnce(&mut Heating),
+    cancel: &CancellationToken,
+) {
+    let mut heating = Heating::new(hub.clone(), rooms, house, jiff::tz::TimeZone::UTC);
     heating.settle = Duration::ZERO;
     heating.floor = Duration::ZERO;
     tune(&mut heating);
     spawn_driver(
-        &hub,
+        hub,
         InstanceId::from(INSTANCE),
         Arc::new(heating),
         cancel.clone(),
     );
-    (hub, cancel)
 }
 
 #[tokio::test]
@@ -756,7 +776,7 @@ async fn a_boost_and_a_hold_outlive_a_restart() {
     );
     until(&hub, "vannes:v/sp", 16.0).await;
     let start = || {
-        let mut heating = Heating::new(hub.clone(), rooms(), jiff::tz::TimeZone::UTC);
+        let mut heating = Heating::new(hub.clone(), rooms(), None, jiff::tz::TimeZone::UTC);
         heating.settle = Duration::ZERO;
         heating.floor = Duration::ZERO;
         heating.tick = Duration::from_millis(20);
@@ -834,4 +854,353 @@ fn bad_rooms_are_refused() {
     let mut twice = rooms();
     twice.push(twice[0].clone());
     assert!(check(&twice).is_err());
+}
+
+const TWO: &str = r#"
+    [heating_house]
+    programmes = ["Normal", "Télétravail"]
+"#;
+
+fn table(text: &str) -> House {
+    #[derive(Deserialize)]
+    struct File {
+        heating_house: House,
+    }
+    toml::from_str::<File>(text).unwrap().heating_house
+}
+
+/// Today in the tests' zone (UTC), and another day.
+fn days() -> (&'static str, &'static str) {
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .weekday()
+        .to_monday_zero_offset();
+    let today = usize::try_from(today).unwrap();
+    (DAYS[today], DAYS[(today + 3) % 7])
+}
+
+async fn order(hub: &Hub, at: &str, value: Value) -> Result<(), String> {
+    hub.command(&point(at), value, Origin::Ui, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tokio::test]
+async fn each_room_keeps_a_week_per_programme_and_plays_the_house_s() {
+    let (hub, cancel) = stand_ins_running().await;
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &cancel);
+    let (today, other) = days();
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    until_text(&hub, "chauffage:maison/today_as", "none").await;
+    until_text(&hub, "chauffage:maison/system_mode", "auto").await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &room("weekly_schedule_normal_monday"), "00:00/20").await;
+    assert_eq!(
+        hub.state(&point(&room("weekly_schedule_teletravail_monday")))
+            .map(|s| s.value),
+        Some(Value::Null)
+    );
+    // An order to the house is judged on its rooms' and valves' rooms.
+    assert!(
+        hub.rooms_of(&DeviceId::from("chauffage:maison"))
+            .contains(&"Bureau".to_owned())
+    );
+
+    // Another programme's day: kept, not played.
+    let teletravail = room(&format!("weekly_schedule_teletravail_{today}"));
+    order(&hub, &teletravail, Value::from("00:00/22"))
+        .await
+        .unwrap();
+    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/20").await;
+    until(&hub, &room("occupied_heating_setpoint"), 20.0).await;
+
+    // The house plays it: every room's step in force, and its days.
+    order(
+        &hub,
+        "chauffage:maison/programme",
+        Value::from("Télétravail"),
+    )
+    .await
+    .unwrap();
+    until(&hub, &room("occupied_heating_setpoint"), 22.0).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/22").await;
+    // A day never set is the first programme's.
+    until_text(&hub, &room(&format!("weekly_schedule_{other}")), "00:00/20").await;
+
+    // `weekly_schedule_<day>` writes the playing programme's.
+    order(
+        &hub,
+        &room(&format!("weekly_schedule_{today}")),
+        Value::from("00:00/21"),
+    )
+    .await
+    .unwrap();
+    until_text(&hub, &teletravail, "00:00/21").await;
+    until(&hub, "vannes:v/sp", 21.0).await;
+    until_text(
+        &hub,
+        &room(&format!("weekly_schedule_normal_{today}")),
+        "00:00/20",
+    )
+    .await;
+
+    // Emptied: the first programme's again. The first one's cannot be.
+    order(&hub, &teletravail, Value::from("")).await.unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+    let normal = room(&format!("weekly_schedule_normal_{today}"));
+    assert!(order(&hub, &normal, Value::from("")).await.is_err());
+
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn today_as_another_day_the_whole_house_and_a_restart() {
+    let (hub, cancel) = stand_ins_running().await;
+    let heating = CancellationToken::new();
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &heating);
+    let (today, other) = days();
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    let teletravail = room(&format!("weekly_schedule_teletravail_{today}"));
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    order(
+        &hub,
+        "chauffage:maison/programme",
+        Value::from("Télétravail"),
+    )
+    .await
+    .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // Today played as another day, then as itself again.
+    order(
+        &hub,
+        &room(&format!("weekly_schedule_teletravail_{other}")),
+        Value::from("00:00/18"),
+    )
+    .await
+    .unwrap();
+    order(&hub, "chauffage:maison/today_as", Value::from(other))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 18.0).await;
+    order(&hub, "chauffage:maison/today_as", Value::from("none"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // The whole house to frost guard, and back.
+    order(&hub, "chauffage:maison/system_mode", Value::from("off"))
+        .await
+        .unwrap();
+    until_text(&hub, &room("system_mode"), "off").await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    order(&hub, "chauffage:maison/system_mode", Value::from("auto"))
+        .await
+        .unwrap();
+    until_text(&hub, &room("system_mode"), "auto").await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // Restarted: the programme, `today_as` and every week are kept.
+    order(&hub, &teletravail, Value::from("00:00/19.5"))
+        .await
+        .unwrap();
+    order(&hub, "chauffage:maison/today_as", Value::from(today))
+        .await
+        .unwrap();
+    heating.cancel();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let heating = CancellationToken::new();
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &heating);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    until_text(&hub, "chauffage:maison/programme", "Télétravail").await;
+    until_text(&hub, "chauffage:maison/today_as", today).await;
+    until_text(&hub, &teletravail, "00:00/19.5").await;
+    until_text(
+        &hub,
+        &room(&format!("weekly_schedule_{today}")),
+        "00:00/19.5",
+    )
+    .await;
+    until(&hub, &room("occupied_heating_setpoint"), 19.5).await;
+    heating.cancel();
+    cancel.cancel();
+}
+
+/// The heating with an absence point, looked at often: a minute is 50 ms.
+fn start_away(hub: &Hub, away_mode: &str, cancel: &CancellationToken) {
+    let table = table(&format!(
+        r#"
+        [heating_house]
+        programmes = ["Normal", "Vacances"]
+        away = "maison:absent/on"
+        away_delay = 2
+        away_mode = "{away_mode}"
+        "#
+    ));
+    start(
+        hub,
+        rooms(),
+        Some(table),
+        |h| {
+            h.tick = Duration::from_millis(20);
+            h.minute = Duration::from_millis(50);
+        },
+        cancel,
+    );
+}
+
+async fn away(hub: &Hub, on: bool) {
+    order(hub, "maison:absent/on", Value::Bool(on))
+        .await
+        .unwrap();
+}
+
+async fn until_away(hub: &Hub, on: bool) {
+    for _ in 0..300 {
+        if hub.state(&point("chauffage:maison/away")).map(|s| s.value) == Some(Value::Bool(on)) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("chauffage:maison/away: {on} expected");
+}
+
+#[tokio::test]
+async fn nobody_home_the_rooms_play_frost_guard_over_what_was_chosen() {
+    let (hub, cancel) = stand_ins_running().await;
+    let heating = CancellationToken::new();
+    start_away(&hub, "off", &heating);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_away(&hub, false).await;
+
+    // Gone: the valves at their lowest after the delay; nothing the house or
+    // the room chose is written over.
+    away(&hub, true).await;
+    until_away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_text(&hub, &room("system_mode"), "auto").await;
+    until(&hub, &room("occupied_heating_setpoint"), 20.0).await;
+    until_text(&hub, "chauffage:maison/system_mode", "auto").await;
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    // Back: the room's own again.
+    away(&hub, false).await;
+    until_away(&hub, false).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // A room held in `heat` is frost-guarded too, and holds again on return.
+    order(&hub, &room("system_mode"), Value::from("heat"))
+        .await
+        .unwrap();
+    order(&hub, &room("occupied_heating_setpoint"), Value::Float(22.0))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_text(&hub, &room("system_mode"), "heat").await;
+    away(&hub, false).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    order(&hub, &room("system_mode"), Value::from("auto"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // Someone sets the house meanwhile: the absence is lifted until the return.
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    order(&hub, "chauffage:maison/programme", Value::from("Vacances"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, false).await;
+    until_away(&hub, false).await;
+    until_text(&hub, "chauffage:maison/programme", "Vacances").await;
+
+    // Restarted while nobody is home: worked out again after the delay.
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    heating.cancel();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let heating = CancellationToken::new();
+    start_away(&hub, "off", &heating);
+    until_away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_text(&hub, &room("system_mode"), "auto").await;
+    until_text(&hub, "chauffage:maison/programme", "Vacances").await;
+    away(&hub, false).await;
+    until_away(&hub, false).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    heating.cancel();
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn nobody_home_the_rooms_play_the_away_programme() {
+    let (hub, cancel) = stand_ins_running().await;
+    start_away(&hub, "Vacances", &cancel);
+    let (today, _) = days();
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    order(
+        &hub,
+        &room(&format!("weekly_schedule_vacances_{today}")),
+        Value::from("00:00/16"),
+    )
+    .await
+    .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // The away programme played: setpoint and days are its own, the house's
+    // choice stays.
+    away(&hub, true).await;
+    until(&hub, &room("occupied_heating_setpoint"), 16.0).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/16").await;
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    away(&hub, false).await;
+    until(&hub, &room("occupied_heating_setpoint"), 20.0).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/20").await;
+    cancel.cancel();
+}
+
+#[test]
+fn a_bad_house_is_refused() {
+    let good = || {
+        table(
+            r#"
+            [heating_house]
+            programmes = ["Normal", "Télétravail", "Vacances d'été"]
+            away = "personnes:maison/everyone_away"
+            away_mode = "Vacances d'été"
+            "#,
+        )
+    };
+    assert!(house::check(&good(), &rooms()).is_ok());
+    assert_eq!(house::key("Vacances d'été"), "vacances_d_ete");
+    assert_eq!(house::key(" Télé-travail 2 "), "tele_travail_2");
+    let cases: [fn(&mut House); 8] = [
+        |h| h.programmes.clear(),
+        |h| h.programmes[1] = String::new(),
+        |h| h.programmes[1] = " Normal".into(),
+        |h| h.programmes[1] = "normal".into(),
+        |h| h.programmes[1] = "!!".into(),
+        |h| h.away = Some("chauffage:parents/system_mode".into()),
+        |h| h.away_mode = "Absent".into(),
+        |h| h.away_delay = 2000,
+    ];
+    for (i, change) in cases.iter().enumerate() {
+        let mut table = good();
+        change(&mut table);
+        assert!(house::check(&table, &rooms()).is_err(), "case {i}");
+    }
+    let mut taken = rooms();
+    taken[0].id = house::DEVICE.into();
+    assert!(house::check(&good(), &taken).is_err());
+    assert!(house::check(&good(), &[]).is_err());
 }

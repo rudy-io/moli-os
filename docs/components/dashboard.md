@@ -328,7 +328,11 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   des groupes de programmes (TRV-ZBT), d'après les convertisseurs de Zigbee2MQTT. Une TRVZB ne
   renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
   garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
-  quand ce n'est pas le groupe suivi par la vanne.
+  quand ce n'est pas le groupe suivi par la vanne. Pour une pièce du chauffage de Moli, quand la
+  maison a des programmes (`[heating_house]`), un sélecteur au-dessus des jours choisit le
+  programme édité (par défaut celui que joue `chauffage:maison`) : l'éditeur écrit alors
+  `weekly_schedule_<clé>_<jour>`, dit quand un jour reprend celui du premier programme, et propose
+  d'y revenir.
   Partout où il paraît (Pièces, Chauffage, Accueil, Moli), un thermostat qui ne fait que chauffer
   est **dessiné en radiateur** : vanne Zigbee, thermostat de pièce de Moli, et vanne d'un autre
   protocole (Matter : `target_temperature` et un mode `off`/`heat`, sans rien d'un climatiseur,

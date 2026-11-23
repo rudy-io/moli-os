@@ -343,6 +343,69 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
   ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
 
+### Les programmes de la maison (`[heating_house]`, `crates/moli-heating/src/house.rs`)
+
+Une semaine type ne suffit pas toujours : télétravail, vacances, un jour férié joué comme un
+samedi, toute la maison en hors-gel pour un week-end. Avec une table `[heating_house]`, chaque
+pièce garde **une semaine par programme**, et un appareil `chauffage:maison` choisit celle que
+toutes jouent.
+
+```toml
+[heating_house]
+programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui par défaut
+# away = "personnes:maison/everyone_away"            # facultatif : un point vrai quand personne n'est là
+# away_delay = 30                                    # minutes d'absence avant d'agir (0 à 1440)
+# away_mode = "off"                                  # "off" (hors-gel) ou le nom d'un programme
+```
+
+- **`chauffage:maison`** : `programme` (choix parmi les noms, réglable) ; `today_as` (`none`,
+  `monday` … `sunday`, réglable : aujourd'hui, toutes les pièces jouent ce jour-là du programme ;
+  revient à `none` à minuit, heure de la maison, et après un redémarrage le lendemain) ;
+  `system_mode` (`auto` ou `off`, réglable : écrit sur **chaque pièce**, comme une scène ; une
+  seule ligne au journal, celle de l'ordre à la maison) ; `away` (en lecture, seulement avec
+  `away` : l'absence joue, voir plus bas). Ses membres sont les pièces et leurs vannes : un ordre d'un
+  agent à la maison est jugé sur toutes leurs pièces (pièces protégées, heures calmes).
+- **Les semaines** : `weekly_schedule_<clé>_<jour>` sur chaque pièce, au même format que
+  `weekly_schedule_<jour>`. La clé est le nom du programme en minuscules, sans accents, chaque
+  suite d'autres caractères devenue un `_` (« Télétravail » → `teletravail`, « Vacances d'été » →
+  `vacances_d_ete`). Un jour jamais réglé est vide et joue celui du **premier** programme ; écrire
+  un texte vide sur un autre programme l'y ramène. Les points `weekly_schedule_<jour>` restent
+  ceux du **programme joué** (celui d'`away_mode` pendant une absence) : les lire ou les écrire,
+  comme avant, c'est lire ou écrire celui-là.
+  Les semaines sont des points de la pièce, gardés d'un démarrage à l'autre. À l'ajout de
+  `[heating_house]`, la semaine qu'avait la pièce devient celle du premier programme. **Le nom
+  d'un programme est sa clé** : le renommer fait repartir ses semaines de celles du premier ;
+  l'ordre, lui, peut changer (le premier est celui par défaut).
+- **Changer de programme ou de jour** réapplique dans chaque pièce en `auto` le créneau en
+  vigueur, et met fin aux réglages à la main sur ses vannes, comme un programme de pièce changé.
+- **L'absence** (`away`) est une **surcouche** : elle n'écrit ni `programme` ni `system_mode` de
+  la maison, ni le `system_mode` des pièces. Le point vrai depuis `away_delay` minutes, `away`
+  devient vrai et les pièces jouent `away_mode` à la place de ce qui est choisi :
+  - `off` : **toutes** les pièces en hors-gel, y compris celles en `heat` (c'est le but) ; leurs
+    vannes reçoivent leur consigne la plus basse, comme en mode `off`. Le tableau de bord voit
+    alors une pièce dont `system_mode` dit encore `auto` (ou `heat`) et dont
+    `occupied_heating_setpoint` garde la consigne qu'elle reprendra au retour, mais dont les vannes
+    sont au plus bas : c'est `chauffage:maison/away` à vrai qui l'explique. La correction des
+    vannes n'apprend pas pendant ce temps.
+  - un programme : ce programme est joué au lieu de celui qui est choisi (`programme` de la maison
+    ne change pas). Les pièces en `auto` suivent ses créneaux : `occupied_heating_setpoint` et
+    `weekly_schedule_<jour>` sont les siens ; les pièces en `heat` ou `off` n'en changent pas.
+
+  Au retour (le point faux), la surcouche disparaît : chaque pièce réapplique le créneau en
+  vigueur de ce qui est choisi. L'absence qui commence ou finit met fin, comme un changement de
+  programme, aux réglages à la main sur les vannes. Un point inconnu (pilote qui démarre, appareil
+  hors ligne) ne change rien. **Lever l'absence** : écrire `programme` ou `system_mode` de la
+  **maison** pendant qu'elle joue la lève pour toute la maison jusqu'au prochain retour (le choix
+  écrit est joué aussitôt). Un ordre à une seule pièce ne la lève pas : la pièce garde son
+  nouveau mode ou sa consigne, joués au retour. Rien n'est gardé de l'absence : après un
+  redémarrage, `away` repart de faux et l'absence se réapplique après `away_delay` si personne
+  n'est toujours là, même si elle avait été levée (les logs de Moli le disent, comme à chaque
+  absence : `heating: nobody home, the house plays its away mode`).
+- `moli-os check-config` refuse : une table sans `[[heating]]`, de 1 à 8 programmes, un nom vide,
+  avec des espaces autour ou de plus de 40 caractères, deux noms de même clé, un `away` qui n'est
+  pas un point d'un autre appareil, un `away_mode` qui n'est ni `off` ni un programme, et une pièce
+  d'id `maison` (l'appareil de la maison).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.

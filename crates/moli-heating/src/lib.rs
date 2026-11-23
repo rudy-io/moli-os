@@ -32,6 +32,10 @@
 //!   the schedule takes over again (0: until the next step), until
 //!   `hold_until` (RFC 3339). See [`temporary`].
 //!
+//! With `[heating_house]`, the house's programmes and `chauffage:maison`
+//! ([`house`]): each room keeps a week per programme, and its
+//! `weekly_schedule_<day>` are the playing programme's.
+//!
 //! ```toml
 //! [[heating]]
 //! id = "parents"                                # never rename it
@@ -64,6 +68,7 @@
 //! the drivers come back.
 
 pub mod hand;
+pub mod house;
 pub mod regulation;
 pub mod schedule;
 pub mod temporary;
@@ -78,6 +83,8 @@ use moli_core::{
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, Hub};
 use serde::Deserialize;
 
+pub use house::House;
+use house::{HouseRun, house_device};
 use regulation::{Shift, valve_heats, valve_setpoint, worth_sending};
 use schedule::{DAYS, Step, format_day, parse_day, step_at, to_next_step};
 use temporary::{Boost, MAX_MINUTES, Timed};
@@ -195,7 +202,7 @@ fn default_boost_minutes() -> u32 {
     60
 }
 
-fn is_point(text: &str) -> bool {
+pub(crate) fn is_point(text: &str) -> bool {
     PointId::from(text)
         .split()
         .is_some_and(|(d, _)| d.as_str().contains(':'))
@@ -289,6 +296,7 @@ fn day_of(temp: f64) -> Step {
 pub struct Heating {
     hub: Hub,
     rooms: Vec<Room>,
+    house: Option<House>,
     zone: jiff::tz::TimeZone,
     settle: Duration,
     /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
@@ -306,10 +314,11 @@ pub struct Heating {
 impl Heating {
     /// `zone`: the house's time zone (the schedule follows local time).
     #[must_use]
-    pub fn new(hub: Hub, rooms: Vec<Room>, zone: jiff::tz::TimeZone) -> Self {
+    pub fn new(hub: Hub, rooms: Vec<Room>, house: Option<House>, zone: jiff::tz::TimeZone) -> Self {
         Self {
             hub,
             rooms,
+            house,
             zone,
             settle: SETTLE,
             floor: regulation::URGENT_FLOOR,
@@ -373,7 +382,9 @@ struct RoomRun {
     id: DeviceId,
     mode: Mode,
     setpoint: f64,
-    week: Vec<Vec<Step>>,
+    /// Each programme's week (one without `[heating_house]`); a day never
+    /// set is the first programme's, which has every day.
+    weeks: Vec<Vec<Option<Vec<Step>>>>,
     /// The step in force (day, index), so a new one is applied once.
     step: Option<(usize, usize)>,
     valves: Vec<ValveRun>,
@@ -388,6 +399,19 @@ struct RoomRun {
 }
 
 impl RoomRun {
+    /// The room's mode as played: `off` under the house's frost guard,
+    /// whatever its own `system_mode` says.
+    fn playing(&self, play: Play) -> Mode {
+        if play.off { Mode::Off } else { self.mode }
+    }
+
+    fn day(&self, programme: usize, day: usize) -> &[Step] {
+        self.weeks[programme][day]
+            .as_deref()
+            .or(self.weeks[0][day].as_deref())
+            .unwrap_or_default()
+    }
+
     /// The setpoint or mode changed: each valve has it soon, whatever was
     /// turned on it by hand.
     fn changed(&mut self) {
@@ -414,6 +438,15 @@ impl RoomRun {
         let until_ms = holds.filter(|h| h.kind == kind).map(|h| h.until_ms).max()?;
         Some(hand::Hold { kind, until_ms })
     }
+}
+
+/// What every room plays: a programme, a day instead of today, and the
+/// house's frost guard while nobody is home ([`house`]).
+#[derive(Clone, Copy, Debug, Default)]
+struct Play {
+    programme: usize,
+    day: Option<usize>,
+    off: bool,
 }
 
 /// The local day (Monday 0) and minute of the day.
@@ -515,7 +548,51 @@ fn valve_devices(room: &Room) -> Vec<DeviceId> {
     devices
 }
 
-fn device(ctx: &DriverCtx, room: &Room) -> Device {
+fn schedule_point(key: String, label: String) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: label.into(),
+        kind: Kind::Text,
+        access: Access {
+            read: true,
+            write: true,
+        },
+        unit: None,
+        semantic: Semantic::Config,
+    }
+}
+
+fn day_name(day: &str) -> String {
+    moli_i18n::tr(&format!("pilotes.chauffage.jour.{day}"))
+}
+
+/// The playing week's days, and each programme's.
+fn schedule_points(house: Option<&House>) -> Vec<PointSpec> {
+    let mut points: Vec<PointSpec> = DAYS
+        .iter()
+        .map(|day| {
+            schedule_point(
+                format!("weekly_schedule_{day}"),
+                moli_i18n::tr!("pilotes.chauffage.programme", jour = day_name(day)),
+            )
+        })
+        .collect();
+    for name in house.map_or(&[][..], |h| &h.programmes[..]) {
+        for day in DAYS {
+            points.push(schedule_point(
+                format!("weekly_schedule_{}_{day}", house::key(name)),
+                moli_i18n::tr!(
+                    "pilotes.chauffage.programme_de",
+                    programme = name,
+                    jour = day_name(day)
+                ),
+            ));
+        }
+    }
+    points
+}
+
+fn device(ctx: &DriverCtx, room: &Room, house: Option<&House>) -> Device {
     let mut points = vec![
         numeric(
             "local_temperature",
@@ -545,23 +622,7 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
             semantic: Semantic::Other,
         },
     ];
-    for day in DAYS {
-        points.push(PointSpec {
-            key: format!("weekly_schedule_{day}").into(),
-            label: moli_i18n::tr!(
-                "pilotes.chauffage.programme",
-                jour = moli_i18n::tr(&format!("pilotes.chauffage.jour.{day}"))
-            )
-            .into(),
-            kind: Kind::Text,
-            access: Access {
-                read: true,
-                write: true,
-            },
-            unit: None,
-            semantic: Semantic::Config,
-        });
-    }
+    points.extend(schedule_points(house));
     points.push(PointSpec {
         key: "valve_override".into(),
         label: moli_i18n::tr!("pilotes.chauffage.reglage_vanne").into(),
@@ -620,8 +681,35 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
     }
 }
 
+/// A programme's own day point.
+fn programme_day(house: &House, programme: usize, day: &str) -> String {
+    format!(
+        "weekly_schedule_{}_{day}",
+        house::key(&house.programmes[programme])
+    )
+}
+
+/// The room's weeks: each programme's days, and the playing one's as
+/// `weekly_schedule_<day>`.
+fn show_weeks(ctx: &DriverCtx, run: &RoomRun, house: Option<&House>, programme: usize) {
+    for (index, day) in DAYS.iter().enumerate() {
+        ctx.set_state(
+            &run.id,
+            &format!("weekly_schedule_{day}"),
+            Value::from(format_day(run.day(programme, index)).as_str()),
+        );
+        let Some(house) = house else { continue };
+        for (p, week) in run.weeks.iter().enumerate() {
+            let value = week[index]
+                .as_deref()
+                .map_or(Value::Null, |s| Value::from(format_day(s).as_str()));
+            ctx.set_state(&run.id, &programme_day(house, p, day), value);
+        }
+    }
+}
+
 /// What the room had before a restart, or its first settings.
-fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
+fn restore(ctx: &DriverCtx, room: &Room, house: Option<&House>, programme: usize) -> RoomRun {
     let id = ctx.device_id(&room.id);
     let mode = match ctx.current(&id, "system_mode") {
         Some(Value::Text(t)) => Mode::parse(&t).unwrap_or(Mode::Auto),
@@ -632,25 +720,24 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         .and_then(|v| v.as_f64())
         .filter(|t| (room.min..=room.max).contains(t))
         .unwrap_or(room.initial);
-    let week = DAYS
-        .iter()
-        .map(
-            |day| match ctx.current(&id, &format!("weekly_schedule_{day}")) {
-                Some(Value::Text(t)) => parse_day(&t, room.min, room.max),
-                _ => None,
-            },
-        )
-        .map(|steps| steps.unwrap_or_else(|| vec![day_of(room.initial)]))
-        .collect::<Vec<_>>();
+    let read = |key: &str| match ctx.current(&id, key) {
+        Some(Value::Text(t)) => parse_day(&t, room.min, room.max),
+        _ => None,
+    };
+    let count = house.map_or(1, |h| h.programmes.len());
+    let mut weeks = vec![vec![None; DAYS.len()]; count];
+    for (index, day) in DAYS.iter().enumerate() {
+        for (p, week) in weeks.iter_mut().enumerate() {
+            week[index] = house.and_then(|h| read(&programme_day(h, p, day)));
+        }
+        // Before the programmes, the room's one week is the first's.
+        weeks[0][index] = weeks[0][index]
+            .take()
+            .or_else(|| read(&format!("weekly_schedule_{day}")))
+            .or_else(|| Some(vec![day_of(room.initial)]));
+    }
     ctx.set_state(&id, "system_mode", Value::from(mode_name(mode)));
     ctx.set_state(&id, "occupied_heating_setpoint", Value::Float(setpoint));
-    for (day, steps) in DAYS.iter().zip(&week) {
-        ctx.set_state(
-            &id,
-            &format!("weekly_schedule_{day}"),
-            Value::from(format_day(steps).as_str()),
-        );
-    }
     // The shift learned before a restart, not learned again from zero.
     let shift = if room.strategy() == Regulation::Shift {
         Shift::from(
@@ -692,7 +779,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         id,
         mode,
         setpoint,
-        week,
+        weeks,
         step: None,
         valves: room
             .valves
@@ -713,6 +800,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         setpoint_hold,
     };
     show_temporary(ctx, &run);
+    show_weeks(ctx, &run, house, programme);
     run
 }
 
@@ -767,11 +855,11 @@ fn demand(
     ctx: &DriverCtx,
     room: &Room,
     run: &mut RoomRun,
-    temperature: Option<f64>,
+    (temperature, mode): (Option<f64>, Mode),
     strategy: Regulation,
 ) {
     let demand = match temperature {
-        Some(room_t) if run.mode != Mode::Off => Some(regulation::demand(
+        Some(room_t) if mode != Mode::Off => Some(regulation::demand(
             run.demand,
             run.target(room.max) - room_t,
             room.hysteresis,
@@ -785,7 +873,7 @@ fn demand(
         for valve in &mut run.valves {
             valve.urgent = true;
         }
-        if demand.is_none() && run.mode != Mode::Off {
+        if demand.is_none() && mode != Mode::Off {
             tracing::warn!(room = %room.id, "heating: room sensor quiet, the valves get the room's setpoint as it is");
         }
     }
@@ -897,12 +985,13 @@ impl Heating {
     }
 
     /// In `auto`, a new step of the schedule becomes the room's setpoint.
-    fn follow(&self, ctx: &DriverCtx, run: &mut RoomRun) {
-        if run.mode != Mode::Auto {
+    fn follow(&self, ctx: &DriverCtx, run: &mut RoomRun, play: Play) {
+        if run.playing(play) != Mode::Auto {
             return;
         }
-        let (day, minute) = local(&self.zone);
-        let Some((index, temp)) = step_at(&run.week[day], minute) else {
+        let (today, minute) = local(&self.zone);
+        let day = play.day.unwrap_or(today);
+        let Some((index, temp)) = step_at(run.day(play.programme, day), minute) else {
             return;
         };
         if run.step != Some((day, index)) {
@@ -918,24 +1007,25 @@ impl Heating {
     }
 
     /// How long before the next step of the schedule, when the room follows it.
-    fn to_next_step(&self, run: &RoomRun) -> Option<Duration> {
-        if run.mode != Mode::Auto {
+    fn to_next_step(&self, run: &RoomRun, play: Play) -> Option<Duration> {
+        if run.playing(play) != Mode::Auto {
             return None;
         }
         let now = jiff::Timestamp::now().to_zoned(self.zone.clone());
-        let (day, minute) = local(&self.zone);
-        let minutes = u64::from(to_next_step(&run.week[day], minute));
+        let (today, minute) = local(&self.zone);
+        let day = play.day.unwrap_or(today);
+        let minutes = u64::from(to_next_step(run.day(play.programme, day), minute));
         let seconds = u64::from(now.second().unsigned_abs());
         Some(Duration::from_secs((minutes * 60).saturating_sub(seconds)))
     }
 
     /// How long before the room's own target changes: its setpoint held
     /// ends, or else the next step of the schedule; or its boost ends.
-    fn to_next_change(&self, run: &RoomRun) -> Option<Duration> {
+    fn to_next_change(&self, run: &RoomRun, play: Play) -> Option<Duration> {
         let now = now_ms();
         let setpoint = match run.setpoint_hold {
             Some(hold) => Some(hold.left(now)),
-            None => self.to_next_step(run),
+            None => self.to_next_step(run, play),
         };
         let boost = run.boost.map(|b| b.timed.left(now));
         setpoint.into_iter().chain(boost).min()
@@ -970,24 +1060,30 @@ impl Heating {
         }
     }
 
-    fn end_setpoint_hold(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, why: &str) {
+    fn end_setpoint_hold(
+        &self,
+        ctx: &DriverCtx,
+        (room, run): (&Room, &mut RoomRun),
+        why: &str,
+        play: Play,
+    ) {
         if let Some(hold) = run.setpoint_hold.take() {
             let minutes = Value::Int(i64::from(hold.minutes));
             self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
             tracing::info!(room = %room.id, why, "heating: setpoint hold over, the schedule again");
             run.step = None;
-            self.follow(ctx, run);
+            self.follow(ctx, run, play);
         }
     }
 
     /// A boost or a setpoint held whose end has come.
-    fn expire(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun) {
+    fn expire(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, play: Play) {
         let now = now_ms();
         if run.boost.is_some_and(|b| b.timed.due(now)) {
             self.end_boost(room, run, "due");
         }
         if run.setpoint_hold.is_some_and(|h| h.due(now)) {
-            self.end_setpoint_hold(ctx, room, run, "due");
+            self.end_setpoint_hold(ctx, (room, run), "due", play);
         }
     }
 
@@ -1059,10 +1155,16 @@ impl Heating {
     /// The room's error moves the shift, while heating and the room known,
     /// and `learning` (`shift`, no valve held by hand: the room is not at
     /// its setpoint then).
-    fn learn(&self, room: &Room, run: &mut RoomRun, temperature: Option<f64>, learning: bool) {
+    fn learn(
+        &self,
+        room: &Room,
+        run: &mut RoomRun,
+        (temperature, mode): (Option<f64>, Mode),
+        learning: bool,
+    ) {
         if let Some(room_t) = temperature
             && learning
-            && run.mode != Mode::Off
+            && mode != Mode::Off
         {
             let now = Instant::now();
             let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
@@ -1076,21 +1178,33 @@ impl Heating {
     }
 
     /// Ends what is due, then regulates the room.
-    async fn look(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, settled: bool) {
-        self.expire(ctx, room, run);
+    async fn look(
+        &self,
+        ctx: &DriverCtx,
+        room: &Room,
+        run: &mut RoomRun,
+        (settled, play): (bool, Play),
+    ) {
+        self.expire(ctx, room, run, play);
         show_temporary(ctx, run);
-        self.regulate(ctx, room, run, settled).await;
+        self.regulate(ctx, room, run, (settled, play)).await;
     }
 
     /// Reads the room and its valves, and writes the valves that need it.
-    async fn regulate(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, settled: bool) {
+    async fn regulate(
+        &self,
+        ctx: &DriverCtx,
+        room: &Room,
+        run: &mut RoomRun,
+        (settled, play): (bool, Play),
+    ) {
         let temperature = self.fresh(&room.sensor);
         ctx.set_state(
             &run.id,
             "local_temperature",
             temperature.map_or(Value::Null, Value::Float),
         );
-        let next_step = self.to_next_change(run);
+        let next_step = self.to_next_change(run, play);
         // Each valve's hold: one turned by hand since the last look, one over.
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
             if state.hold.is_some_and(|h| now_ms() >= h.until_ms) {
@@ -1116,11 +1230,12 @@ impl Heating {
         let hold = run.hold();
         show_hold(ctx, &run.id, hold);
         let strategy = room.strategy();
-        demand(ctx, room, run, temperature, strategy);
+        let mode = run.playing(play);
+        demand(ctx, room, run, (temperature, mode), strategy);
         self.learn(
             room,
             run,
-            temperature,
+            (temperature, mode),
             hold.is_none() && strategy == Regulation::Shift,
         );
         let shift = run.shift.get();
@@ -1146,7 +1261,7 @@ impl Heating {
             if temperature.is_none() && !urgent {
                 continue;
             }
-            let next = target(room, strategy, (run.mode, aim, run.demand), shift, bounds);
+            let next = target(room, strategy, (mode, aim, run.demand), shift, bounds);
             // On the valve's own step, coarser than the half degree: what it holds.
             let next = regulation::on_step(next, step, bounds);
             let point = PointId::from(valve.as_str());
@@ -1184,7 +1299,14 @@ impl Heating {
 
     /// An order to a room's own points (already checked against them by the
     /// hub, except a schedule's text).
-    fn command(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, command: CommandRequest) {
+    fn command(
+        &self,
+        ctx: &DriverCtx,
+        room: &Room,
+        run: &mut RoomRun,
+        play: Play,
+        command: CommandRequest,
+    ) {
         // Given up by the hub (told the caller it failed): not applied after all.
         if command.abandoned() {
             return;
@@ -1204,16 +1326,7 @@ impl Heating {
         } else if key == "system_mode" {
             match text(&command.value).and_then(Mode::parse) {
                 Some(mode) => {
-                    self.end_boost(room, run, "mode");
-                    if let Some(hold) = run.setpoint_hold.take() {
-                        let minutes = Value::Int(i64::from(hold.minutes));
-                        self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
-                    }
-                    run.mode = mode;
-                    run.step = None;
-                    run.changed();
-                    ctx.set_state(&run.id, key, Value::from(mode_name(mode)));
-                    self.follow(ctx, run);
+                    self.set_mode(ctx, (room, run), mode, play);
                     Ok(())
                 }
                 None => Err(moli_i18n::tr!("pilotes.chauffage.mode_refuse")),
@@ -1229,17 +1342,20 @@ impl Heating {
             }
         } else if let Some(result) = self.temporary_command(room, run, key, &command.value) {
             result
-        } else if let Some(day) = key
-            .strip_prefix("weekly_schedule_")
-            .and_then(|d| DAYS.iter().position(|x| *x == d))
-        {
-            match text(&command.value).and_then(|t| parse_day(t, room.min, room.max)) {
+        } else if let Some((programme, day, own)) = self.schedule_key(key, play.programme) {
+            let steps = match text(&command.value) {
+                // A programme's own day emptied: the first programme's again.
+                Some(t) if own && programme > 0 && t.trim().is_empty() => Some(None),
+                Some(t) => parse_day(t, room.min, room.max).map(Some),
+                None => None,
+            };
+            match steps {
                 Some(steps) => {
-                    ctx.set_state(&run.id, key, Value::from(format_day(&steps).as_str()));
-                    run.week[day] = steps;
+                    run.weeks[programme][day] = steps;
+                    show_weeks(ctx, run, self.house.as_ref(), play.programme);
                     // Today's day changed: its step in force is applied again.
                     run.step = None;
-                    self.follow(ctx, run);
+                    self.follow(ctx, run, play);
                     Ok(())
                 }
                 None => Err(moli_i18n::tr!("pilotes.chauffage.programme_refuse")),
@@ -1307,6 +1423,46 @@ impl Heating {
     }
 }
 
+impl Heating {
+    /// A room's mode, from its own order or the house's: its boost and its
+    /// setpoint held end, as any change of mode.
+    fn set_mode(
+        &self,
+        ctx: &DriverCtx,
+        (room, run): (&Room, &mut RoomRun),
+        mode: Mode,
+        play: Play,
+    ) {
+        self.end_boost(room, run, "mode");
+        if let Some(hold) = run.setpoint_hold.take() {
+            let minutes = Value::Int(i64::from(hold.minutes));
+            self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
+        }
+        run.mode = mode;
+        run.step = None;
+        run.changed();
+        ctx.set_state(&run.id, "system_mode", Value::from(mode_name(mode)));
+        self.follow(ctx, run, play);
+    }
+
+    /// The programme and day a `weekly_schedule_…` key is, and whether it is
+    /// a programme's own (not the playing one's `weekly_schedule_<day>`).
+    fn schedule_key(&self, key: &str, playing: usize) -> Option<(usize, usize, bool)> {
+        let rest = key.strip_prefix("weekly_schedule_")?;
+        let day_of = |d: &str| DAYS.iter().position(|x| *x == d);
+        if let Some(day) = day_of(rest) {
+            return Some((playing, day, false));
+        }
+        let house = self.house.as_ref()?;
+        let (name, day) = rest.rsplit_once('_')?;
+        let programme = house
+            .programmes
+            .iter()
+            .position(|p| house::key(p) == name)?;
+        Some((programme, day_of(day)?, true))
+    }
+}
+
 impl Driver for Heating {
     fn kind(&self) -> &'static str {
         "heating"
@@ -1314,10 +1470,17 @@ impl Driver for Heating {
 
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            let house = self.house.as_ref();
+            let mut hrun = house.map(|h| {
+                ctx.upsert_device(house_device(ctx, h, &self.rooms));
+                self.restore_house(ctx, h)
+            });
+            let play =
+                |hrun: &Option<HouseRun>| hrun.as_ref().map(HouseRun::playing).unwrap_or_default();
             let mut runs = Vec::with_capacity(self.rooms.len());
             for room in &self.rooms {
-                ctx.upsert_device(device(ctx, room));
-                runs.push(restore(ctx, room));
+                ctx.upsert_device(device(ctx, room, house));
+                runs.push(restore(ctx, room, house, play(&hrun).programme));
             }
             ctx.ready();
             let started = Instant::now();
@@ -1327,20 +1490,34 @@ impl Driver for Heating {
                 tokio::select! {
                     command = ctx.next_command() => {
                         let Some(command) = command else { return Ok(()) };
+                        let settled = started.elapsed() >= self.settle;
+                        if let (Some(house), Some(h)) = (house, hrun.as_mut())
+                            && h.id == command.device.id
+                        {
+                            self.command_house(ctx, house, (h, &mut runs), command);
+                            let play = h.playing();
+                            for (room, run) in self.rooms.iter().zip(&mut runs) {
+                                self.look(ctx, room, run, (settled, play)).await;
+                            }
+                            continue;
+                        }
                         let Some(index) = runs.iter().position(|r| r.id == command.device.id) else {
                             command.reply(Err(moli_i18n::tr!("pilotes.chauffage.point_inconnu")));
                             continue;
                         };
                         let (room, run) = (&self.rooms[index], &mut runs[index]);
-                        self.command(ctx, room, run, command);
-                        let settled = started.elapsed() >= self.settle;
-                        self.look(ctx, room, run, settled).await;
+                        self.command(ctx, room, run, play(&hrun), command);
+                        self.look(ctx, room, run, (settled, play(&hrun))).await;
                     }
                     _ = tick.tick() => {
                         let settled = started.elapsed() >= self.settle;
+                        if let (Some(house), Some(h)) = (house, hrun.as_mut()) {
+                            self.house_tick(ctx, house, (h, &mut runs));
+                        }
+                        let play = play(&hrun);
                         for (room, run) in self.rooms.iter().zip(&mut runs) {
-                            self.follow(ctx, run);
-                            self.look(ctx, room, run, settled).await;
+                            self.follow(ctx, run, play);
+                            self.look(ctx, room, run, (settled, play)).await;
                         }
                     }
                 }

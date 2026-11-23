@@ -191,6 +191,22 @@ timezone = "Europe/Paris"
 # name = "South"
 # azimuth = 180                 # where the façade looks, clockwise from north
 
+# Heating: a room's own thermostat on the room's sensor (docs/components/pilotes.md,
+# « Chauffage »), as instance chauffage, one device per room.
+# [[heating]]
+# id = "bureau"                         # stable: chauffage:bureau
+# name = "Bureau"
+# sensor = "z2m:0x…/temperature"
+# valves = ["z2m:0x…/occupied_heating_setpoint"]
+#
+# The house's programmes: a week per programme in each room, and chauffage:maison
+# (programme, today_as, system_mode, away) to choose the one every room plays.
+# [heating_house]
+# programmes = ["Normal", "Télétravail", "Vacances"]   # the first one by default
+# away = "personnes:maison/everyone_away"              # optional: true when nobody is home
+# away_delay = 30                                      # minutes of absence before acting
+# away_mode = "off"                                    # "off" (frost guard) or a programme's name
+
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]
 id = "z2m"

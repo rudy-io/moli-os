@@ -147,3 +147,16 @@ test('the days are written in turn and the first one not done stops the rest', a
   assert.deepEqual(await writeDays(['x'], async () => undefined), { written: [], stopped: 'error' });
   assert.deepEqual(await writeDays(['x', 'monday'], async (d) => (d === 'x' ? 'error' : 'ok')), { written: [], stopped: 'error' });
 });
+
+test('a house programme\'s key is Moli\'s, and a room keeps a week of each', async () => {
+  const { programmeKey, programmesOf } = await import('./schedule.js');
+  assert.equal(programmeKey('Télétravail'), 'teletravail');
+  assert.equal(programmeKey("Vacances d'été"), 'vacances_d_ete');
+  assert.equal(programmeKey(' Télé-travail 2 '), 'tele_travail_2');
+  const house = { online: true, points: [point('programme', { type: 'enum', values: ['Normal', 'Télétravail'] })] };
+  const room = valve();
+  room.points.push(...['normal', 'teletravail'].map((k) => point(`weekly_schedule_${k}_monday`, text)));
+  assert.deepEqual(programmesOf(room, house), [{ name: 'Normal', key: 'normal' }, { name: 'Télétravail', key: 'teletravail' }]);
+  assert.deepEqual(programmesOf(valve(), house), []);
+  assert.deepEqual(programmesOf(room, undefined), []);
+});

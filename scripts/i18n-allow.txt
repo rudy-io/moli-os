@@ -14,3 +14,6 @@ web/src/maison/ui/PaperPrinterCard.svelte  /(couleur|noire|jaune)
 web/src/maison/lib/paper.js  /pleine\|full/
 # Les noms de polices d'un thème (piles CSS), pas du texte affiché.
 web/src/maison/lib/themes.js  (sans-serif|serif|monospace)",$
+# Les lettres accentuées que la clé d'un programme du chauffage replie, comme Moli (jamais affichées).
+web/src/maison/lib/schedule.js  \['àáâãäå', 'a'\]
+web/src/maison/lib/schedule.js  \['ùúûü', 'u'\]

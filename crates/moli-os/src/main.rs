@@ -1537,6 +1537,7 @@ fn spawn_house_drivers(
             Arc::new(moli_heating::Heating::new(
                 hub.clone(),
                 config.heating.clone(),
+                config.heating_house.clone(),
                 zone,
             )),
             cancel.clone(),
