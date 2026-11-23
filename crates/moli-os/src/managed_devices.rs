@@ -365,15 +365,27 @@ impl Manager {
                 Some(device.device.id.as_str().to_owned()),
             ));
         }
+        // Where each instance's device really is: a device the profile
+        // driver followed to a new address leaves its configured one free
+        // (another device may have it now).
+        let here = |instance: &str, configured: &str| {
+            let at = self
+                .0
+                .hub
+                .known_address(&InstanceId::from(instance))
+                .filter(|known| known.configured == configured)
+                .map_or_else(|| configured.to_owned(), |known| known.host);
+            at == host
+        };
         self.0
             .configured
             .iter()
-            .filter(|c| c.host.as_deref() == Some(host))
+            .filter(|c| c.host.as_deref().is_some_and(|h| here(&c.instance, h)))
             .map(|c| c.instance.clone())
             .chain(
                 devices
                     .iter()
-                    .filter(|d| d.host == host)
+                    .filter(|d| here(&d.instance, &d.host))
                     .map(|d| d.instance.clone()),
             )
             .next()

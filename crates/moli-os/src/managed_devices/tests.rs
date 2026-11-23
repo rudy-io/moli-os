@@ -321,3 +321,37 @@ fn only_private_addresses_written_plainly() {
     assert!(private_host("1.1.1.1").is_none());
     assert!(private_host("192.168.1.255x").is_none());
 }
+
+/// A configured device that moved leaves its configured address free:
+/// another device there is not « already in the house ».
+#[tokio::test]
+async fn an_address_a_followed_device_left_is_free() {
+    let plug = Plug::start("").await;
+    let (dir, config) = house(
+        "[[driver]]\nid = \"meross-multi-9\"\nkind = \"profile\"\n[driver.options]\nprofile = \"meross-multiprise\"\nhost = \"127.0.0.1\"\n",
+    );
+    let hub = hub(&dir);
+    let cancel = CancellationToken::new();
+    let setup = Manager::at_port(hub.clone(), &config, cancel.clone(), plug.port);
+    // Still there, as far as Moli knows: the address is taken.
+    let taken = setup.probe(probe(LOOPBACK, None)).await.unwrap();
+    assert_eq!(taken.existing_instance.as_deref(), Some("meross-multi-9"));
+    // Followed elsewhere: free.
+    hub.remember_address(
+        &InstanceId::from("meross-multi-9"),
+        moli_runtime::KnownAddress {
+            configured: LOOPBACK.into(),
+            host: "192.168.1.9".into(),
+            mac: None,
+            identity: None,
+        },
+    )
+    .await
+    .unwrap();
+    let free = setup.probe(probe(LOOPBACK, None)).await.unwrap();
+    assert_eq!(free.status, "recognized");
+    assert_eq!(free.existing_instance, None);
+    cancel.cancel();
+    plug.task.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
