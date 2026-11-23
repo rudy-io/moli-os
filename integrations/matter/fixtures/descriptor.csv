@@ -41,3 +41,6 @@
 35,f,3b,ignored
 36,106,400,ignored
 37,305,403,ignored
+# Metering (0090/0091) needs its cluster metadata; the server list alone adds no point.
+38,10a 510,6 90 91,on
+39,510,90 91,ignored

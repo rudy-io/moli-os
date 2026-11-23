@@ -1894,8 +1894,9 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 `moli-matter` contrôle les appareils Matter sur le réseau IP, directement ou derrière
 un pont. Les capacités annoncées activent OnOff, variation/couleur (une luminosité à 0 %
 éteint la lampe au lieu de la ramener à son niveau minimal), stores de levage,
-thermostats et serrures sous garde ; température, humidité, occupation, contact et
-fuite restent en lecture seule. Reachable conditionne les endpoints pontés.
+thermostats et serrures sous garde ; température, humidité, occupation, contact,
+fuite et mesure électrique (puissance, tension, courant, index d'énergie en kWh des
+clusters `0090`/`0091`) restent en lecture seule. Reachable conditionne les endpoints pontés.
 Le tissu utilise le coffre chiffré et des racines d'attestation explicites.
 L'appairage humain passe par la CLI, sur le réseau IP (multi-admin) ; aucun
 provisionnement BLE/Thread n'est compilé, et un appareil Thread se commissionne
