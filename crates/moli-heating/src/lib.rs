@@ -21,6 +21,9 @@
 //!   leaves as it is for a while (`manual`, `airing`: [`hand`]); writing
 //!   `none` gives the valves the room's setpoint again.
 //! - `valve_override_until`: when that ends (RFC 3339), empty without one.
+//! - `heat_demand`: the room asks for heat, its sensor under the setpoint
+//!   by more than `hysteresis`, until it is over it by as much
+//!   ([`regulation::demand`]); never in `off` nor with the sensor quiet.
 //!
 //! ```toml
 //! [[heating]]
@@ -28,8 +31,13 @@
 //! name = "Chambre parentale"
 //! sensor = "matter:<meter>/temperature"
 //! valves = ["matter:<valve>/target_temperature"]  # each valve's setpoint
-//! # correction = false: the valves get the room's setpoint as it is (a valve
-//! #   that already regulates on a sensor of the room, as tado X does with its own)
+//! # regulation = "shift": the valves get the room's setpoint moved by the
+//! #   learned shift; "none": as it is (a valve that already regulates on a
+//! #   sensor of the room, as tado X does with its own; `correction = false`
+//! #   says the same); "force": the room's setpoint plus `force_offset` while
+//! #   the room asks for heat, minus it otherwise (a valve that regulates
+//! #   badly on its own thermometer)
+//! # force_offset = 4.0, hysteresis = 0.3
 //! # min = 5.0, max = 25.0: the setpoints the room accepts
 //! # initial = 19.0: the setpoint and schedule before anyone set one
 //! ```
@@ -41,7 +49,8 @@
 //!
 //! Orders go through the hub as the house's own, like a scene's. The room's
 //! sensor quiet, the shift holds and the valves are left as they are unless
-//! the room's setpoint or mode changes. A valve is written only on a
+//! the room's setpoint or mode changes; in `force`, the valves get the
+//! room's setpoint as it is, once. A valve is written only on a
 //! change of half a degree, at most every [`regulation::MIN_INTERVAL`] unless
 //! the room changed, and never in the first minutes after a start, while
 //! the drivers come back.
@@ -69,7 +78,7 @@ pub const INSTANCE: &str = "chauffage";
 /// How often the schedule and the valves are looked at.
 const TICK: Duration = Duration::from_secs(60);
 /// A reading older than this is no longer the room's temperature.
-const FRESH_MS: u64 = 30 * 60 * 1000;
+const FRESH: Duration = Duration::from_secs(30 * 60);
 /// No valve is written in this time after a start: the drivers come back
 /// and the sensors are read again first.
 const SETTLE: Duration = Duration::from_secs(3 * 60);
@@ -93,6 +102,18 @@ pub struct Room {
     /// get the room's setpoint as it is).
     #[serde(default = "default_correction")]
     pub correction: bool,
+    /// How the valves are driven ([`Regulation`]); unset: `shift`, or
+    /// `none` with `correction = false`.
+    #[serde(default)]
+    pub regulation: Option<Regulation>,
+    /// `force`: how far over or under the room's setpoint the valves are
+    /// sent (°C).
+    #[serde(default = "default_force_offset")]
+    pub force_offset: f64,
+    /// The room asks for heat under its setpoint by more than this, and no
+    /// longer over it by more than this (°C).
+    #[serde(default = "default_hysteresis")]
+    pub hysteresis: f64,
     #[serde(default = "default_min")]
     pub min: f64,
     #[serde(default = "default_max")]
@@ -102,8 +123,41 @@ pub struct Room {
     pub initial: f64,
 }
 
+/// How a room's valves are given their setpoint.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Regulation {
+    /// The room's setpoint, moved by a shift learned from the room's error
+    /// ([`regulation::Shift`]).
+    Shift,
+    /// The room's setpoint plus [`Room::force_offset`] while the room asks
+    /// for heat, minus it otherwise: the valve opens wide or shuts.
+    Force,
+    /// The room's setpoint as it is.
+    #[serde(rename = "none")]
+    AsIs,
+}
+
+impl Room {
+    /// The room's [`Regulation`], `correction = false` included.
+    #[must_use]
+    pub fn strategy(&self) -> Regulation {
+        self.regulation.unwrap_or(if self.correction {
+            Regulation::Shift
+        } else {
+            Regulation::AsIs
+        })
+    }
+}
+
 fn default_correction() -> bool {
     true
+}
+fn default_force_offset() -> f64 {
+    4.0
+}
+fn default_hysteresis() -> f64 {
+    0.3
 }
 fn default_min() -> f64 {
     5.0
@@ -173,6 +227,18 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
             parse_day(&format_day(&[day_of(room.initial)]), room.min, room.max).is_some(),
             "heating room {id}: initial within min..max, on the half degree"
         );
+        ensure!(
+            room.correction || room.regulation.is_none(),
+            "heating room {id}: correction = false or regulation, not both"
+        );
+        ensure!(
+            (0.5..=10.0).contains(&room.force_offset),
+            "heating room {id}: 0.5 <= force_offset <= 10"
+        );
+        ensure!(
+            (0.0..=2.0).contains(&room.hysteresis),
+            "heating room {id}: 0 <= hysteresis <= 2"
+        );
     }
     Ok(())
 }
@@ -188,12 +254,14 @@ pub struct Heating {
     zone: jiff::tz::TimeZone,
     settle: Duration,
     /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
-    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`]: shorter in the tests.
+    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`]:
+    /// shorter in the tests.
     floor: Duration,
     interval: Duration,
     tick: Duration,
     hand_hold: Duration,
     airing_hold: Duration,
+    fresh: Duration,
 }
 
 impl Heating {
@@ -210,6 +278,7 @@ impl Heating {
             tick: TICK,
             hand_hold: hand::HAND_HOLD,
             airing_hold: hand::AIRING_HOLD,
+            fresh: FRESH,
         }
     }
 }
@@ -271,6 +340,8 @@ struct RoomRun {
     /// Learned from the room's error, and when it was last read.
     shift: Shift,
     read: Option<Instant>,
+    /// The room asks for heat; none in `off` or with the sensor quiet.
+    demand: Option<bool>,
 }
 
 impl RoomRun {
@@ -409,6 +480,17 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
         unit: None,
         semantic: Semantic::Other,
     });
+    points.push(PointSpec {
+        key: "heat_demand".into(),
+        label: moli_i18n::tr!("pilotes.chauffage.demande").into(),
+        kind: Kind::Binary,
+        access: Access {
+            read: true,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Other,
+    });
     points.push(numeric(
         "valve_correction",
         moli_i18n::tr!("pilotes.chauffage.correction"),
@@ -463,7 +545,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         );
     }
     // The shift learned before a restart, not learned again from zero.
-    let shift = if room.correction {
+    let shift = if room.strategy() == Regulation::Shift {
         Shift::from(
             ctx.current(&id, "valve_correction")
                 .and_then(|v| v.as_f64())
@@ -475,6 +557,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
     ctx.set_state(&id, "valve_correction", Value::Float(shift.get()));
     // A hold is not kept across a restart: the valves get the room's again.
     show_hold(ctx, &id, None);
+    ctx.set_state(&id, "heat_demand", Value::Bool(false));
     ctx.set_availability(&id, true);
     RoomRun {
         id,
@@ -496,6 +579,7 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
             .collect(),
         shift,
         read: None,
+        demand: None,
     }
 }
 
@@ -524,6 +608,56 @@ fn mode_name(mode: Mode) -> &'static str {
     }
 }
 
+/// Whether the room asks for heat. In `force`, a change is the valves'
+/// to have soon; the sensor quiet, they get the room's setpoint as it is.
+fn demand(
+    ctx: &DriverCtx,
+    room: &Room,
+    run: &mut RoomRun,
+    temperature: Option<f64>,
+    strategy: Regulation,
+) {
+    let demand = match temperature {
+        Some(room_t) if run.mode != Mode::Off => Some(regulation::demand(
+            run.demand,
+            run.setpoint - room_t,
+            room.hysteresis,
+        )),
+        _ => None,
+    };
+    if demand == run.demand {
+        return;
+    }
+    if strategy == Regulation::Force {
+        for valve in &mut run.valves {
+            valve.urgent = true;
+        }
+        if demand.is_none() && run.mode != Mode::Off {
+            tracing::warn!(room = %room.id, "heating: room sensor quiet, the valves get the room's setpoint as it is");
+        }
+    }
+    run.demand = demand;
+    ctx.set_state(&run.id, "heat_demand", Value::Bool(demand == Some(true)));
+}
+
+/// The setpoint a valve within `bounds` is given: the room's `mode`,
+/// `setpoint`, `demand` and learned `shift`.
+fn target(
+    room: &Room,
+    strategy: Regulation,
+    (mode, setpoint, demand): (Mode, f64, Option<bool>),
+    shift: f64,
+    bounds: (f64, f64),
+) -> f64 {
+    match (mode, strategy, demand) {
+        (Mode::Off, ..) => bounds.0,
+        (_, Regulation::Force, Some(demand)) => {
+            regulation::forced_setpoint(setpoint, room.force_offset, demand, bounds)
+        }
+        _ => valve_setpoint(setpoint, shift, bounds),
+    }
+}
+
 impl Heating {
     /// A temperature that is still the room's: recent, from a device that
     /// answers.
@@ -539,7 +673,8 @@ impl Heating {
         }
         let sample = self.hub.state(&point)?;
         let value = sample.value.as_f64().filter(|t| t.is_finite())?;
-        (now_ms().saturating_sub(sample.ts) <= FRESH_MS).then_some(value)
+        let age = u128::from(now_ms().saturating_sub(sample.ts));
+        (age <= self.fresh.as_millis()).then_some(value)
     }
 
     /// Whether one of the room's valves still heats (none known: yes, as
@@ -659,6 +794,24 @@ impl Heating {
         }
     }
 
+    /// The room's error moves the shift, while heating and the room known,
+    /// and `learning` (`shift`, no valve held by hand: the room is not at
+    /// its setpoint then).
+    fn learn(&self, room: &Room, run: &mut RoomRun, temperature: Option<f64>, learning: bool) {
+        if let Some(room_t) = temperature
+            && learning
+            && run.mode != Mode::Off
+        {
+            let now = Instant::now();
+            let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
+            let heating = self.heating(room, room_t);
+            run.shift.update(run.setpoint - room_t, elapsed, heating);
+            run.read = Some(now);
+        } else {
+            run.read = None;
+        }
+    }
+
     /// Reads the room and its valves, and writes the valves that need it.
     async fn regulate(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, settled: bool) {
         let temperature = self.fresh(&room.sensor);
@@ -692,21 +845,14 @@ impl Heating {
         }
         let hold = run.hold();
         show_hold(ctx, &run.id, hold);
-        // The room's error moves the shift, while heating and the room known,
-        // and no valve held by hand (the room is not at its setpoint then).
-        if let Some(room_t) = temperature
-            && room.correction
-            && run.mode != Mode::Off
-            && hold.is_none()
-        {
-            let now = Instant::now();
-            let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
-            let heating = self.heating(room, room_t);
-            run.shift.update(run.setpoint - room_t, elapsed, heating);
-            run.read = Some(now);
-        } else {
-            run.read = None;
-        }
+        let strategy = room.strategy();
+        demand(ctx, room, run, temperature, strategy);
+        self.learn(
+            room,
+            run,
+            temperature,
+            hold.is_none() && strategy == Regulation::Shift,
+        );
         let shift = run.shift.get();
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
             // Kept until the valve may be written: a change made while Moli
@@ -729,10 +875,13 @@ impl Heating {
             if temperature.is_none() && !urgent {
                 continue;
             }
-            let next = match run.mode {
-                Mode::Off => bounds.0,
-                Mode::Heat | Mode::Auto => valve_setpoint(run.setpoint, shift, bounds),
-            };
+            let next = target(
+                room,
+                strategy,
+                (run.mode, run.setpoint, run.demand),
+                shift,
+                bounds,
+            );
             // On the valve's own step, coarser than the half degree: what it holds.
             let next = regulation::on_step(next, step, bounds);
             let point = PointId::from(valve.as_str());

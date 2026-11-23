@@ -2,7 +2,9 @@
 
 1. Demander : Frigate publie-t-il sur MQTT, et sur quel broker (même que Zigbee2MQTT ?) ;
    l'adresse de son API interne (défaut `http://127.0.0.1:5000`).
-2. Aucun identifiant : le broker doit accepter Moli sans mot de passe.
+2. Aucun identifiant : le broker doit accepter Moli sans mot de passe. Avec des ACL, Moli lit
+   `frigate/available`, `frigate/stats`, `frigate/reviews` (les alertes), `frigate/+/+`,
+   `frigate/+/+/state`, `frigate/+/status/detect`, et n'écrit que `frigate/+/<detect|recordings|snapshots>/set`.
 3. Déclarer `kind = "frigate"` (options par défaut : `127.0.0.1:1883`, sujet `frigate`) ;
    `moli-os check-config`, redémarrer.
 4. Le direct (facultatif) : seulement si la maison le choisit, avec un go2rtc joignable
