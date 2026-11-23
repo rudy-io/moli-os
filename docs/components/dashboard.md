@@ -58,8 +58,8 @@ La vue Airzone reste une vue de consultation. Le pilotage autorisé est accessib
 La page Installation présente d’abord les passerelles et leurs actions courantes. Les adresses, les identifiants, le retrait réversible et le remplacement sont repliés dans les réglages ; les diagnostics détaillés sont dans « Informations techniques ». L’assistant conserve l’aide sur l’appairage physique et la restauration des cartes sous « Besoin d’aide ? ». La découverte des zones déjà appairées reste automatique ; l’API locale n’offre ni appairage ni désappairage physique.
 
 
-Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : Thème,
-Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli. Une pastille glisse
+Navigation : un menu à gauche par défaut (une barre en bas sur téléphone, défilable) ; pied du
+menu : Thème, Système, Atelier. Un menu plus long que l'écran défile, le pied reste en vue. Bulle « Demander à Moli » sur toutes les pages sauf Moli. Une pastille glisse
 d'un onglet à l'autre, une page arrive en fondu ; un onglet ajouté ou retiré se range en glissant.
 
 **Thème** ouvre une feuille : l'apparence (Auto / Jour / Nuit), les **couleurs** (un thème,
@@ -69,6 +69,14 @@ sans choix, l'écran prend celui de la maison (`theme` de `home.json`), sinon Po
 chaque écran a son menu, et un onglet qui apparaît plus tard (une première caméra) se montre de
 lui-même. Accueil ne s'éteint pas. Un onglet que la maison n'a rien pour remplir n'est pas listé.
 Une page éteinte s'ouvre toujours par son adresse (`#/plan`).
+
+La feuille règle aussi **le menu** de l'écran (`lib/menu.js`) : sa **position** (gauche, droite,
+haut, bas ; sur un téléphone il reste une barre, en haut ou en bas), sa **forme** (classique :
+icônes et noms ; compact : icônes seules, le nom en info-bulle et pour les lecteurs d'écran ;
+flottant : une carte détachée du bord) et **l'ordre** des onglets (flèches monter / descendre,
+« Revenir à l'ordre d'origine »). Accueil reste premier ; un onglet qui apparaît plus tard prend sa
+place d'origine après ceux qu'on a rangés. Retenu par écran (`maison-menu` dans le navigateur) ;
+sans choix, l'écran prend le `menu` de `home.json`, sinon le menu classique à gauche.
 
 ## La mise en page de la maison : `data/home.json`
 
@@ -136,6 +144,10 @@ telles que les appareils les nomment).
 - `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment (nombres et heures dans la langue de la maison) ; relu toutes les 10 à 60 s selon la fenêtre, jamais quand la page est cachée. 8 points au plus par carte, `minutes` de 1 à 10 080 (une semaine) ; un point mal écrit (sans `/`) ou que la maison n'a pas est écarté, et la carte le dit.
 - `themes` et `theme` : les thèmes de la maison et celui qu'un nouvel écran prend (voir
   « Les thèmes » ci-dessous).
+- `menu` (facultatif) : le menu qu'un écran prend tant qu'il n'a rien choisi,
+  `{ "position": "bottom", "shape": "floating", "order": ["salon", "plan"] }` ; `position` parmi
+  `left`, `right`, `top`, `bottom`, `shape` parmi `classic`, `compact`, `floating`, `order` les
+  adresses des onglets (sans Accueil). Un mot inconnu est ignoré.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
