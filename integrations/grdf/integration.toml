@@ -1,0 +1,31 @@
+[integration]
+id = "grdf"
+name = "GRDF (compteur gaz Gazpar, par l'espace client)"
+# Unofficial: GRDF has no public API for its customers. Moli signs in to the
+# customer area as its page does, which GRDF may change at any time.
+brands = ["GRDF"]
+models = ["Compteur Gazpar"]
+transport = "https"
+driver = "grdf"
+crate = "moli-grdf"
+
+[discovery]
+# A cloud account: nothing to find on the home network.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+secrets = ["email", "password"]
+vars = []
+options = ["pce"]
+
+[origin]
+reused = "aucun code repris : adresses, étapes de connexion et champs lus dans PyGazpar (bibliothèque de Gazpar2HAWS et de l'intégration Gazpar de Home Assistant) comme référence du protocole"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/informatives.json"
+
+[[fixture]]
+file = "fixtures/identify.json"

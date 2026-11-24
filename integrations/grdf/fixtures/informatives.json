@@ -1,0 +1,80 @@
+{
+  "00000000000000": {
+    "idPce": "00000000000000",
+    "frequence": null,
+    "releves": [
+      {
+        "coeffConversion": 11.31,
+        "dateDebutReleve": "2000-01-01T05:00:00+00:00",
+        "dateFinReleve": "2000-01-02T05:00:00+00:00",
+        "energieConsomme": 113,
+        "frequenceReleve": null,
+        "indexDebut": 1000,
+        "indexFin": 1010,
+        "journeeGaziere": "2000-01-01",
+        "natureReleve": "Informative Journalier",
+        "pcs": null,
+        "pta": null,
+        "qualificationReleve": "Mesuré",
+        "status": null,
+        "temperature": null,
+        "volumeBrutConsomme": 10,
+        "volumeConverti": null
+      },
+      {
+        "coeffConversion": 11.31,
+        "dateDebutReleve": "2000-01-02T05:00:00+00:00",
+        "dateFinReleve": "2000-01-03T05:00:00+00:00",
+        "energieConsomme": 113,
+        "frequenceReleve": null,
+        "indexDebut": 1010,
+        "indexFin": 1020,
+        "journeeGaziere": "2000-01-02",
+        "natureReleve": "Informative Journalier",
+        "pcs": null,
+        "pta": null,
+        "qualificationReleve": "Mesuré",
+        "status": null,
+        "temperature": null,
+        "volumeBrutConsomme": 10,
+        "volumeConverti": null
+      },
+      {
+        "coeffConversion": 11.31,
+        "dateDebutReleve": "2000-01-03T05:00:00+00:00",
+        "dateFinReleve": "2000-01-04T05:00:00+00:00",
+        "energieConsomme": 102,
+        "frequenceReleve": null,
+        "indexDebut": 1020,
+        "indexFin": 1029,
+        "journeeGaziere": "2000-01-03",
+        "natureReleve": "Informative Journalier",
+        "pcs": null,
+        "pta": null,
+        "qualificationReleve": "Mesuré",
+        "status": null,
+        "temperature": null,
+        "volumeBrutConsomme": 9,
+        "volumeConverti": null
+      },
+      {
+        "coeffConversion": null,
+        "dateDebutReleve": "2000-01-04T05:00:00+00:00",
+        "dateFinReleve": "2000-01-05T05:00:00+00:00",
+        "energieConsomme": null,
+        "frequenceReleve": null,
+        "indexDebut": 1029,
+        "indexFin": null,
+        "journeeGaziere": "2000-01-04",
+        "natureReleve": "Informative Journalier",
+        "pcs": null,
+        "pta": null,
+        "qualificationReleve": null,
+        "status": null,
+        "temperature": null,
+        "volumeBrutConsomme": null,
+        "volumeConverti": null
+      }
+    ]
+  }
+}

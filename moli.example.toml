@@ -112,6 +112,16 @@ timezone = "Europe/Paris"
 # history = true
 # price = 0.17
 
+# Natural gas from a Gazpar meter, through the `grdf` driver: each day,
+# reported a day late, spread evenly over its hours (already in kWh):
+# [[energy.meter]]
+# id = "gas"
+# name = "Gas"
+# point = "grdf:gazpar/hours"
+# role = "gas"
+# history = true
+# price = 0.12
+
 # A home battery: what went in and out (lifetime indexes, no price), plus its
 # charge and power for the live views (power positive while charging; set
 # discharge_positive = true for an inverter that counts the other way):

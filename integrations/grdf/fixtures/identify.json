@@ -1,0 +1,75 @@
+{
+  "version": "1.0.0",
+  "stateHandle": "02.id.FIXTURE-STATE-HANDLE",
+  "expiresAt": "2000-01-01T00:10:00.000Z",
+  "intent": "LOGIN",
+  "remediation": {
+    "type": "array",
+    "value": [
+      {
+        "rel": [
+          "create-form"
+        ],
+        "name": "challenge-authenticator",
+        "relatesTo": [
+          "$.currentAuthenticatorEnrollment"
+        ],
+        "href": "https://connexion.grdf.fr/idp/idx/challenge/answer",
+        "method": "POST",
+        "value": [
+          {
+            "name": "credentials",
+            "type": "object",
+            "form": {
+              "value": [
+                {
+                  "name": "passcode",
+                  "label": "Password",
+                  "secret": true
+                }
+              ]
+            },
+            "required": true
+          },
+          {
+            "name": "stateHandle",
+            "required": true,
+            "value": "02.id.FIXTURE-STATE-HANDLE",
+            "visible": false,
+            "mutable": false
+          }
+        ],
+        "accepts": "application/json; okta-version=1.0.0"
+      },
+      {
+        "rel": [
+          "create-form"
+        ],
+        "name": "select-authenticator-authenticate",
+        "href": "https://connexion.grdf.fr/idp/idx/challenge",
+        "method": "POST"
+      }
+    ]
+  },
+  "currentAuthenticatorEnrollment": {
+    "type": "object",
+    "value": {
+      "type": "password",
+      "key": "okta_password",
+      "displayName": "Password"
+    }
+  },
+  "user": {
+    "type": "object",
+    "value": {
+      "identifier": "user@example.com"
+    }
+  },
+  "app": {
+    "type": "object",
+    "value": {
+      "name": "oidc_client",
+      "label": "Mon Espace GRDF"
+    }
+  }
+}

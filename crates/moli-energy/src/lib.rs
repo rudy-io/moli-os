@@ -1641,6 +1641,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn late_gas_hours_are_filed_with_their_own_price_only() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n\
+             [[meter]]\nid = \"gaz\"\nname = \"Gaz\"\npoint = \"grdf:gazpar/hours\"\nrole = \"gas\"\nhistory = true\nprice = 0.1\n\
+             [[meter]]\nid = \"gaz2\"\nname = \"Gaz sans prix\"\npoint = \"grdf2:gazpar/hours\"\nrole = \"gas\"\nhistory = true\n",
+        )
+        .unwrap();
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let store = Arc::new(Store::memory());
+        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
+        let text = |json: String| Value::Text(json.into());
+        let hour = |kwh: f64| format!(r#"[{{"hour":{},"kwh":{kwh}}}]"#, 10 * H);
+        recorder
+            .on_meter("enedis:linky/hours", &text(hour(1.0)), 30 * H)
+            .await;
+        recorder
+            .on_meter("grdf:gazpar/hours", &text(hour(4.0)), 30 * H)
+            .await;
+        recorder
+            .on_meter("grdf2:gazpar/hours", &text(hour(2.0)), 30 * H)
+            .await;
+        let rows = store.hours(0, 100 * H).unwrap();
+        let cost = |id: &str| rows.iter().find(|r| r.meter == id).map(|r| (r.kwh, r.cost));
+        assert_eq!(cost("gaz"), Some((4.0, Some(0.4))));
+        // Never the electricity's price.
+        assert_eq!(cost("gaz2"), Some((2.0, None)));
+    }
+
+    #[tokio::test]
     async fn the_house_price_prices_the_meters_without_one_from_its_time() {
         let config: Config = toml::from_str(
             "[[meter]]\nid = \"plug\"\nname = \"Plug\"\npoint = \"t:p/e\"\nrole = \"total\"\n\
