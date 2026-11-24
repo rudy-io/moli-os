@@ -362,6 +362,8 @@
   "pilotes.enedis.jeton_refuse": "la Conso API refuse ce jeton : renouveler le consentement avant de redémarrer",
   "pilotes.enedis.reseau": "la Conso API ne répond pas",
   "pilotes.enedis.statut": "la Conso API a répondu {status}",
+  "pilotes.enedis.statut_motif": "la Conso API a répondu {status} : {motif}",
+  "pilotes.enedis.sans_courbe": "Enedis ne fournit pas la courbe horaire ({motif}) : seule la consommation de chaque jour est relevée, sans le détail par heure ni le pic",
   "pilotes.enedis.reponse_illisible": "réponse de la Conso API illisible",
   "pilotes.enedis.pas_de_donnees": "aucune mesure depuis une semaine : vérifier que la courbe de charge est activée dans l'espace client Enedis",
   "pilotes.tuya.aucun_appareil": "aucun appareil Tuya pour l'instant : lancer `moli-os tuya import` (fichier attendu : {file})",

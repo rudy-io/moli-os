@@ -114,6 +114,11 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   (l'index HC n'est étalé que sur du temps HC).
 - Chiffre principal = la plus complète des deux mesures (`grid` et `total`, par exemple Linky
   et EM06).
+- **Jours entiers** (`history`) : une entrée peut aussi être un jour entier (`{"day": ms, "to": ms,
+  "kwh": …}`, de minuit à minuit, 23 à 25 heures), quand le service ne donne que le total du jour
+  (pilote `enedis` sans courbe). Il est réparti également sur ses heures **seulement si aucune heure
+  de ce compteur n'est déjà classée ce jour-là** : une courbe reçue, même en partie, n'est jamais
+  complétée, et rien ne compte deux fois.
 - **Historique repris de HA** (statistiques long terme, lecture seule) :
   `tools/home-assistant/ha-energy-export.py … | docker exec -i moli-os /moli-os energy
   import`, relançable sans doublon.

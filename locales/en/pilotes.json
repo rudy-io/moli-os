@@ -362,6 +362,8 @@
   "pilotes.enedis.jeton_refuse": "the Conso API refuses this token: renew the consent before restarting",
   "pilotes.enedis.reseau": "the Conso API does not answer",
   "pilotes.enedis.statut": "the Conso API answered {status}",
+  "pilotes.enedis.statut_motif": "the Conso API answered {status}: {motif}",
+  "pilotes.enedis.sans_courbe": "Enedis does not provide the hourly curve ({motif}): only each day's consumption is read, without the hours or the peak",
   "pilotes.enedis.reponse_illisible": "unreadable answer from the Conso API",
   "pilotes.enedis.pas_de_donnees": "no measure for a week: check that the load curve is enabled in the Enedis customer area",
   "pilotes.tuya.aucun_appareil": "no Tuya devices yet: run `moli-os tuya import` (expected file: {file})",
