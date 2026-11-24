@@ -3,7 +3,7 @@
   import { hub } from '../lib/home.svelte.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
-  import { noLiveMeasure, lastDay, vsUsual, usualFrac } from '../lib/energy-late.js';
+  import { lateHouse, lastDay, vsUsual, usualFrac } from '../lib/energy-late.js';
   import Icon from './Icon.svelte';
 
   onMount(useEnergy);
@@ -45,7 +45,7 @@
 
   // Meters a day late and nothing live (Linky through Enedis, Gazpar through
   // GRDF): the last day known against its usual day, not a « today » at 0.
-  const late = $derived(noLiveMeasure(s));
+  const late = $derived(lateHouse(s));
   const days = $derived(late ? [lastDay(s, 'electricity'), lastDay(s, 'gas')].filter(Boolean) : []);
   const elecDay = $derived(days.find((d) => d.energy === 'electricity'));
   const hasGas = $derived(!!s?.month?.gas || (s?.meters ?? []).some((m) => m.role === 'gas'));

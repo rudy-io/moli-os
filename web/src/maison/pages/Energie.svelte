@@ -13,7 +13,7 @@
   import DayEnergy from '../ui/DayEnergy.svelte';
   import { batteryNow } from '../lib/battery.js';
   import { yearOverYear, trendTone } from '../lib/year-compare.js';
-  import { noLiveMeasure, lastDay, vsUsual } from '../lib/energy-late.js';
+  import { lateHouse, lastDay, vsUsual } from '../lib/energy-late.js';
 
   onMount(useEnergy);
 
@@ -39,7 +39,7 @@
 
   // Meters a day late and nothing live (a Linky through Enedis, a Gazpar
   // through GRDF): the last day known instead of « now » and « today ».
-  const late = $derived(noLiveMeasure(s));
+  const late = $derived(lateHouse(s));
   const elecDay = $derived(late ? lastDay(s, 'electricity') : null);
   const gasDay = $derived(lastDay(s, 'gas'));
   const hasCircuits = $derived((s?.meters ?? []).some((m) => m.role === 'circuit' || m.role === 'appliance'));
@@ -535,10 +535,10 @@
           {/each}
         </div>
       </div>
-      <EnergyChart {range} {by} />
+      <EnergyChart {range} {by} stackGas={late} />
       <p class="foot muted">
         {!splits ? t('energie.histo.note_compteurs') : by === 'devices' ? t('energie.histo.note_appareils') : t('energie.histo.note_tarif')}
-        {#if gasDay}{t('energie.histo.note_gaz')}{/if}
+        {#if late && gasDay}{t('energie.histo.note_gaz')}{/if}
         {t('energie.histo.avant_moli')}
       </p>
     </section>

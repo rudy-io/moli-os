@@ -9,7 +9,9 @@
    *  (`by` = 'devices': circuits, appliances, lights, the rest) or as
    *  billed ('tariff': off-peak and peak). Hovering a bar, the legend says
    *  what each part drew in it. */
-  let { range = 'day', by = 'devices' } = $props();
+  /** `stackGas`: a house read a day late, nothing live (Linky, Gazpar): its
+   *  gas stacks above the electricity. Elsewhere gas stays apart, as always. */
+  let { range = 'day', by = 'devices', stackGas = false } = $props();
 
   const RANGES = {
     hour: { step: 'hour', count: 24 },
@@ -48,7 +50,9 @@
   const own = $derived(ownUse(meters));
 
   // The gas meters, on top of the electricity (the total is then both).
-  const gas = $derived(meters.filter((m) => m.role === 'gas').map((m) => ({ id: m.id, name: m.name, color: GAS, gas: true })));
+  const gas = $derived(
+    stackGas ? meters.filter((m) => m.role === 'gas').map((m) => ({ id: m.id, name: m.name, color: GAS, gas: true })) : [],
+  );
   const electricity = $derived.by(() => {
     // Without circuits nor measured appliances, the parts would be the whole
     // house as « the rest », in grey: the meter itself says it better.

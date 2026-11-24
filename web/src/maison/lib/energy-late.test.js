@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { noLiveMeasure, lastDay, vsUsual, usualFrac, gaps } from './energy-late.js';
+import { noLiveMeasure, lateHouse, lastDay, vsUsual, usualFrac, gaps } from './energy-late.js';
 
 const DAY = 86_400_000;
 
@@ -9,6 +9,17 @@ test('a house without a live measure is told apart', () => {
   assert.equal(noLiveMeasure({ meters: [{ role: 'grid', history: true }] }), true);
   assert.equal(noLiveMeasure({ live: { point: 'a/b' }, meters: [] }), false);
   assert.equal(noLiveMeasure({ meters: [{ role: 'total', power: 'z2m:x/power' }] }), false);
+});
+
+test('a house is shown by its last day only when the server says its electricity is late', () => {
+  const elec = { energy: 'electricity', day: 1, amount: { kwh: 1 }, usual_days: 0 };
+  const gas = { energy: 'gas', day: 1, amount: { kwh: 1 }, usual_days: 0 };
+  assert.equal(lateHouse({ meters: [], last_days: [elec] }), true);
+  // New install, or a cumulative meter without a power point: no last day yet.
+  assert.equal(lateHouse({ meters: [{ role: 'total' }] }), false);
+  // Only the gas is late: the electricity keeps « now » and « today ».
+  assert.equal(lateHouse({ meters: [], last_days: [gas] }), false);
+  assert.equal(lateHouse({ live: { point: 'a/b' }, meters: [], last_days: [elec] }), false);
 });
 
 test('the last day known, against its usual day', () => {

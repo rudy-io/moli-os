@@ -11,6 +11,12 @@ export function noLiveMeasure(summary) {
   return !summary.live && !(summary.meters ?? []).some((m) => m.power);
 }
 
+/** A house shown by its last day known: the server says its electricity is
+ *  read a day late (`last_days`), and nothing is measured live. */
+export function lateHouse(summary) {
+  return noLiveMeasure(summary) && lastDay(summary, 'electricity') != null;
+}
+
 /** The last day known of `energy` ('electricity' or 'gas'), if read late. */
 export function lastDay(summary, energy) {
   return (summary?.last_days ?? []).find((d) => d.energy === energy) ?? null;
