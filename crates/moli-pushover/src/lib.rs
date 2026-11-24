@@ -128,6 +128,21 @@ fn key_ok(key: &str) -> bool {
     key.len() == 30 && key.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// What is wrong with a stored key, told without the key: which secret, how
+/// long it is, how many characters are not letters or digits.
+fn key_problem(name: &str, key: &str) -> Option<String> {
+    if key_ok(key) {
+        return None;
+    }
+    let other = key.chars().filter(|c| !c.is_ascii_alphanumeric()).count();
+    Some(moli_i18n::tr!(
+        "pilotes.pushover.cle_invalide",
+        name = name,
+        len = key.chars().count(),
+        other = other
+    ))
+}
+
 /// « Title\nMessage », or just a message (titled « Moli »), cut to
 /// Pushover's limits rather than refused.
 fn message(text: &str) -> Option<Message> {
@@ -379,8 +394,8 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         return park(ctx, &id, moli_i18n::tr!("pilotes.pushover.cles_manquantes")).await;
     };
     let (token, user) = (token.trim().to_owned(), user.trim().to_owned());
-    if !key_ok(&token) || !key_ok(&user) {
-        return park(ctx, &id, moli_i18n::tr!("pilotes.pushover.cles_invalides")).await;
+    if let Some(problem) = key_problem(TOKEN, &token).or_else(|| key_problem(USER, &user)) {
+        return park(ctx, &id, problem).await;
     }
     let web: &dyn Web = &api::Internet;
     let client = Client::new(web, token, user);
@@ -530,6 +545,10 @@ mod tests {
         assert!(!key_ok(""));
         assert!(!key_ok("short"));
         assert!(!key_ok("faketokenfaketokenfaketoken00/"));
+        assert_eq!(key_problem(TOKEN, KEY), None);
+        let said = key_problem(USER, "abc def").unwrap();
+        assert!(said.contains("user") && said.contains('7') && said.contains('1'));
+        assert!(!said.contains("abc"));
     }
 
     #[test]

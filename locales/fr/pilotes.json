@@ -16,7 +16,7 @@
   "pilotes.pushover.restants": "Messages restants ce mois",
   "pilotes.pushover.tous_les_appareils": "tous les appareils du compte",
   "pilotes.pushover.cles_manquantes": "il manque le jeton d'application ou la clé utilisateur Pushover (secrets « token » et « user »)",
-  "pilotes.pushover.cles_invalides": "le jeton d'application et la clé utilisateur Pushover font chacun 30 lettres et chiffres : vérifier les secrets « token » et « user »",
+  "pilotes.pushover.cle_invalide": "le secret « {name} » de Pushover fait {len} caractères, dont {other} autres que des lettres et des chiffres, au lieu de 30 lettres et chiffres : le ranger à nouveau (seulement la clé, copiée depuis pushover.net), puis redémarrer",
   "pilotes.pushover.cles_refusees": "Pushover refuse les clés ({why}) : vérifier le jeton d'application et la clé utilisateur sur pushover.net, les ranger à nouveau, puis redémarrer",
   "pilotes.pushover.appareils_inconnus": "appareils Pushover inconnus : {unknown} (ceux du compte : {known}) ; corriger `devices`, puis redémarrer",
   "pilotes.pushover.injoignable": "Pushover injoignable ({cause})",

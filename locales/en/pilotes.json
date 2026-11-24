@@ -16,7 +16,7 @@
   "pilotes.pushover.restants": "Messages left this month",
   "pilotes.pushover.tous_les_appareils": "every device of the account",
   "pilotes.pushover.cles_manquantes": "the Pushover application token or user key is missing (secrets “token” and “user”)",
-  "pilotes.pushover.cles_invalides": "a Pushover application token and user key are 30 letters and digits each: check the secrets “token” and “user”",
+  "pilotes.pushover.cle_invalide": "Pushover's “{name}” secret is {len} characters long, {other} of them neither letters nor digits, instead of 30 letters and digits: store it again (the key alone, copied from pushover.net), then restart",
   "pilotes.pushover.cles_refusees": "Pushover refuses the keys ({why}): check the application token and the user key on pushover.net, store them again, then restart",
   "pilotes.pushover.appareils_inconnus": "unknown Pushover devices: {unknown} (the account's: {known}); fix `devices`, then restart",
   "pilotes.pushover.injoignable": "Pushover unreachable ({cause})",
