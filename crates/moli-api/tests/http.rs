@@ -3405,21 +3405,18 @@ impl moli_api::device_setup::DeviceSetup for CountedDeviceSetup {
 async fn only_a_person_adds_a_device_never_an_agent_nor_the_tablet_without_its_code() {
     let hub = lamp_hub().await;
     let setup = Arc::new(CountedDeviceSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            device_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        device_setup: Some(setup.clone()),
+        ..moli_api::Options::default()
+    };
     let probe = json!({"host":"192.168.1.40"});
     let install = json!({"host":"192.168.1.40","identity":"abc","name":"Lampe"});
     let routes = [
         ("/api/integrations/devices/probe", &probe),
         ("/api/integrations/devices", &install),
     ];
+    let addr = serve(&hub, &options).await;
     for (who, headers) in [
         // An agent through the API (`Api`), and one that says it is MCP.
         ("agent", ""),
@@ -3428,20 +3425,24 @@ async fn only_a_person_adds_a_device_never_an_agent_nor_the_tablet_without_its_c
         ("tablet", "x-moli-origin: ui\r\n"),
     ] {
         for (route, body) in routes {
-            let (status, _) = request_with(&addr, "POST", route, Some(body), headers).await;
-            assert_eq!(status, 403, "{who} reached {route}");
+            let (status, body) = request_with(&addr, "POST", route, Some(body), headers).await;
+            assert_eq!(status, 403, "{who} reached {route}: {body}");
         }
     }
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 
-    // A person with the house's code reaches the backend.
+    // A person with the house's code reaches the backend. Another server:
+    // the refusals above spent these routes' budget (six per 10 s).
+    let addr = serve(&hub, &options).await;
     let human = format!(
         "{}x-moli-origin: ui\r\n",
         pin_session(&addr, "482915").await
     );
-    for (route, body) in routes {
+    // The fake backend: nobody answers the probe (200, `silent`), nor the addition (502).
+    for ((route, body), expected) in routes.into_iter().zip([200, 502]) {
         let (status, body) = request_with(&addr, "POST", route, Some(body), &human).await;
-        assert_ne!(status, 403, "{route}: {body}");
+        assert_eq!(status, expected, "{route}: {body}");
+        assert!(body.contains("silent"), "{route}: {body}");
     }
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
 }
