@@ -65,6 +65,21 @@
     if (m !== mode) act(`${modeDevice.id}/state`, m, t('maison.accueil.mode_action', { mode: modeName(m) }));
   }
 
+  // Shortcuts: the switches the house uses most (home.json
+  // `favorites.switches`), one tap away, first thing on the page.
+  const shortcuts = $derived(
+    (cfg.favorites?.switches ?? [])
+      .map((s) => {
+        const cut = String(s.point ?? '').lastIndexOf('/');
+        return { ...s, id: s.point?.slice(0, cut), key: s.point?.slice(cut + 1) };
+      })
+      .filter((s) => s.id && s.key && device(s.id)),
+  );
+  function toggleShortcut(s) {
+    const on = isOn(s.id, s.key);
+    act(s.point, !on, t(on ? 'maison.accueil.raccourci_eteindre' : 'maison.accueil.raccourci_allumer', { name: s.name }));
+  }
+
   // The speakers that talk (announcements): one tap silences them all, for
   // four hours at most (they speak again by themselves).
   const talkers = $derived(Object.values(hub.devices).filter((d) => d.points.some((p) => p.key === 'quiet' && p.access?.write)));
@@ -210,6 +225,22 @@
 
 <div class="accueil">
   <SkyHero />
+
+  {#if shortcuts.length}
+    <div class="shortcuts" role="group" aria-label={t('maison.accueil.raccourcis')}>
+      {#each shortcuts as s (s.point)}
+        {@const on = isOn(s.id, s.key)}
+        <button
+          class:on
+          aria-pressed={on}
+          disabled={pending(s.id, s.key) || device(s.id)?.online === false}
+          onclick={() => toggleShortcut(s)}
+        >
+          <span class="dot"><Icon name={s.icon ?? 'power'} size={20} /></span>{s.name}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   {#if modes.length}
     <div class="modes" role="radiogroup" aria-label={t('maison.accueil.mode_maison')}>
@@ -383,6 +414,53 @@
   .modes button.hush.on {
     background: color-mix(in srgb, var(--alert) 16%, var(--surface-2));
     color: var(--alert);
+  }
+
+  .shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .shortcuts button {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 18px 8px 8px;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 650;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: background 0.2s var(--ease), color 0.2s var(--ease);
+  }
+
+  .shortcuts .dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface, #fff);
+    color: var(--ink-3);
+  }
+
+  .shortcuts button.on {
+    background: var(--warm-soft);
+    color: var(--warm-ink);
+  }
+
+  .shortcuts button.on .dot {
+    background: var(--warm-ink);
+    color: var(--surface, #fff);
+  }
+
+  .shortcuts button:disabled {
+    opacity: 0.55;
+    cursor: default;
   }
 
   .notices {

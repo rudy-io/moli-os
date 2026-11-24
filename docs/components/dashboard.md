@@ -91,6 +91,7 @@ telles que les appareils les nomment).
   "favorites": {
     "lights":  [{ "id": "hue:…", "name": "Salon", "icon": "sofa-outline" }],
     "climate": [{ "id": "clim-salon:…", "name": "Salon" }],
+    "switches": [{ "point": "tuya:…/switch_1", "name": "Appareil photo", "icon": "camera" }],
     "cameras": [{ "id": "reolink:…", "name": "Sonnette", "refresh": 10 }, { "id": "reolink:…", "name": "Allée", "refresh": 60, "battery": true }]
   },
   "salon":   { "tv": "tele:…", "speaker": "sonos:…", "room_light": "hue:…", "lamps": ["hue:…"] },
@@ -104,6 +105,11 @@ telles que les appareils les nomment).
 }
 ```
 
+- `favorites.switches` (facultatif) : les interrupteurs dont la maison se sert le plus (une prise,
+  une sortie de multiprise), en haut de l'Accueil, juste sous le ciel : un appui allume ou éteint
+  le point (`point` = `<appareil>/<clé>`, valeur vrai/faux), la pastille est colorée quand il est
+  allumé, grisée quand l'appareil ne répond pas. `icon` : un nom du jeu d'icônes (`power` par défaut).
+  La garde s'applique comme partout (pièce protégée, heures calmes).
 - `live_outside` (facultatif, `true`) : le direct des caméras aussi **hors de la maison** (carte « Devant la porte » de l'accueil, visionneuse des caméras). Seulement si la maison a ouvert le port WebRTC de ses caméras vers Internet (Frigate : redirection du port 8555 TCP et UDP, et l'adresse publique dans `go2rtc.webrtc.candidates`) : sans lui, le direct échouerait après 15 s et retomberait sur les images. Le port ne sert que les flux négociés par Moli (même contrôle que les images : pas d'invité, pièce protégée derrière le code). Le passé reste à la maison.
 - `scenes` : les scènes de la maison (`[[scene]]` dans `moli.toml`, voir [pilotes.md](pilotes.md))
   montrées sur l'Accueil, sous les lumières, dans cet ordre : nom, icône et couleurs de la pastille.
