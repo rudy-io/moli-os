@@ -3,7 +3,8 @@
 //! back to the room's.
 //!
 //! - **By hand**: the setpoint holds for [`HAND_HOLD`] at most, and only
-//!   until the next step of the schedule.
+//!   until the room's own setpoint changes (the next step of the schedule,
+//!   the end of a setpoint held or of a boost: [`crate::temporary`]).
 //! - **Airing**: a valve turned down to its lowest, or well under the room
 //!   ([`AIRING_BELOW`]), is someone opening the window. It holds for
 //!   [`AIRING_HOLD`], and ends as soon as the valve is turned up again.
@@ -120,14 +121,15 @@ pub fn after_turn(previous: Option<Kind>, airing_now: bool) -> Option<Kind> {
     }
 }
 
-/// When a hold of `kind` made at `now_ms` ends: its own length, or the next
-/// step of the schedule if it comes sooner (`to_next_step`, `None` when the
-/// room does not follow its schedule).
+/// When a hold of `kind` made at `now_ms` ends: its own length, or the
+/// room's next change if it comes sooner (`to_next_change`: the next step of
+/// the schedule, the end of a setpoint held or of a boost; `None` without
+/// one).
 #[must_use]
 pub fn until(
     kind: Kind,
     now_ms: u64,
-    to_next_step: Option<Duration>,
+    to_next_change: Option<Duration>,
     hand: Duration,
     airing: Duration,
 ) -> u64 {
@@ -135,7 +137,7 @@ pub fn until(
         Kind::Hand => hand,
         Kind::Airing => airing,
     };
-    let length = to_next_step.map_or(own, |next| own.min(next));
+    let length = to_next_change.map_or(own, |next| own.min(next));
     now_ms.saturating_add(u64::try_from(length.as_millis()).unwrap_or(u64::MAX))
 }
 

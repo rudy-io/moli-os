@@ -5,6 +5,7 @@
   import { pointOf, climateKeys } from '../lib/capabilities.js';
   import { DAYS, scheduleSpec, hhmm } from '../lib/schedule.js';
   import { radiatorState, nextChange, warm, heatsOnly, valveOpen } from '../lib/radiator.js';
+  import { temporaryOf } from '../lib/temporary.js';
 
   /** A radiator behind a thermostat, drawn: heat rises from it while it heats,
    *  it glows at its setpoint, a breeze goes through it while the window is
@@ -50,6 +51,7 @@
     const at = Date.parse(value(id, 'valve_override_until') ?? '');
     return Number.isFinite(at) ? clock(at) : '—';
   });
+  const temporary = $derived(temporaryOf((key) => value(id, key), home.now));
   // What the schedule does next, said once a minute.
   const next = $derived.by(() => {
     if (mode !== 'auto') return null;
@@ -80,6 +82,10 @@
   const detail = $derived.by(() => {
     if (state.phase === 'airing') return t('commun.radiateur.aeration', { heure: until });
     if (state.hold === 'manual') return t('commun.vanne.reglage.main', { heure: until });
+    if (temporary.boost && mode !== 'off') {
+      return t('commun.radiateur.boost', { deg: deg(temporary.boost.by, keys.target), heure: clock(temporary.boost.until) });
+    }
+    if (temporary.hold && mode === 'auto') return t('commun.radiateur.maintien', { heure: clock(temporary.hold.until) });
     if (next && next.days < 2) {
       return t(next.days ? 'commun.radiateur.ensuite_demain' : 'commun.radiateur.ensuite', { deg: deg(next.deg, keys.target), heure: hhmm(next.min) });
     }
