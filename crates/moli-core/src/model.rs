@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -43,12 +44,16 @@ pub struct Label {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub room: Option<String>,
+    /// The family's names for some of its points (a power strip's outlets:
+    /// `on_1` → « Écran »), by point key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub points: BTreeMap<String, String>,
 }
 
 impl Label {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.name.is_none() && self.room.is_none()
+        self.name.is_none() && self.room.is_none() && self.points.is_empty()
     }
 }
 

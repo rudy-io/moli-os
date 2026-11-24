@@ -9,7 +9,8 @@ use moli_core::{
     PointSpec, Semantic, Value,
 };
 use moli_runtime::{
-    BoxFuture, CommandError, Driver, DriverCtx, Hub, HubOptions, LabelPatch, spawn_driver,
+    BoxFuture, CommandError, Driver, DriverCtx, Hub, HubOptions, LabelError, LabelPatch,
+    spawn_driver,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -484,6 +485,119 @@ async fn labels_persist_and_reload() {
         reloaded.device(&device).unwrap().label.room.as_deref(),
         Some("Bureau")
     );
+
+    cancel.cancel();
+    cancel2.cancel();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_point_keeps_the_name_the_family_gives_it() {
+    let dir = std::env::temp_dir().join(format!("moli-point-labels-{}", std::process::id()));
+    let path = dir.join("labels.toml");
+    let _ = std::fs::remove_file(&path);
+    let opts = HubOptions {
+        labels_path: Some(path.clone()),
+        ..HubOptions::default()
+    };
+    let hub = Hub::new(opts.clone()).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        FakePlug::new(false),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    let device = moli_core::DeviceId::from("fake:plug1");
+
+    // An agent may name a point nobody named, cleaned like any label.
+    let label = hub
+        .set_point_label(
+            &device,
+            "state",
+            "  Écran\n bureau ",
+            false,
+            Origin::Mcp,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        label.points.get("state").map(String::as_str),
+        Some("Écran bureau")
+    );
+    // Never rename it: a person does.
+    let refused = hub
+        .set_point_label(&device, "state", "Autre", false, Origin::Mcp, None)
+        .await;
+    assert!(matches!(refused, Err(LabelError::Guarded(_))));
+    hub.set_point_label(&device, "state", "Lampe", false, Origin::Ui, None)
+        .await
+        .unwrap();
+    // A name home.json gives it counts too: an agent does not cover it,
+    // a person does.
+    hub.set_point_label(&device, "state", "", false, Origin::Ui, None)
+        .await
+        .unwrap();
+    let covered = hub
+        .set_point_label(&device, "state", "Lampe", true, Origin::Mcp, None)
+        .await;
+    assert!(matches!(covered, Err(LabelError::Guarded(_))));
+    hub.set_point_label(&device, "state", "Lampe", true, Origin::Ui, None)
+        .await
+        .unwrap();
+    // A point the device does not have, a device Moli does not know.
+    let ghost = hub
+        .set_point_label(&device, "ghost", "X", false, Origin::Ui, None)
+        .await;
+    assert!(matches!(ghost, Err(LabelError::UnknownPoint)));
+    let nobody = hub
+        .set_point_label(&"fake:ghost".into(), "state", "X", false, Origin::Ui, None)
+        .await;
+    assert!(matches!(nobody, Err(LabelError::UnknownDevice)));
+    // The device's own name is untouched by its points', and the other way round.
+    hub.set_label(
+        &device,
+        LabelPatch {
+            name: Some("Multiprise".into()),
+            room: None,
+        },
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    let saved = hub.device(&device).unwrap().label;
+    assert_eq!(saved.name.as_deref(), Some("Multiprise"));
+    assert_eq!(saved.points.get("state").map(String::as_str), Some("Lampe"));
+
+    // Kept on disk; an empty name forgets it.
+    let reloaded = Hub::new(opts).unwrap();
+    let cancel2 = CancellationToken::new();
+    spawn_driver(
+        &reloaded,
+        InstanceId::from("fake"),
+        FakePlug::new(false),
+        cancel2.clone(),
+    );
+    wait_running(&reloaded).await;
+    assert_eq!(
+        reloaded
+            .device(&device)
+            .unwrap()
+            .label
+            .points
+            .get("state")
+            .map(String::as_str),
+        Some("Lampe")
+    );
+    let forgot = reloaded
+        .set_point_label(&device, "state", " ", false, Origin::Ui, None)
+        .await
+        .unwrap();
+    assert!(forgot.points.is_empty());
+    assert_eq!(forgot.name.as_deref(), Some("Multiprise"));
 
     cancel.cancel();
     cancel2.cancel();
