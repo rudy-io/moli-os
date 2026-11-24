@@ -115,12 +115,12 @@
     --fam-soft: color-mix(in srgb, #e9a23b 16%, var(--surface));
   }
   .logic {
-    --fam: #4b74f2;
-    --fam-soft: color-mix(in srgb, #4b74f2 14%, var(--surface));
+    --fam: var(--cool);
+    --fam-soft: color-mix(in srgb, var(--cool) 14%, var(--surface));
   }
   .action {
-    --fam: #2c9a88;
-    --fam-soft: color-mix(in srgb, #2c9a88 14%, var(--surface));
+    --fam: var(--good);
+    --fam-soft: color-mix(in srgb, var(--good) 14%, var(--surface));
   }
   .wait {
     --fam: #8a92a4;
@@ -246,7 +246,7 @@
     border-radius: 999px;
     display: grid;
     place-items: center;
-    color: #fff;
+    color: var(--on-good);
     background: var(--good);
     box-shadow: 0 0 0 3px var(--surface);
   }

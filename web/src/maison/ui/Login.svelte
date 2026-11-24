@@ -172,7 +172,7 @@
     border: none;
     border-radius: 999px;
     background: var(--cool);
-    color: #fff;
+    color: var(--on-cool);
     font: inherit;
     font-size: 16px;
     font-weight: 700;

@@ -58,8 +58,25 @@ La vue Airzone reste une vue de consultation. Le pilotage autorisé est accessib
 La page Installation présente d’abord les passerelles et leurs actions courantes. Les adresses, les identifiants, le retrait réversible et le remplacement sont repliés dans les réglages ; les diagnostics détaillés sont dans « Informations techniques ». L’assistant conserve l’aide sur l’appairage physique et la restauration des cartes sous « Besoin d’aide ? ». La découverte des zones déjà appairées reste automatique ; l’API locale n’offre ni appairage ni désappairage physique.
 
 
-Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
-Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
+Navigation : un menu à gauche par défaut (une barre en bas sur téléphone, défilable) ; pied du
+menu : Thème, Système, Atelier. Un menu plus long que l'écran défile, le pied reste en vue. Bulle « Demander à Moli » sur toutes les pages sauf Moli. Une pastille glisse
+d'un onglet à l'autre, une page arrive en fondu ; un onglet ajouté ou retiré se range en glissant.
+
+**Thème** ouvre une feuille : l'apparence (Auto / Jour / Nuit), les **couleurs** (un thème,
+aperçu dessiné ; voir « Les thèmes » plus bas) et les onglets du menu, chacun avec
+son interrupteur. Le thème choisi est retenu par écran (`maison-palette` dans le navigateur) ;
+sans choix, l'écran prend celui de la maison (`theme` de `home.json`), sinon Porcelaine. Seuls les onglets éteints sont mémorisés (`maison-onglets` dans le navigateur) :
+chaque écran a son menu, et un onglet qui apparaît plus tard (une première caméra) se montre de
+lui-même. Accueil ne s'éteint pas. Un onglet que la maison n'a rien pour remplir n'est pas listé.
+Une page éteinte s'ouvre toujours par son adresse (`#/plan`).
+
+La feuille règle aussi **le menu** de l'écran (`lib/menu.js`) : sa **position** (gauche, droite,
+haut, bas ; sur un téléphone il reste une barre, en haut ou en bas), sa **forme** (classique :
+icônes et noms ; compact : icônes seules, le nom en info-bulle et pour les lecteurs d'écran ;
+flottant : une carte détachée du bord) et **l'ordre** des onglets (flèches monter / descendre,
+« Revenir à l'ordre d'origine »). Accueil reste premier ; un onglet qui apparaît plus tard prend sa
+place d'origine après ceux qu'on a rangés. Retenu par écran (`maison-menu` dans le navigateur) ;
+sans choix, l'écran prend le `menu` de `home.json`, sinon le menu classique à gauche.
 
 ## La mise en page de la maison : `data/home.json`
 
@@ -125,6 +142,12 @@ telles que les appareils les nomment).
   sa pièce, puis retirez son entrée. La carte « Jardin » ne garde que les lumières qu'aucune
   pièce extérieure ne montre déjà, et disparaît quand la liste est vide.
 - `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment (nombres et heures dans la langue de la maison) ; relu toutes les 10 à 60 s selon la fenêtre, jamais quand la page est cachée. 8 points au plus par carte, `minutes` de 1 à 10 080 (une semaine) ; un point mal écrit (sans `/`) ou que la maison n'a pas est écarté, et la carte le dit.
+- `themes` et `theme` : les thèmes de la maison et celui qu'un nouvel écran prend (voir
+  « Les thèmes » ci-dessous).
+- `menu` (facultatif) : le menu qu'un écran prend tant qu'il n'a rien choisi,
+  `{ "position": "bottom", "shape": "floating", "order": ["salon", "plan"] }` ; `position` parmi
+  `left`, `right`, `top`, `bottom`, `shape` parmi `classic`, `compact`, `floating`, `order` les
+  adresses des onglets (sans Accueil). Un mot inconnu est ignoré.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
@@ -146,14 +169,60 @@ telles que les appareils les nomment).
   (`labels.toml`, `points`, par `PUT /api/labels/{id}/points/{clé}`) et passe avant ceux de
   `outlets` et du pilote ; un nom effacé redonne celui d'origine.
 
+## Les thèmes (`web/src/maison/lib/themes.js`)
+
+Moli en apporte quatre : **Porcelaine** (la base, `maison.css`), **Sauge**, **Océan** (un léger
+dégradé en fond) et **Terracotta** (police à empattements). La maison ajoute les siens dans
+`home.json` ; un thème du même `id` qu'un thème de Moli le remplace. Un thème ne dit que ce qu'il
+change, jour et nuit séparément ; le reste vient de Porcelaine ou de Nuit.
+
+```json
+{
+  "theme": "chez-nous",
+  "themes": [{
+    "id": "chez-nous",
+    "name": { "fr": "Chez nous", "en": "Our home" },
+    "font": "rounded",
+    "corners": "pill",
+    "background": { "image": "/api/plan/images/3f9c0a7e5b21d864.jpg", "dim": 0.35 },
+    "day":   { "bg": "#f6e6d8", "surface": "#fffaf6", "ink": "#2a1a12", "warm": "#e2763a", "cool": "#3f6fb5" },
+    "night": { "bg": "#170f0b", "surface": "#241913", "ink": "#f6ebe2", "warm": "#f08a4e",
+               "background": { "gradient": ["#170f0b", "#2a1810"] } }
+  }]
+}
+```
+
+- `id` : minuscules, chiffres, tirets (40 au plus). `name` : un texte, ou un par langue.
+- Couleurs (`day`, `night`) : les jetons de `maison.css`, en `#rrggbb` (ou `#rgb`, `#rrggbbaa`)
+  et rien d'autre : `bg`, `surface`, `surface-2`, `surface-3`, `ink`, `ink-2`, `ink-3`, `line`,
+  `warm` (allumé), `cool` (climat), `good`, `alert`, leurs `-soft`, `warm-ink`, `warm-deep`,
+  `warm-glow`, `sun`, et `on-warm` / `on-cool` / `on-good` / `on-alert` (le texte posé sur un
+  bouton de cette couleur). Ce qui n'est pas dit se **déduit** : `surface-2`, `surface-3` et `line`
+  de `surface` et `ink`, les `-soft` de leur accent, le texte sur un accent (blanc s'il se lit,
+  sinon l'encre sombre).
+- **Lisibilité** : chaque texte est mesuré contre son fond (contraste WCAG : 4,5 pour le texte,
+  4 pour `ink-3`, 3 pour le texte d'un bouton). Une couleur trop pâle est remplacée par celle de
+  Porcelaine ou de Nuit qui se lit ; la feuille Thème dit ce qui a été ignoré ou ajusté.
+- `font` : `figtree` (dans le paquet), `system`, `rounded`, `serif`, `mono` (polices de
+  l'appareil, rien à télécharger). `corners` : `square`, `soft`, `round` (défaut), `pill`.
+- `background` (pour les deux, ou dans `day` / `night`) : `image` (une image gardée par Moli,
+  celle d'un étage du plan : `/api/plan/images/<nom>` ; jamais une adresse ailleurs, que chaque
+  écran irait chercher chez un tiers), `gradient` (2 à 6
+  couleurs), `dim` (un voile de la couleur `bg`, de 0 à 0,9, pour que le texte reste lisible sur
+  une photo). Le fond reste immobile quand la page défile ; les cartes gardent leur `surface`.
+- Les couleurs voulues ne suivent pas le thème : vidéo des caméras, couleurs des lampes, ciel,
+  tracés de la carte, habillages du Plan, logo et orbe de Moli.
+
 ## Conception visuelle
 
 - Thème **porcelaine** le jour, **nuit** après le coucher du soleil (point `daylight` de la
-  météo) ; bascule Auto / Jour / Nuit (mémorisée dans le navigateur).
+  météo) ; choix Auto / Jour / Nuit dans la feuille Thème (mémorisé dans le navigateur).
 - Ambre = allumé, bleu = climat/froid, corail = attention. Grandes cibles tactiles, peu de mots,
   aucun jargon. Police Figtree Variable, icônes Material Design (sélection dans
   `lib/icons.js` : seules celles-ci sont dans le paquet).
-- Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style).
+- Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style). Une couleur de
+  l'interface passe par un jeton, jamais en dur : un thème la change (texte sur un bouton plein :
+  `var(--on-warm)`, pas `#fff`).
 - Règle de style : **pas de bordure gauche colorée** sur les cartes.
 - Une lampe injoignable n'est jamais affichée allumée (sa dernière valeur est une supposition).
 - Les ordres retenus par la garde ouvrent la feuille « C'est moi » (code PIN), qui sert aussi

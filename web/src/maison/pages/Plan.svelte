@@ -932,7 +932,7 @@
 
   .token.alarm {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     animation: pulse 1.2s ease-in-out infinite;
   }
 
@@ -989,7 +989,7 @@
     border-radius: 50%;
     border: none;
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     cursor: pointer;
   }
 

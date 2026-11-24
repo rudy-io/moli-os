@@ -343,7 +343,7 @@
 
   .fan-toggle.on {
     background: var(--cool);
-    color: #fff;
+    color: var(--on-cool);
   }
 
   .spin .fan-toggle :global(svg) {
@@ -398,7 +398,7 @@
 
   .apart.open {
     background: var(--warm);
-    color: #fff;
+    color: var(--on-warm);
   }
 
   .bulbs {

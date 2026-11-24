@@ -448,7 +448,7 @@
 
   .power.lit {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     box-shadow: 0 3px 0 color-mix(in srgb, var(--alert) 60%, #000), 0 8px 22px -6px var(--alert);
   }
 
