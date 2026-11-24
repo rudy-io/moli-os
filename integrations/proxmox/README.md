@@ -30,11 +30,14 @@ virtuelles, ses stockages, la dernière sauvegarde et ses disques.
   - `lxc_<vmid>`, `qemu_<vmid>` : en marche, processeur, mémoire, durée d'allumage, disque (conteneurs
     seulement : Proxmox ne voit pas l'intérieur d'une machine virtuelle), `problem` / `detail` ;
   - `storage_<id>` : occupation, libre, taille, contenu (stockages actifs) ;
-  - `backup` : dernier résultat, dernière exécution (UTC), durée, heures depuis la dernière réussie, en cours ;
+  - `backup` : dernier résultat, dernière exécution (UTC), durée, heures depuis la dernière réussie, en cours
+    (les tâches sont lues avec `source=all` : celle qui tourne aussi) ;
   - `disk_<n>` : santé SMART, vie restante, taille, type. Nommés par leur place, jamais par leur numéro de série.
 - **Alertes** (`problem` binaire sens `alert`, `detail` texte) : nœud injoignable ; invité arrêté alors
-  qu'il démarre avec le serveur ; mémoire d'un invité qui tourne, disque d'un conteneur, disque système
-  ou stockage au-dessus de `full_percent` (90) ; dernière sauvegarde en échec, ou aucune réussie depuis
+  qu'il démarre avec le serveur ; mémoire d'un conteneur qui tourne, disque d'un conteneur, disque système
+  ou stockage au-dessus de `full_percent` (90) ; mémoire d'une machine virtuelle au-dessus de
+  `vm_full_percent`, seulement s'il est donné (Proxmox compte le cache disque de l'invité comme occupé :
+  une VM Linux paraît toujours pleine) ; dernière sauvegarde en échec, ou aucune réussie depuis
   `backup_hours` (26) ; SMART en échec ou moins de 10 % de vie. La page « Parc » les liste, un
   automatisme peut s'y accrocher.
 - **Un nœud injoignable n'arrête pas le pilote** : l'appareil `node` reste, `up` faux, `problem` vrai ;

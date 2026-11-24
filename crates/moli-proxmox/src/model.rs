@@ -31,6 +31,8 @@ const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 pub(crate) struct Limits {
     /// Memory, disk or storage use above this, in percent: a problem.
     pub full: f64,
+    /// A virtual machine's memory above this: a problem (none by default).
+    pub vm_full: Option<f64>,
     /// No successful backup for this long, in hours: a problem.
     pub backup_hours: f64,
 }
@@ -161,7 +163,11 @@ fn alert(reasons: &[String]) -> States {
 
 /// A use above the threshold, said in words.
 fn too_full(what: &str, share: Option<f64>, limits: Limits) -> Option<String> {
-    let share = share.filter(|s| *s > limits.full)?;
+    above(what, share, limits.full)
+}
+
+fn above(what: &str, share: Option<f64>, limit: f64) -> Option<String> {
+    let share = share.filter(|s| *s > limit)?;
     Some(moli_i18n::tr!(
         "pilotes.proxmox.detail_plein",
         quoi = what,
@@ -331,11 +337,18 @@ pub(crate) fn guest(
     if running == Some(false) && starts_at_boot == Some(true) {
         reasons.push(moli_i18n::tr!("pilotes.proxmox.detail_arrete"));
     }
-    if running == Some(true) {
-        reasons.extend(too_full(
+    // A virtual machine's `mem` counts the guest's disk cache as used: its
+    // own threshold, none by default (a container's figures are right).
+    let memory_limit = if kind == "lxc" {
+        Some(limits.full)
+    } else {
+        limits.vm_full
+    };
+    if let (Some(true), Some(limit)) = (running, memory_limit) {
+        reasons.extend(above(
             &moli_i18n::tr!("pilotes.proxmox.memoire"),
             memory,
-            limits,
+            limit,
         ));
     }
     reasons.extend(too_full(
@@ -640,6 +653,7 @@ mod tests {
 
     const LIMITS: Limits = Limits {
         full: 90.0,
+        vm_full: None,
         backup_hours: 26.0,
     };
 
@@ -756,6 +770,37 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_virtual_machine_full_of_cache_is_no_problem_unless_asked() {
+        // A Home Assistant VM as Proxmox sees it: 94 %, mostly the guest's cache.
+        let vm = serde_json::json!({"vmid": 201, "name": "ha", "status": "running", "mem": 4_041_060_352_u64, "maxmem": 4_294_967_296_u64});
+        let quiet = guest(&instance(), "qemu", &vm, None, LIMITS).unwrap();
+        assert_eq!(value(&quiet.states, "problem"), &Value::Bool(false));
+        assert!(matches!(value(&quiet.states, "memory"), Value::Float(m) if *m > 93.0));
+        let asked = Limits {
+            vm_full: Some(90.0),
+            ..LIMITS
+        };
+        let loud = guest(&instance(), "qemu", &vm, None, asked).unwrap();
+        assert_eq!(value(&loud.states, "problem"), &Value::Bool(true));
+        // A container's memory keeps the common threshold.
+        let ct = serde_json::json!({"vmid": 101, "name": "ct", "status": "running", "mem": 98, "maxmem": 100, "disk": 1, "maxdisk": 10});
+        let full = guest(&instance(), "lxc", &ct, None, LIMITS).unwrap();
+        assert_eq!(value(&full.states, "problem"), &Value::Bool(true));
+    }
+
+    #[test]
+    fn a_backup_running_is_said_and_the_one_before_tells() {
+        let tasks = fixture(include_str!(
+            "../../../integrations/proxmox/fixtures/tasks-running.json"
+        ));
+        let start = num(&tasks[0]["starttime"]).unwrap();
+        let e = backup(&instance(), &tasks, start + 600.0, LIMITS);
+        assert_eq!(value(&e.states, "running"), &Value::Bool(true));
+        assert_eq!(value(&e.states, "last_result"), &Value::Text("OK".into()));
+        assert_eq!(value(&e.states, "problem"), &Value::Bool(false));
     }
 
     #[test]
