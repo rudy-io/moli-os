@@ -1226,7 +1226,7 @@ mod tests {
                 Tlv::Array([6, 0x90, 0x91].map(Tlv::Uint).to_vec()),
             ),
         ];
-        for (cluster, features, attrs) in [(0x90, 2, vec![4, 5, 8]), (0x91, 0b0101, vec![1])] {
+        for (cluster, features, attrs) in [(0x90, 2, vec![4, 0x0c, 8]), (0x91, 0b0101, vec![1])] {
             report.extend([
                 (path(1, cluster, 0xfffc), Tlv::Uint(features)),
                 (path(1, cluster, 0xfffd), Tlv::Uint(1)),
@@ -1249,7 +1249,7 @@ mod tests {
                 .all(|p| p.key.as_ref() == "on" || !p.access.write)
         );
         let subscribed = subscription_paths(&report, &found);
-        for (cluster, attribute) in [(0x90, 8), (0x90, 4), (0x90, 5), (0x91, 1)] {
+        for (cluster, attribute) in [(0x90, 8), (0x90, 4), (0x90, 0x0c), (0x91, 1)] {
             assert!(
                 subscribed
                     .iter()

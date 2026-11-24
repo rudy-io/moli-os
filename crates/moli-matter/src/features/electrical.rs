@@ -34,6 +34,8 @@ struct Measure {
     divisor: f64,
     /// Imported/exported totals are non-negative by constraint.
     signed: bool,
+    /// Skipped when the cluster also announces this attribute: one point, one source.
+    unless: Option<u32>,
 }
 
 const MEASURES: &[Measure] = &[
@@ -47,6 +49,7 @@ const MEASURES: &[Measure] = &[
         features: 0,
         divisor: 1e3,
         signed: true,
+        unless: None,
     },
     Measure {
         cluster: POWER,
@@ -58,6 +61,7 @@ const MEASURES: &[Measure] = &[
         features: 0,
         divisor: 1e3,
         signed: true,
+        unless: None,
     },
     Measure {
         cluster: POWER,
@@ -69,10 +73,15 @@ const MEASURES: &[Measure] = &[
         features: 0,
         divisor: 1e3,
         signed: true,
+        unless: None,
     },
+    // The measured (total) current is RMSCurrent (0x0C), or ApparentCurrent (0x07)
+    // on a device without RMSCurrent: both equal apparent power / voltage.
+    // Never ActiveCurrent (0x05): it is only the in-phase component (P / V) and
+    // under-reads a non-resistive load (a phone charger reads 42 mA for 90 mA).
     Measure {
         cluster: POWER,
-        attribute: 0x05,
+        attribute: 0x0c,
         key: "current",
         label: "pilotes.matter.current",
         unit: Unit::Ampere,
@@ -80,6 +89,19 @@ const MEASURES: &[Measure] = &[
         features: 0,
         divisor: 1e3,
         signed: true,
+        unless: None,
+    },
+    Measure {
+        cluster: POWER,
+        attribute: 0x07,
+        key: "current",
+        label: "pilotes.matter.current",
+        unit: Unit::Ampere,
+        semantic: Semantic::Current,
+        features: 0,
+        divisor: 1e3,
+        signed: true,
+        unless: Some(0x0c),
     },
     // Only cumulative totals are meters: periodic energy restarts every period
     // and would read as a reset to `moli-energy`, so it is never exposed.
@@ -93,6 +115,7 @@ const MEASURES: &[Measure] = &[
         features: IMPORTED | CUMULATIVE,
         divisor: 1e6,
         signed: false,
+        unless: None,
     },
     Measure {
         cluster: ENERGY,
@@ -104,6 +127,7 @@ const MEASURES: &[Measure] = &[
         features: EXPORTED | CUMULATIVE,
         divisor: 1e6,
         signed: false,
+        unless: None,
     },
 ];
 
@@ -135,7 +159,9 @@ impl Electrical {
                 &self.energy
             };
             cluster.as_ref().is_some_and(|c| {
-                c.attributes.contains(&m.attribute) && c.features & m.features == m.features
+                c.attributes.contains(&m.attribute)
+                    && c.features & m.features == m.features
+                    && m.unless.is_none_or(|a| !c.attributes.contains(&a))
             })
         })
     }
@@ -245,7 +271,7 @@ mod tests {
     }
     /// An AC plug: ALTC power with every measure, imported cumulative energy.
     fn plug() -> Vec<(AttributePath, Tlv)> {
-        let mut report = globals(POWER, 0b10, &[0, 1, 2, 4, 5, 8, 0x0a]);
+        let mut report = globals(POWER, 0b10, &[0, 1, 2, 4, 0x0c, 8, 0x0a]);
         report.extend(globals(ENERGY, 0b0101, &[0, 1, 5]));
         report
     }
@@ -324,7 +350,7 @@ mod tests {
             (path(POWER, 0x08), Tlv::Int(-1500), "power", -1.5),
             (path(POWER, 0x0a), Tlv::Int(80_250), "apparent_power", 80.25),
             (path(POWER, 0x04), Tlv::Int(231_400), "voltage", 231.4),
-            (path(POWER, 0x05), Tlv::Int(260), "current", 0.26),
+            (path(POWER, 0x0c), Tlv::Int(260), "current", 0.26),
             (
                 path(ENERGY, 0x01),
                 energy(Tlv::Int(12_345_678)),
@@ -372,6 +398,35 @@ mod tests {
         ] {
             assert_eq!(e.update(path(ENERGY, 0x01), &v), null("energy"), "{v:?}");
         }
+    }
+
+    #[test]
+    fn current_is_the_measured_current_never_the_active_component() {
+        let current = |attrs: &[u64]| {
+            let mut e = Electrical::discover(1, &globals(POWER, 0b10, attrs))?;
+            let paths: Vec<_> = e.paths(1).iter().filter_map(|p| p.attribute).collect();
+            let from = |id, e: &mut Electrical| e.update(path(POWER, id), &Tlv::Int(113));
+            Some((
+                paths,
+                from(0x05, &mut e),
+                from(0x07, &mut e),
+                from(0x0c, &mut e),
+            ))
+        };
+        let reading = vec![("current", Value::Float(0.113))];
+        // RMSCurrent wins; ApparentCurrent is not even subscribed.
+        let (paths, active, apparent, rms) = current(&[0, 1, 2, 4, 5, 7, 8, 0x0c]).unwrap();
+        assert_eq!(paths, [8, 4, 0x0c]);
+        assert!(active.is_empty() && apparent.is_empty());
+        assert_eq!(rms, reading);
+        // Without RMSCurrent, ApparentCurrent stands in.
+        let (paths, active, apparent, rms) = current(&[0, 1, 2, 4, 5, 7, 8]).unwrap();
+        assert_eq!(paths, [8, 4, 0x07]);
+        assert!(active.is_empty() && rms.is_empty());
+        assert_eq!(apparent, reading);
+        // ActiveCurrent alone is not a current: no point.
+        let e = Electrical::discover(1, &globals(POWER, 0b10, &[0, 1, 2, 4, 5, 8])).unwrap();
+        assert!(!keys(&e).contains(&"current".to_string()));
     }
 
     #[test]
