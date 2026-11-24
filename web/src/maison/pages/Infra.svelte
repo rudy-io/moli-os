@@ -11,6 +11,8 @@
   import NasCard from '../ui/infra/NasCard.svelte';
   import ProxmoxCard from '../ui/infra/ProxmoxCard.svelte';
   import { proxmoxNodes, proxmoxIssues } from '../lib/proxmox.js';
+  import BoxCard from '../ui/infra/BoxCard.svelte';
+  import { boxIssues, reader } from '../lib/box.js';
 
   /** The house's machines, the digital side of « is everything fine at
    *  home? »: the server (live from Moli), its disks and containers (the host
@@ -37,6 +39,8 @@
   const server = $derived(devices.find((d) => d.model === 'Serveur de la maison'));
   const pcs = $derived(devices.filter((d) => d.model === 'Ordinateur'));
   const box = $derived(devices.find((d) => d.points.some((p) => p.key === 'external_ip')));
+  // The internet box, from the points home.json names (`infra.box`, lib/box.js).
+  const boxCfg = $derived(home.config?.infra?.box ?? null);
   const nases = $derived(nasGroups(devices));
   const sv = (k) => (server ? value(server.id, k) : null);
   // Proxmox nodes (the `proxmox` driver): their parts and their problems.
@@ -89,6 +93,8 @@
     for (const g of nodes) {
       for (const p of proxmoxIssues(g, value)) out.push(t('systeme.infra.alerte.proxmox', { name: nameOf(p.id), detail: p.detail || '—' }));
     }
+    // The box: a hot sensor, a fast fan, a degraded array, a full disk.
+    out.push(...boxIssues(boxCfg, reader(value), t));
     return out;
   });
   const stale = $derived(infra && home.now - infra.ts > 5 * 60_000);
@@ -224,10 +230,21 @@
       <PcCard {pc} />
     {/each}
 
+    {#if boxCfg}
+      <BoxCard box={boxCfg} />
+    {/if}
+
     {#each guestCharts as c (c.instance)}
       <HistoryChart title={t('systeme.infra.historique.processeur')} minutes={1440} points={c.ids.map((id) => `${id}/cpu`)} />
       <HistoryChart title={t('systeme.infra.historique.memoire')} minutes={1440} points={c.ids.map((id) => `${id}/memory`)} />
     {/each}
+    {#if boxCfg?.down || boxCfg?.up}
+      <HistoryChart
+        title={t('systeme.infra.historique.debit', { box: boxCfg.name ?? t('systeme.infra.box.titre') })}
+        minutes={1440}
+        points={[boxCfg.down, boxCfg.up].filter(Boolean)}
+      />
+    {/if}
 
     {#if box}
       <section class="card">

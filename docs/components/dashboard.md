@@ -125,6 +125,28 @@ telles que les appareils les nomment).
   sa pièce, puis retirez son entrée. La carte « Jardin » ne garde que les lumières qu'aucune
   pièce extérieure ne montre déjà, et disparaît quand la liste est vide.
 - `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment (nombres et heures dans la langue de la maison) ; relu toutes les 10 à 60 s selon la fenêtre, jamais quand la page est cachée. 8 points au plus par carte, `minutes` de 1 à 10 080 (une semaine) ; un point mal écrit (sans `/`) ou que la maison n'a pas est écarté, et la carte le dit.
+- `infra.box` (facultatif) : la carte de la **box internet** sur la page Infra (`ui/infra/BoxCard.svelte`,
+  `lib/box.js`), faite des points que la maison lit déjà (pilote `freebox`, une box vue par Home
+  Assistant, tout autre pilote) et qu'elle **désigne** ici : rien n'est deviné d'après les noms, un
+  point absent n'apparaît pas. Lecture seule.
+
+  ```json
+  "infra": { "box": {
+    "name": "Freebox",
+    "down": "freebox:box/rate_down", "up": "freebox:box/rate_up",
+    "free": "freebox:box/free_space", "degraded": "freebox:box/raid_degraded", "wifi": "freebox:box/wifi",
+    "temperatures": [{ "label": "Disque", "point": "freebox:box/temp_hdd0", "warn": 50, "alert": 55 }],
+    "fans": [{ "label": "Ventilateur", "point": "freebox:box/fan0_speed", "warn": 1800 }]
+  } }
+  ```
+
+  Les températures en jauges (orange dès `warn`, rouge dès `alert`), les ventilateurs (orange dès
+  `warn`), l'occupation du disque (`free` : % libre), la grappe (`degraded` : `true` si dégradée), le
+  Wi-Fi ; les débits `down` et `up` en Mbit/s dans l'en-tête, convertis depuis l'unité que **le point
+  déclare** (`rate_unit` seulement pour un point qui n'en déclare pas ; une unité qui n'est pas un
+  débit n'est pas convertie : « — »), et leur courbe des dernières 24 h. Entrent dans le bandeau
+  « à voir » : une température au-delà de `alert`, un ventilateur au-delà de `warn`, la grappe
+  dégradée, un disque plein à 90 % ou plus.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
