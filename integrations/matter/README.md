@@ -8,8 +8,9 @@ already on an IP network, including Thread devices reachable through an existing
 router. Bluetooth commissioning is not part of this contribution: the vendored stack is
 trimmed to what Moli builds and tests, so a Thread device is onboarded with its own app or
 another controller first and then driven over IP; see [thread.md](thread.md).
-Physical validation covers OnOff on the Hue bridge only: covers, lock and thermostat
-ran on the virtual accessory, not on hardware.
+Physical validation covers OnOff on the Hue bridge, and read-only electrical
+measurement on one IKEA GRILLPLATS plug ([report](HARDWARE.md)): covers, lock and
+thermostat ran on the virtual accessory, not on hardware.
 The default release image exceeds the project's 25 MB budget. An optional compact
 build is measured below that budget, at the cost of symbolized local backtraces; see
 `docs/components/exploitation.md` and `docs/PERFORMANCE.md`.
