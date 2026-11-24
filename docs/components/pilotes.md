@@ -362,8 +362,9 @@ programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui pa
   `monday` … `sunday`, réglable : aujourd'hui, toutes les pièces jouent ce jour-là du programme ;
   revient à `none` à minuit, heure de la maison, et après un redémarrage le lendemain) ;
   `system_mode` (`auto` ou `off`, réglable : écrit sur **chaque pièce**, comme une scène ; une
-  seule ligne au journal, celle de l'ordre à la maison ; `auto` remet donc aussi en `auto` les
-  pièces mises en `off` exprès) ; avec `away`, en lecture : `away` (personne n'est là depuis
+  seule ligne au journal, celle de l'ordre à la maison ; comme le `system_mode` d'une pièce, il
+  met fin aux boosts et aux consignes maintenues ; `auto` remet aussi en `auto` les pièces mises
+  en `off` exprès) ; avec `away`, en lecture : `away` (personne n'est là depuis
   `away_delay`) et `away_lifted` (une personne a levé l'absence, voir plus bas). Ses membres sont
   les pièces et leurs vannes : un ordre d'un agent à la maison est jugé sur toutes leurs pièces
   (pièces protégées, heures calmes) et attend la validation d'un humain dès que l'une est
@@ -383,7 +384,9 @@ programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui pa
   ses semaines de celles du premier ; l'ordre, lui, peut changer (le premier est celui par
   défaut).
 - **Changer de programme ou de jour** réapplique dans chaque pièce en `auto` le créneau en
-  vigueur, et met fin aux réglages à la main sur ses vannes, comme un programme de pièce changé.
+  vigueur, et met fin aux réglages à la main sur ses vannes, comme un programme de pièce changé ;
+  il s'applique **même pendant une consigne maintenue**, qui prend fin (dit au journal). Le
+  boost, lui, reste : il s'ajoute à la nouvelle consigne.
 - **L'absence** (`away`) est une **surcouche** : elle n'écrit ni `programme` ni `system_mode` de
   la maison, ni le `system_mode` des pièces. Le point vrai depuis `away_delay` minutes, `away`
   devient vrai et les pièces jouent `away_mode` à la place de ce qui est choisi :
@@ -399,17 +402,24 @@ programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui pa
     (`occupied_heating_setpoint` est le sien) ; les pièces en `heat` ou `off` n'en changent pas.
 
   Au retour (le point faux), la surcouche disparaît : chaque pièce réapplique le créneau en
-  vigueur de ce qui est choisi. L'absence qui commence ou finit met fin, comme un changement de
-  programme, aux réglages à la main sur les vannes. Un point inconnu (pilote qui démarre, appareil
+  vigueur de ce qui est choisi. **L'absence passe avant le reste** : son début met fin, dans
+  chaque pièce, au boost et à la consigne maintenue (dit au journal) ; son début et sa fin
+  mettent fin aux réglages à la main sur les vannes, et s'appliquent même pendant un maintien.
+  Un maintien qui finit pendant l'absence rend le créneau du programme **joué** (celui
+  d'`away_mode`), pas celui du programme choisi. Un point inconnu (pilote qui démarre, appareil
   hors ligne) ne change rien.
   - **Lever l'absence pour toute la maison** : seul l'ordre d'une **personne** (le tableau de
     bord) sur `programme` ou `system_mode` de la maison la lève, jusqu'au prochain retour ; le
     choix écrit est joué aussitôt, et `chauffage:maison/away_lifted` devient vrai. Un automatisme
     ou un agent qui écrit ces points change seulement ce qui sera joué au retour.
-  - **Sortir une pièce de l'absence** : l'ordre d'une **personne** sur la consigne ou le
-    `system_mode` d'une pièce la sort de l'absence jusqu'à la fin de celle-ci (son point
-    `away_lifted` devient vrai) ; elle joue alors son mode et son programme comme si personne
-    n'était parti. Celui d'un automatisme ou d'un agent est seulement gardé pour le retour.
+  - **Sortir une pièce de l'absence** : l'ordre d'une **personne** sur la consigne, le
+    `system_mode`, le boost (`boost`, `boost_minutes`) ou le maintien (`hold_minutes`) d'une
+    pièce la sort de l'absence jusqu'à la fin de celle-ci (son point `away_lifted` devient vrai),
+    **une fois l'ordre accepté** : un ordre refusé (un maintien hors `auto`, une durée sans boost
+    en cours) ne la sort pas. Elle joue alors son mode et son programme comme si personne n'était
+    parti : le créneau en vigueur du programme choisi, puis le boost ou le maintien demandé (une
+    consigne écrite reste celle écrite). Celui d'un automatisme ou d'un agent est seulement gardé
+    pour le retour.
   - **Au redémarrage**, l'absence en cours, sa levée et les pièces qui en sont sorties sont
     gardées (ce sont des points, relus du cache d'état) : un redémarrage ne remet ni le chauffage
     au minimum sous le nez de quelqu'un qui l'avait levée, ni une maison vide à chauffer pendant

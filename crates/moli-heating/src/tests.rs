@@ -1393,6 +1393,233 @@ async fn without_the_programmes_each_room_keeps_the_first_one_s_week() {
     cancel.cancel();
 }
 
+async fn try_as(hub: &Hub, at: &str, value: Value, origin: Origin) -> bool {
+    hub.command(&point(at), value, origin, None).await.is_ok()
+}
+
+#[tokio::test]
+async fn the_absence_ends_boosts_and_holds_and_a_programme_change_applies_over_a_hold() {
+    let (hub, cancel) = stand_ins_running().await;
+    start_away(&hub, rooms(), "off", &cancel);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // Held at 21: a change of the house's programme applies all the same.
+    order(&hub, &room("occupied_heating_setpoint"), Value::Float(21.0))
+        .await
+        .unwrap();
+    order(&hub, &room("hold_minutes"), Value::Int(600))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 21.0).await;
+    let (today, _) = days();
+    order(
+        &hub,
+        &room(&format!("weekly_schedule_vacances_{today}")),
+        Value::from("00:00/19"),
+    )
+    .await
+    .unwrap();
+    order(&hub, "chauffage:maison/programme", Value::from("Vacances"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 19.0).await;
+    assert!(left(&hub, "hold_until").is_none());
+    order(&hub, "chauffage:maison/programme", Value::from("Normal"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // A boost and a hold, then nobody home: both end, the valves at their
+    // lowest; back, the schedule's 20, not 22.
+    order(&hub, &room("boost"), Value::Float(2.0))
+        .await
+        .unwrap();
+    order(&hub, &room("boost_minutes"), Value::Int(600))
+        .await
+        .unwrap();
+    order(&hub, &room("hold_minutes"), Value::Int(600))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until(&hub, &room("boost"), 0.0).await;
+    assert!(left(&hub, "hold_until").is_none());
+    away(&hub, false).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn the_house_s_mode_ends_boosts_and_holds() {
+    let (hub, cancel) = stand_ins_running().await;
+    start(
+        &hub,
+        rooms(),
+        Some(table(TWO)),
+        |h| h.tick = Duration::from_millis(20),
+        &cancel,
+    );
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    order(&hub, &room("boost"), Value::Float(2.0))
+        .await
+        .unwrap();
+    order(&hub, &room("boost_minutes"), Value::Int(600))
+        .await
+        .unwrap();
+    order(&hub, &room("hold_minutes"), Value::Int(600))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+    order(&hub, "chauffage:maison/system_mode", Value::from("off"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until(&hub, &room("boost"), 0.0).await;
+    assert!(left(&hub, "hold_until").is_none());
+    order(&hub, "chauffage:maison/system_mode", Value::from("auto"))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_person_s_boost_or_hold_takes_the_room_out_of_the_absence_once_taken() {
+    let (hub, cancel) = stand_ins_running().await;
+    let heating = CancellationToken::new();
+    start_away(&hub, rooms(), "off", &heating);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // Refused by the room (no boost to lengthen): nothing lifted.
+    assert!(!try_as(&hub, &room("boost_minutes"), Value::Int(30), Origin::Ui).await);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // A person's boost: out of the absence, the schedule's 20 and the boost.
+    assert!(try_as(&hub, &room("boost"), Value::Float(2.0), Origin::Ui).await);
+    until_bool(&hub, &room("away_lifted"), true).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    away(&hub, false).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    order(&hub, &room("boost"), Value::Float(0.0))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // A person's hold: the same.
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    assert!(try_as(&hub, &room("hold_minutes"), Value::Int(120), Origin::Ui).await);
+    until_bool(&hub, &room("away_lifted"), true).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    assert!(left(&hub, "hold_until").is_some());
+
+    // A room in `heat` cannot be held: the order refused, still away.
+    away(&hub, false).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    order(&hub, &room("system_mode"), Value::from("heat"))
+        .await
+        .unwrap();
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    assert!(!try_as(&hub, &room("hold_minutes"), Value::Int(120), Origin::Ui).await);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    heating.cancel();
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_hold_over_during_the_absence_gives_the_played_programme_s_step() {
+    let (hub, cancel) = stand_ins_running().await;
+    let mut held = rooms();
+    held[0].hold_default_minutes = 4;
+    start_away(&hub, held, "Vacances", &cancel);
+    let (today, _) = days();
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    order(
+        &hub,
+        &room(&format!("weekly_schedule_vacances_{today}")),
+        Value::from("00:00/16"),
+    )
+    .await
+    .unwrap();
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+
+    // An automation's setpoint, held for a while (the room stays away):
+    // over, the away programme's 16, not the chosen one's 20.
+    order_as(
+        &hub,
+        &room("occupied_heating_setpoint"),
+        Value::Float(21.0),
+        Origin::Automation,
+    )
+    .await;
+    until(&hub, "vannes:v/sp", 21.0).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn without_the_programmes_after_a_real_restart_the_first_one_s_week() {
+    let dir = std::env::temp_dir().join(format!(
+        "moli-heating-programmes-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let options = || HubOptions {
+        state_path: Some(dir.join("state.json")),
+        ..HubOptions::default()
+    };
+    let (today, _) = days();
+    let day = format!("chauffage:parents/weekly_schedule_{today}");
+
+    let (hub, cancel) = stand_ins_with(options()).await;
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &cancel);
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    order(
+        &hub,
+        "chauffage:maison/programme",
+        Value::from("Télétravail"),
+    )
+    .await
+    .unwrap();
+    order(&hub, &day, Value::from("00:00/22")).await.unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+    hub.persist_state().await.unwrap();
+    cancel.cancel();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // A new hub from the state on disk, the heating without `[heating_house]`.
+    let (hub, cancel) = stand_ins_with(options()).await;
+    start(&hub, rooms(), None, |_| {}, &cancel);
+    until_text(&hub, &day, "00:00/20").await;
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 20.0).await;
+    for _ in 0..100 {
+        if hub.device(&DeviceId::from("chauffage:maison")).is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(hub.device(&DeviceId::from("chauffage:maison")).is_none());
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_bad_house_is_refused() {
     let good = || {

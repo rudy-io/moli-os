@@ -1143,13 +1143,21 @@ impl Heating {
         why: &str,
         play: Play,
     ) {
-        if let Some(hold) = run.setpoint_hold.take() {
-            let minutes = Value::Int(i64::from(hold.minutes));
-            self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
-            tracing::info!(room = %room.id, why, "heating: setpoint hold over, the schedule again");
+        if self.drop_setpoint_hold(room, run, why) {
             run.step = None;
             self.follow(ctx, run, play);
         }
+    }
+
+    /// Ends the setpoint held, journaled; whether there was one.
+    fn drop_setpoint_hold(&self, room: &Room, run: &mut RoomRun, why: &str) -> bool {
+        let Some(hold) = run.setpoint_hold.take() else {
+            return false;
+        };
+        let minutes = Value::Int(i64::from(hold.minutes));
+        self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
+        tracing::info!(room = %room.id, why, "heating: setpoint hold over, the schedule again");
+        true
     }
 
     /// A boost or a setpoint held whose end has come.
@@ -1388,18 +1396,62 @@ impl Heating {
             return;
         }
         let key = command.key.as_ref();
-        if matches!(key, "occupied_heating_setpoint" | "system_mode")
-            && by_person(command.origin)
-            && run.away(play).is_some()
-        {
-            run.outside = true;
-            ctx.set_state(&run.id, "away_lifted", Value::Bool(true));
-            tracing::info!(room = %room.id, "heating: room ordered by someone, out of the absence until it ends");
-            run.changed();
+        // A person's order to what the room is at, during the absence: the
+        // room is out of it, once the order is taken.
+        let leaving = matches!(
+            key,
+            "occupied_heating_setpoint"
+                | "system_mode"
+                | "boost"
+                | "boost_minutes"
+                | "hold_minutes"
+        ) && by_person(command.origin)
+            && run.away(play).is_some();
+        run.outside |= leaving;
+        let result = self.room_order(ctx, room, run, play, &command);
+        if leaving {
+            if result.is_ok() {
+                self.leave_absence(ctx, room, run, play, key);
+            } else {
+                run.outside = false;
+            }
+        }
+        command.reply(result);
+    }
+
+    /// The room out of the absence after a person's order: it plays its own
+    /// again, the step of the chosen programme (unless the order was its
+    /// setpoint), kept under a hold just asked for.
+    fn leave_absence(
+        &self,
+        ctx: &DriverCtx,
+        room: &Room,
+        run: &mut RoomRun,
+        play: Play,
+        key: &str,
+    ) {
+        ctx.set_state(&run.id, "away_lifted", Value::Bool(true));
+        tracing::info!(room = %room.id, "heating: room ordered by someone, out of the absence until it ends");
+        run.changed();
+        if key != "occupied_heating_setpoint" {
+            let held = run.setpoint_hold.take();
             run.step = None;
             self.follow(ctx, run, play);
+            run.setpoint_hold = held;
         }
-        let result = if key == "occupied_heating_setpoint" {
+    }
+
+    /// An order to a room's point, applied; what to answer.
+    fn room_order(
+        &self,
+        ctx: &DriverCtx,
+        room: &Room,
+        run: &mut RoomRun,
+        play: Play,
+        command: &CommandRequest,
+    ) -> Result<(), String> {
+        let key = command.key.as_ref();
+        if key == "occupied_heating_setpoint" {
             match command.value.as_f64() {
                 Some(t) if (room.min..=room.max).contains(&t) => {
                     run.setpoint = regulation::half_degree(t).clamp(room.min, room.max);
@@ -1449,8 +1501,7 @@ impl Heating {
             }
         } else {
             Err(moli_i18n::tr!("pilotes.chauffage.point_inconnu"))
-        };
-        command.reply(result);
+        }
     }
 
     /// An order to the room's boost or setpoint held; `None` for another point.
@@ -1521,10 +1572,7 @@ impl Heating {
         play: Play,
     ) {
         self.end_boost(room, run, "mode");
-        if let Some(hold) = run.setpoint_hold.take() {
-            let minutes = Value::Int(i64::from(hold.minutes));
-            self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
-        }
+        self.drop_setpoint_hold(room, run, "mode");
         run.mode = mode;
         run.step = None;
         run.changed();

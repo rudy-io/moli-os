@@ -360,22 +360,30 @@ impl Heating {
     }
 
     /// Every room plays the house's programme and day again: its step in
-    /// force is applied anew.
-    fn replay(&self, ctx: &DriverCtx, play: Play, runs: &mut [RoomRun]) {
-        for run in runs {
+    /// force is applied anew, over a setpoint held too (`all`: in every
+    /// room; else in those the absence reaches).
+    fn replay(&self, ctx: &DriverCtx, play: Play, runs: &mut [RoomRun], all: bool) {
+        for (room, run) in self.rooms.iter().zip(runs.iter_mut()) {
             show_weeks(ctx, run, self.house.as_ref(), play.programme);
+            if all || !run.outside {
+                self.drop_setpoint_hold(room, run, "house");
+            }
             run.step = None;
             self.follow(ctx, run, play);
         }
     }
 
-    /// The absence starts or ends playing: every room's valves get what the
-    /// room now plays soon, whatever was turned on them by hand.
-    fn turn(&self, ctx: &DriverCtx, hrun: &HouseRun, runs: &mut [RoomRun]) {
-        for run in runs.iter_mut() {
+    /// The absence starts (`starting`) or ends playing: in each room it
+    /// reaches, the valves get what the room now plays soon, whatever was
+    /// turned on them by hand or held; its start ends the boosts too.
+    fn turn(&self, ctx: &DriverCtx, hrun: &HouseRun, runs: &mut [RoomRun], starting: bool) {
+        for (room, run) in self.rooms.iter().zip(runs.iter_mut()) {
+            if starting && !run.outside {
+                self.end_boost(room, run, "away");
+            }
             run.changed();
         }
-        self.replay(ctx, hrun.playing(), runs);
+        self.replay(ctx, hrun.playing(), runs, false);
     }
 
     /// A person set the house's programme or mode: the absence, if it
@@ -387,7 +395,7 @@ impl Heating {
             tracing::info!(
                 "heating: the house set by someone, the away mode lifted until the next return"
             );
-            self.turn(ctx, hrun, runs);
+            self.turn(ctx, hrun, runs, false);
         }
     }
 
@@ -437,7 +445,7 @@ impl Heating {
                     if person {
                         self.lift(ctx, hrun, runs);
                     }
-                    self.replay(ctx, hrun.playing(), runs);
+                    self.replay(ctx, hrun.playing(), runs, true);
                     Ok(())
                 }
                 None => Err(moli_i18n::tr!("pilotes.chauffage.maison.programme_refuse")),
@@ -481,7 +489,7 @@ impl Heating {
             "today_as",
             Value::from(day.map_or("none", |d| DAYS[d])),
         );
-        self.replay(ctx, hrun.playing(), runs);
+        self.replay(ctx, hrun.playing(), runs, true);
     }
 
     /// `today_as` over at midnight, and the detected absence.
@@ -506,7 +514,7 @@ impl Heating {
                 hrun.away.applied = true;
                 ctx.set_state(&hrun.id, "away", Value::Bool(true));
                 tracing::info!(mode = %house.away_mode, "heating: nobody home, the house plays its away mode");
-                self.turn(ctx, hrun, runs);
+                self.turn(ctx, hrun, runs, true);
             }
             Some(false) => {
                 let away = std::mem::take(&mut hrun.away);
@@ -521,7 +529,7 @@ impl Heating {
                 ctx.set_state(&hrun.id, "away_lifted", Value::Bool(false));
                 tracing::info!("heating: someone home, the house plays its own choice again");
                 if !away.lifted {
-                    self.turn(ctx, hrun, runs);
+                    self.turn(ctx, hrun, runs, false);
                 }
             }
             // Not known (its driver starts, or it went quiet): nothing changes.
