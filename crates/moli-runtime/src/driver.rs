@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use moli_core::{Device, DeviceId, DriverStatus, InstanceId, PointId, Value};
+use moli_core::{Device, DeviceId, DriverStatus, InstanceId, Origin, PointId, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -45,6 +45,8 @@ pub struct CommandRequest {
     pub key: Arc<str>,
     /// Canonical value, already validated against the point spec.
     pub value: Value,
+    /// Who gave the order (a person, an automation, an agent…).
+    pub origin: Origin,
     /// When the hub stopped waiting: an order past it must never run (a
     /// lamp switched on hours after « failed » is worse than a refusal).
     pub deadline: Instant,
@@ -500,6 +502,7 @@ mod cancellation_tests {
             }),
             key: "on".into(),
             value: Value::Bool(true),
+            origin: Origin::Ui,
             deadline: Instant::now() + std::time::Duration::from_secs(60),
             reply,
         })

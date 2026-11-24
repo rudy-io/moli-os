@@ -525,6 +525,21 @@ impl Config {
         moli_heating::check(&self.heating).map_err(|e| anyhow::anyhow!("[[heating]] {e}"))?;
         if let Some(house) = &self.heating_house {
             moli_heating::house::check(house, &self.heating)?;
+            // Anyone may write a helper: an agent would empty the house
+            // without the guard looking at its rooms. The heating also
+            // refuses any writable point once its driver says so.
+            if let Some(away) = &house.away
+                && let Some(helpers) = self
+                    .drivers
+                    .iter()
+                    .find(|d| d.kind == "helpers" && away.starts_with(&format!("{}:", d.id)))
+            {
+                bail!(
+                    "[heating_house] away {away:?} is a helper of {:?}, which anyone may write: \
+                     the absence wants a read-only point (personnes:…/everyone_away)",
+                    helpers.id
+                );
+            }
         }
         // The heating writes its valves by itself, with no code typed.
         for room in &self.heating {
@@ -595,6 +610,18 @@ mod tests {
         assert!(config.check().is_err());
         let config: Config = toml::from_str(&house("bureau", "Absent")).unwrap();
         assert!(config.check().is_err());
+        let helper = format!(
+            "{}[[driver]]\nid = \"aides\"\nkind = \"helpers\"\n",
+            house("bureau", "off").replace("personnes:maison/everyone_away", "aides:absent/on")
+        );
+        let config: Config = toml::from_str(&helper).unwrap();
+        assert!(
+            config
+                .check()
+                .unwrap_err()
+                .to_string()
+                .contains("read-only")
+        );
         assert!(
             toml::from_str::<Config>("[heating_house]\nprogrammes = []\nmode = \"off\"\n").is_err()
         );

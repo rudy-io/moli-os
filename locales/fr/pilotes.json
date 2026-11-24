@@ -1153,6 +1153,8 @@
   "pilotes.chauffage.maison.programme": "Programme",
   "pilotes.chauffage.maison.jour": "Aujourd’hui comme",
   "pilotes.chauffage.maison.absence": "Absence",
+  "pilotes.chauffage.hors_absence": "Sortie de l’absence",
+  "pilotes.chauffage.maison.absence_levee": "Absence levée",
   "pilotes.chauffage.maison.programme_refuse": "Programme inconnu de la maison",
   "pilotes.chauffage.maison.jour_refuse": "Jour inconnu : none, ou monday à sunday",
   "pilotes.chauffage.maison.mode_refuse": "Mode inconnu : auto ou off",

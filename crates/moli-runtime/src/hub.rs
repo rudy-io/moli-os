@@ -1858,7 +1858,7 @@ impl Hub {
             since: now_ms(),
             events: self.subscribe(),
         });
-        let sent = self.send(prepared).await;
+        let sent = self.send(prepared, origin).await;
         if let Some(watch) = follow
             && sent.as_ref().err().is_none_or(transient)
         {
@@ -1904,7 +1904,7 @@ impl Hub {
                 }
                 let started = Instant::now();
                 let sent = match hub.prepare(&point, &wanted) {
-                    Ok(prepared) => hub.send(prepared).await,
+                    Ok(prepared) => hub.send(prepared, origin).await,
                     Err(e) => Err(e),
                 };
                 let note = moli_i18n::tr!("serveur.ordre.renvoi", envoi = send, envois = MAX_SENDS);
@@ -1958,7 +1958,7 @@ impl Hub {
     }
 
     /// Hands a prepared order to its driver and waits for the answer.
-    async fn send(&self, prepared: Prepared) -> Result<(), CommandError> {
+    async fn send(&self, prepared: Prepared, origin: Origin) -> Result<(), CommandError> {
         // Every order ends here, approved ones too: a mirror stops them all,
         // but those that change nothing outside Moli (it runs them in the
         // shadow of the real house).
@@ -1981,6 +1981,7 @@ impl Hub {
                 device,
                 key,
                 value,
+                origin,
                 deadline: Instant::now() + self.0.opts.command_timeout,
                 reply,
             })

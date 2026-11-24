@@ -353,7 +353,7 @@ toutes jouent.
 ```toml
 [heating_house]
 programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui par défaut
-# away = "personnes:maison/everyone_away"            # facultatif : un point vrai quand personne n'est là
+# away = "personnes:maison/everyone_away"            # facultatif : un point en lecture seule, vrai quand personne n'est là
 # away_delay = 30                                    # minutes d'absence avant d'agir (0 à 1440)
 # away_mode = "off"                                  # "off" (hors-gel) ou le nom d'un programme
 ```
@@ -362,49 +362,67 @@ programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui pa
   `monday` … `sunday`, réglable : aujourd'hui, toutes les pièces jouent ce jour-là du programme ;
   revient à `none` à minuit, heure de la maison, et après un redémarrage le lendemain) ;
   `system_mode` (`auto` ou `off`, réglable : écrit sur **chaque pièce**, comme une scène ; une
-  seule ligne au journal, celle de l'ordre à la maison) ; `away` (en lecture, seulement avec
-  `away` : l'absence joue, voir plus bas). Ses membres sont les pièces et leurs vannes : un ordre d'un
-  agent à la maison est jugé sur toutes leurs pièces (pièces protégées, heures calmes).
+  seule ligne au journal, celle de l'ordre à la maison ; `auto` remet donc aussi en `auto` les
+  pièces mises en `off` exprès) ; avec `away`, en lecture : `away` (personne n'est là depuis
+  `away_delay`) et `away_lifted` (une personne a levé l'absence, voir plus bas). Ses membres sont
+  les pièces et leurs vannes : un ordre d'un agent à la maison est jugé sur toutes leurs pièces
+  (pièces protégées, heures calmes) et attend la validation d'un humain dès que l'une est
+  protégée.
 - **Les semaines** : `weekly_schedule_<clé>_<jour>` sur chaque pièce, au même format que
   `weekly_schedule_<jour>`. La clé est le nom du programme en minuscules, sans accents, chaque
   suite d'autres caractères devenue un `_` (« Télétravail » → `teletravail`, « Vacances d'été » →
   `vacances_d_ete`). Un jour jamais réglé est vide et joue celui du **premier** programme ; écrire
   un texte vide sur un autre programme l'y ramène. Les points `weekly_schedule_<jour>` restent
-  ceux du **programme joué** (celui d'`away_mode` pendant une absence) : les lire ou les écrire,
-  comme avant, c'est lire ou écrire celui-là.
+  ceux du **programme choisi** par la maison (même pendant une absence qui joue un autre
+  programme) : les lire ou les écrire, comme avant, c'est lire ou écrire celui-là.
   Les semaines sont des points de la pièce, gardés d'un démarrage à l'autre. À l'ajout de
-  `[heating_house]`, la semaine qu'avait la pièce devient celle du premier programme. **Le nom
-  d'un programme est sa clé** : le renommer fait repartir ses semaines de celles du premier ;
-  l'ordre, lui, peut changer (le premier est celui par défaut).
+  `[heating_house]`, la semaine qu'avait la pièce devient celle du premier programme ; au
+  **retrait** de `[heating_house]`, chaque pièce reprend la semaine du **premier** programme (pas
+  celle du dernier choisi), les logs le disent (`[heating_house] removed`) et l'appareil
+  `chauffage:maison` disparaît. **Le nom d'un programme est sa clé** : le renommer fait repartir
+  ses semaines de celles du premier ; l'ordre, lui, peut changer (le premier est celui par
+  défaut).
 - **Changer de programme ou de jour** réapplique dans chaque pièce en `auto` le créneau en
   vigueur, et met fin aux réglages à la main sur ses vannes, comme un programme de pièce changé.
 - **L'absence** (`away`) est une **surcouche** : elle n'écrit ni `programme` ni `system_mode` de
   la maison, ni le `system_mode` des pièces. Le point vrai depuis `away_delay` minutes, `away`
   devient vrai et les pièces jouent `away_mode` à la place de ce qui est choisi :
-  - `off` : **toutes** les pièces en hors-gel, y compris celles en `heat` (c'est le but) ; leurs
-    vannes reçoivent leur consigne la plus basse, comme en mode `off`. Le tableau de bord voit
-    alors une pièce dont `system_mode` dit encore `auto` (ou `heat`) et dont
-    `occupied_heating_setpoint` garde la consigne qu'elle reprendra au retour, mais dont les vannes
-    sont au plus bas : c'est `chauffage:maison/away` à vrai qui l'explique. La correction des
-    vannes n'apprend pas pendant ce temps.
+  - `off` : **toutes** les pièces en hors-gel, y compris celles en `heat` (personne n'est là) ;
+    leurs vannes reçoivent leur consigne la plus basse, comme en mode `off`, y compris une pièce en
+    `regulation = "force"` (pas sa consigne forcée) ; elle ne demande pas de chaleur
+    (`heat_demand` faux). Le tableau de bord voit alors une pièce dont `system_mode` dit encore
+    `auto` (ou `heat`) et dont `occupied_heating_setpoint` garde la consigne qu'elle reprendra au
+    retour, mais dont les vannes sont au plus bas : c'est `chauffage:maison/away` à vrai qui
+    l'explique. La correction des vannes n'apprend pas pendant ce temps.
   - un programme : ce programme est joué au lieu de celui qui est choisi (`programme` de la maison
-    ne change pas). Les pièces en `auto` suivent ses créneaux : `occupied_heating_setpoint` et
-    `weekly_schedule_<jour>` sont les siens ; les pièces en `heat` ou `off` n'en changent pas.
+    et `weekly_schedule_<jour>` ne changent pas). Les pièces en `auto` suivent ses créneaux
+    (`occupied_heating_setpoint` est le sien) ; les pièces en `heat` ou `off` n'en changent pas.
 
   Au retour (le point faux), la surcouche disparaît : chaque pièce réapplique le créneau en
   vigueur de ce qui est choisi. L'absence qui commence ou finit met fin, comme un changement de
   programme, aux réglages à la main sur les vannes. Un point inconnu (pilote qui démarre, appareil
-  hors ligne) ne change rien. **Lever l'absence** : écrire `programme` ou `system_mode` de la
-  **maison** pendant qu'elle joue la lève pour toute la maison jusqu'au prochain retour (le choix
-  écrit est joué aussitôt). Un ordre à une seule pièce ne la lève pas : la pièce garde son
-  nouveau mode ou sa consigne, joués au retour. Rien n'est gardé de l'absence : après un
-  redémarrage, `away` repart de faux et l'absence se réapplique après `away_delay` si personne
-  n'est toujours là, même si elle avait été levée (les logs de Moli le disent, comme à chaque
-  absence : `heating: nobody home, the house plays its away mode`).
+  hors ligne) ne change rien.
+  - **Lever l'absence pour toute la maison** : seul l'ordre d'une **personne** (le tableau de
+    bord) sur `programme` ou `system_mode` de la maison la lève, jusqu'au prochain retour ; le
+    choix écrit est joué aussitôt, et `chauffage:maison/away_lifted` devient vrai. Un automatisme
+    ou un agent qui écrit ces points change seulement ce qui sera joué au retour.
+  - **Sortir une pièce de l'absence** : l'ordre d'une **personne** sur la consigne ou le
+    `system_mode` d'une pièce la sort de l'absence jusqu'à la fin de celle-ci (son point
+    `away_lifted` devient vrai) ; elle joue alors son mode et son programme comme si personne
+    n'était parti. Celui d'un automatisme ou d'un agent est seulement gardé pour le retour.
+  - **Au redémarrage**, l'absence en cours, sa levée et les pièces qui en sont sorties sont
+    gardées (ce sont des points, relus du cache d'état) : un redémarrage ne remet ni le chauffage
+    au minimum sous le nez de quelqu'un qui l'avait levée, ni une maison vide à chauffer pendant
+    `away_delay`. Si quelqu'un est rentré entre-temps, le premier coup d'œil au point le voit.
+  - **Le point `away` doit être en lecture seule** (comme `personnes:…/everyone_away`) : s'il
+    était inscriptible, un agent qui l'écrirait passerait toutes les pièces en absence, protégées
+    comprises, sans que la garde les regarde. `check-config` refuse une aide (`helpers`) ; le
+    chauffage ne suit jamais un point qui se dit inscriptible une fois son pilote lancé (dit une
+    fois au journal).
 - `moli-os check-config` refuse : une table sans `[[heating]]`, de 1 à 8 programmes, un nom vide,
   avec des espaces autour ou de plus de 40 caractères, deux noms de même clé, un `away` qui n'est
-  pas un point d'un autre appareil, un `away_mode` qui n'est ni `off` ni un programme, et une pièce
-  d'id `maison` (l'appareil de la maison).
+  pas un point d'un autre appareil ou qui est une aide, un `away_mode` qui n'est ni `off` ni un
+  programme, et une pièce d'id `maison` (l'appareil de la maison).
 
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 

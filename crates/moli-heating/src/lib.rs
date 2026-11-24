@@ -34,7 +34,7 @@
 //!
 //! With `[heating_house]`, the house's programmes and `chauffage:maison`
 //! ([`house`]): each room keeps a week per programme, and its
-//! `weekly_schedule_<day>` are the playing programme's.
+//! `weekly_schedule_<day>` are the chosen programme's.
 //!
 //! ```toml
 //! [[heating]]
@@ -74,6 +74,7 @@ pub mod schedule;
 pub mod temporary;
 
 use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use anyhow::ensure;
@@ -309,6 +310,8 @@ pub struct Heating {
     airing_hold: Duration,
     fresh: Duration,
     minute: Duration,
+    /// The absence point said once to be writable.
+    away_refused: AtomicBool,
 }
 
 impl Heating {
@@ -328,6 +331,7 @@ impl Heating {
             airing_hold: hand::AIRING_HOLD,
             fresh: FRESH,
             minute: Duration::from_secs(60),
+            away_refused: AtomicBool::new(false),
         }
     }
 }
@@ -396,13 +400,32 @@ struct RoomRun {
     boost: Option<Boost>,
     /// In `auto`, the setpoint held until then, whatever the schedule says.
     setpoint_hold: Option<Timed>,
+    /// A person ordered the room during the absence: out of it until it ends.
+    outside: bool,
 }
 
 impl RoomRun {
+    /// The absence over the room, unless a person took it out.
+    fn away(&self, play: Play) -> Option<Overlay> {
+        play.away.filter(|_| !self.outside)
+    }
+
     /// The room's mode as played: `off` under the house's frost guard,
     /// whatever its own `system_mode` says.
     fn playing(&self, play: Play) -> Mode {
-        if play.off { Mode::Off } else { self.mode }
+        if self.away(play) == Some(Overlay::Off) {
+            Mode::Off
+        } else {
+            self.mode
+        }
+    }
+
+    /// The programme whose step is in force.
+    fn programme(&self, play: Play) -> usize {
+        match self.away(play) {
+            Some(Overlay::Programme(p)) => p,
+            _ => play.programme,
+        }
     }
 
     fn day(&self, programme: usize, day: usize) -> &[Step] {
@@ -440,13 +463,23 @@ impl RoomRun {
     }
 }
 
-/// What every room plays: a programme, a day instead of today, and the
-/// house's frost guard while nobody is home ([`house`]).
+/// What the house has every room play: its chosen programme (whose days
+/// `weekly_schedule_<day>` are), a day instead of today, and while nobody is
+/// home, `away_mode` over them ([`house`]).
 #[derive(Clone, Copy, Debug, Default)]
 struct Play {
     programme: usize,
     day: Option<usize>,
-    off: bool,
+    away: Option<Overlay>,
+}
+
+/// What the absence plays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Overlay {
+    /// Every room's valves at their lowest.
+    Off,
+    /// This programme instead of the chosen one.
+    Programme(usize),
 }
 
 /// The local day (Monday 0) and minute of the day.
@@ -566,7 +599,22 @@ fn day_name(day: &str) -> String {
     moli_i18n::tr(&format!("pilotes.chauffage.jour.{day}"))
 }
 
-/// The playing week's days, and each programme's.
+/// A read-only true/false point.
+pub(crate) fn flag(key: &str, label: String) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: label.into(),
+        kind: Kind::Binary,
+        access: Access {
+            read: true,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Other,
+    }
+}
+
+/// The chosen programme's days, and each programme's.
 fn schedule_points(house: Option<&House>) -> Vec<PointSpec> {
     let mut points: Vec<PointSpec> = DAYS
         .iter()
@@ -647,6 +695,12 @@ fn device(ctx: &DriverCtx, room: &Room, house: Option<&House>) -> Device {
         unit: None,
         semantic: Semantic::Other,
     });
+    if house.is_some_and(|h| h.away.is_some()) {
+        points.push(flag(
+            "away_lifted",
+            moli_i18n::tr!("pilotes.chauffage.hors_absence"),
+        ));
+    }
     points.push(PointSpec {
         key: "heat_demand".into(),
         label: moli_i18n::tr!("pilotes.chauffage.demande").into(),
@@ -689,8 +743,8 @@ fn programme_day(house: &House, programme: usize, day: &str) -> String {
     )
 }
 
-/// The room's weeks: each programme's days, and the playing one's as
-/// `weekly_schedule_<day>`.
+/// The room's weeks: each programme's days, and the house's chosen one's
+/// as `weekly_schedule_<day>`.
 fn show_weeks(ctx: &DriverCtx, run: &RoomRun, house: Option<&House>, programme: usize) {
     for (index, day) in DAYS.iter().enumerate() {
         ctx.set_state(
@@ -708,8 +762,14 @@ fn show_weeks(ctx: &DriverCtx, run: &RoomRun, house: Option<&House>, programme: 
     }
 }
 
-/// What the room had before a restart, or its first settings.
-fn restore(ctx: &DriverCtx, room: &Room, house: Option<&House>, programme: usize) -> RoomRun {
+/// What the room had before a restart, or its first settings. `left`:
+/// the first programme's days of a `[heating_house]` since removed.
+fn restore(
+    ctx: &DriverCtx,
+    room: &Room,
+    house: Option<&House>,
+    (programme, left): (usize, Option<&[Option<Value>]>),
+) -> RoomRun {
     let id = ctx.device_id(&room.id);
     let mode = match ctx.current(&id, "system_mode") {
         Some(Value::Text(t)) => Mode::parse(&t).unwrap_or(Mode::Auto),
@@ -730,9 +790,14 @@ fn restore(ctx: &DriverCtx, room: &Room, house: Option<&House>, programme: usize
         for (p, week) in weeks.iter_mut().enumerate() {
             week[index] = house.and_then(|h| read(&programme_day(h, p, day)));
         }
-        // Before the programmes, the room's one week is the first's.
+        let left = left
+            .and_then(|l| l[index].as_ref())
+            .and_then(text)
+            .and_then(|t| parse_day(t, room.min, room.max));
+        // Without the programmes, the room's one week is the first's.
         weeks[0][index] = weeks[0][index]
             .take()
+            .or(left)
             .or_else(|| read(&format!("weekly_schedule_{day}")))
             .or_else(|| Some(vec![day_of(room.initial)]));
     }
@@ -775,6 +840,8 @@ fn restore(ctx: &DriverCtx, room: &Room, house: Option<&House>, programme: usize
             until_ms,
         });
     ctx.set_availability(&id, true);
+    let outside = house.is_some_and(|h| h.away.is_some())
+        && ctx.current(&id, "away_lifted") == Some(Value::Bool(true));
     let run = RoomRun {
         id,
         mode,
@@ -798,10 +865,19 @@ fn restore(ctx: &DriverCtx, room: &Room, house: Option<&House>, programme: usize
         demand: None,
         boost,
         setpoint_hold,
+        outside,
     };
     show_temporary(ctx, &run);
     show_weeks(ctx, &run, house, programme);
+    if house.is_some_and(|h| h.away.is_some()) {
+        ctx.set_state(&run.id, "away_lifted", Value::Bool(run.outside));
+    }
     run
+}
+
+/// An order from a person (the dashboard), not an automation nor an agent.
+pub(crate) fn by_person(origin: Origin) -> bool {
+    matches!(origin, Origin::Ui | Origin::Household)
 }
 
 fn text(value: &Value) -> Option<&str> {
@@ -991,7 +1067,7 @@ impl Heating {
         }
         let (today, minute) = local(&self.zone);
         let day = play.day.unwrap_or(today);
-        let Some((index, temp)) = step_at(run.day(play.programme, day), minute) else {
+        let Some((index, temp)) = step_at(run.day(run.programme(play), day), minute) else {
             return;
         };
         if run.step != Some((day, index)) {
@@ -1014,7 +1090,7 @@ impl Heating {
         let now = jiff::Timestamp::now().to_zoned(self.zone.clone());
         let (today, minute) = local(&self.zone);
         let day = play.day.unwrap_or(today);
-        let minutes = u64::from(to_next_step(run.day(play.programme, day), minute));
+        let minutes = u64::from(to_next_step(run.day(run.programme(play), day), minute));
         let seconds = u64::from(now.second().unsigned_abs());
         Some(Duration::from_secs((minutes * 60).saturating_sub(seconds)))
     }
@@ -1312,6 +1388,17 @@ impl Heating {
             return;
         }
         let key = command.key.as_ref();
+        if matches!(key, "occupied_heating_setpoint" | "system_mode")
+            && by_person(command.origin)
+            && run.away(play).is_some()
+        {
+            run.outside = true;
+            ctx.set_state(&run.id, "away_lifted", Value::Bool(true));
+            tracing::info!(room = %room.id, "heating: room ordered by someone, out of the absence until it ends");
+            run.changed();
+            run.step = None;
+            self.follow(ctx, run, play);
+        }
         let result = if key == "occupied_heating_setpoint" {
             match command.value.as_f64() {
                 Some(t) if (room.min..=room.max).contains(&t) => {
@@ -1477,10 +1564,27 @@ impl Driver for Heating {
             });
             let play =
                 |hrun: &Option<HouseRun>| hrun.as_ref().map(HouseRun::playing).unwrap_or_default();
+            let first = if house.is_none() {
+                self.programmes_removed(ctx)
+            } else {
+                None
+            };
             let mut runs = Vec::with_capacity(self.rooms.len());
             for room in &self.rooms {
+                // Read before the room is published again without them.
+                let left = first.as_ref().map(|key| {
+                    let id = ctx.device_id(&room.id);
+                    DAYS.iter()
+                        .map(|day| ctx.current(&id, &format!("weekly_schedule_{key}_{day}")))
+                        .collect::<Vec<_>>()
+                });
                 ctx.upsert_device(device(ctx, room, house));
-                runs.push(restore(ctx, room, house, play(&hrun).programme));
+                runs.push(restore(
+                    ctx,
+                    room,
+                    house,
+                    (play(&hrun).programme, left.as_deref()),
+                ));
             }
             ctx.ready();
             let started = Instant::now();

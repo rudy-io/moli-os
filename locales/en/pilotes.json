@@ -1153,6 +1153,8 @@
   "pilotes.chauffage.maison.programme": "Programme",
   "pilotes.chauffage.maison.jour": "Today as",
   "pilotes.chauffage.maison.absence": "Away",
+  "pilotes.chauffage.hors_absence": "Out of the absence",
+  "pilotes.chauffage.maison.absence_levee": "Absence lifted",
   "pilotes.chauffage.maison.programme_refuse": "Not one of the house's programmes",
   "pilotes.chauffage.maison.jour_refuse": "Unknown day: none, or monday to sunday",
   "pilotes.chauffage.maison.mode_refuse": "Unknown mode: auto or off",

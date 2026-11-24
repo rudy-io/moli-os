@@ -104,8 +104,33 @@ impl Driver for Valves {
                 });
                 ctx.set_state(&id, "sp", Value::Float(16.0));
             }
+            // Presence, as `personnes` tells it: read-only, moved by `set`.
+            let presence = ctx.device_id("presence");
+            let flag = |key: &str, write: bool| PointSpec {
+                key: key.into(),
+                label: key.into(),
+                kind: Kind::Binary,
+                access: Access { read: true, write },
+                unit: None,
+                semantic: Semantic::Other,
+            };
+            ctx.upsert_device(Device {
+                id: presence.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "presence".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![flag("away", false), flag("set", true)],
+            });
+            ctx.set_state(&presence, "away", Value::Bool(false));
             ctx.ready();
             while let Some(command) = ctx.next_command().await {
+                if command.device.id == presence {
+                    ctx.set_state(&presence, "away", command.value.clone());
+                }
                 // « entiere » keeps whole degrees, cut down, without saying so.
                 let value = match command.value.as_f64() {
                     Some(v) if &*command.device.native_name == "entiere" => Value::Float(v.floor()),
@@ -196,7 +221,11 @@ async fn house_of(rooms: Vec<Room>, tune: impl FnOnce(&mut Heating)) -> (Hub, Ca
 }
 
 async fn stand_ins_running() -> (Hub, CancellationToken) {
-    let hub = Hub::new(HubOptions::default()).unwrap();
+    stand_ins_with(HubOptions::default()).await
+}
+
+async fn stand_ins_with(options: HubOptions) -> (Hub, CancellationToken) {
+    let hub = Hub::new(options).unwrap();
     let cancel = CancellationToken::new();
     spawn_driver(
         &hub,
@@ -410,15 +439,23 @@ async fn a_valve_that_rounds_what_it_is_given_is_not_turned_by_hand() {
         tokio::time::sleep(Duration::from_millis(20)).await;
         until_text(&hub, room, "none").await;
     }
-    // Turned on its dial: a hand.
-    hub.command(
-        &point("vannes:entiere/sp"),
-        Value::Float(18.0),
-        Origin::Ui,
-        None,
-    )
-    .await
-    .unwrap();
+    // Turned on its dial: a hand. Moli writes this valve at each look here
+    // (no interval): a turn that lands just before one of its writes is
+    // overwritten unseen, as on a real dial; turned again then.
+    for _ in 0..5 {
+        hub.command(
+            &point("vannes:entiere/sp"),
+            Value::Float(18.0),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if hub.state(&point(room)).map(|s| s.value) == Some(Value::from("manual")) {
+            break;
+        }
+    }
     until_text(&hub, room, "manual").await;
     until(&hub, "vannes:entiere/sp", 18.0).await;
     cancel.cancel();
@@ -1029,19 +1066,29 @@ async fn today_as_another_day_the_whole_house_and_a_restart() {
 }
 
 /// The heating with an absence point, looked at often: a minute is 50 ms.
-fn start_away(hub: &Hub, away_mode: &str, cancel: &CancellationToken) {
+fn start_away(hub: &Hub, rooms: Vec<Room>, away_mode: &str, cancel: &CancellationToken) {
+    start_away_on(hub, rooms, "vannes:presence/away", away_mode, cancel);
+}
+
+fn start_away_on(
+    hub: &Hub,
+    rooms: Vec<Room>,
+    point: &str,
+    away_mode: &str,
+    cancel: &CancellationToken,
+) {
     let table = table(&format!(
         r#"
         [heating_house]
         programmes = ["Normal", "Vacances"]
-        away = "maison:absent/on"
+        away = "{point}"
         away_delay = 2
         away_mode = "{away_mode}"
         "#
     ));
     start(
         hub,
-        rooms(),
+        rooms,
         Some(table),
         |h| {
             h.tick = Duration::from_millis(20);
@@ -1052,42 +1099,55 @@ fn start_away(hub: &Hub, away_mode: &str, cancel: &CancellationToken) {
 }
 
 async fn away(hub: &Hub, on: bool) {
-    order(hub, "maison:absent/on", Value::Bool(on))
+    order(hub, "vannes:presence/set", Value::Bool(on))
         .await
         .unwrap();
 }
 
-async fn until_away(hub: &Hub, on: bool) {
-    for _ in 0..300 {
-        if hub.state(&point("chauffage:maison/away")).map(|s| s.value) == Some(Value::Bool(on)) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("chauffage:maison/away: {on} expected");
+async fn order_as(hub: &Hub, at: &str, value: Value, origin: Origin) {
+    hub.command(&point(at), value, origin, None).await.unwrap();
+}
+
+/// The heating stopped, then started again on the same hub (its points as
+/// the state cache gives them back).
+async fn restart(
+    heating: CancellationToken,
+    again: impl FnOnce(&CancellationToken),
+) -> CancellationToken {
+    heating.cancel();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let heating = CancellationToken::new();
+    again(&heating);
+    heating
 }
 
 #[tokio::test]
 async fn nobody_home_the_rooms_play_frost_guard_over_what_was_chosen() {
     let (hub, cancel) = stand_ins_running().await;
     let heating = CancellationToken::new();
-    start_away(&hub, "off", &heating);
+    start_away(&hub, rooms(), "off", &heating);
     let room = |key: &str| format!("chauffage:parents/{key}");
     until(&hub, "vannes:v/sp", 20.0).await;
-    until_away(&hub, false).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
 
     // Gone: the valves at their lowest after the delay; nothing the house or
     // the room chose is written over.
     away(&hub, true).await;
-    until_away(&hub, true).await;
+    until_bool(&hub, "chauffage:maison/away", true).await;
     until(&hub, "vannes:v/sp", 5.0).await;
     until_text(&hub, &room("system_mode"), "auto").await;
     until(&hub, &room("occupied_heating_setpoint"), 20.0).await;
     until_text(&hub, "chauffage:maison/system_mode", "auto").await;
     until_text(&hub, "chauffage:maison/programme", "Normal").await;
+
+    // Restarted while nobody is home: still away, at once.
+    let heating = restart(heating, |c| start_away(&hub, rooms(), "off", c)).await;
+    until_bool(&hub, "chauffage:maison/away", true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
     // Back: the room's own again.
     away(&hub, false).await;
-    until_away(&hub, false).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
     until(&hub, "vannes:v/sp", 20.0).await;
 
     // A room held in `heat` is frost-guarded too, and holds again on return.
@@ -1107,34 +1167,76 @@ async fn nobody_home_the_rooms_play_frost_guard_over_what_was_chosen() {
         .await
         .unwrap();
     until(&hub, "vannes:v/sp", 20.0).await;
-
-    // Someone sets the house meanwhile: the absence is lifted until the return.
-    away(&hub, true).await;
-    until(&hub, "vannes:v/sp", 5.0).await;
-    order(&hub, "chauffage:maison/programme", Value::from("Vacances"))
-        .await
-        .unwrap();
-    until(&hub, "vannes:v/sp", 20.0).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    until(&hub, "vannes:v/sp", 20.0).await;
-    away(&hub, false).await;
-    until_away(&hub, false).await;
-    until_text(&hub, "chauffage:maison/programme", "Vacances").await;
-
-    // Restarted while nobody is home: worked out again after the delay.
-    away(&hub, true).await;
-    until(&hub, "vannes:v/sp", 5.0).await;
     heating.cancel();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn only_a_person_setting_the_house_lifts_the_absence_kept_across_a_restart() {
+    let (hub, cancel) = stand_ins_running().await;
     let heating = CancellationToken::new();
-    start_away(&hub, "off", &heating);
-    until_away(&hub, true).await;
-    until(&hub, "vannes:v/sp", 5.0).await;
-    until_text(&hub, &room("system_mode"), "auto").await;
-    until_text(&hub, "chauffage:maison/programme", "Vacances").await;
-    away(&hub, false).await;
-    until_away(&hub, false).await;
+    start_away(&hub, rooms(), "off", &heating);
     until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // An automation changes the choice played on return, nothing more.
+    let programme = "chauffage:maison/programme";
+    order_as(&hub, programme, Value::from("Vacances"), Origin::Automation).await;
+    until_text(&hub, programme, "Vacances").await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, "chauffage:maison/away_lifted", false).await;
+
+    // A person: lifted until the return, and after a restart too.
+    order_as(&hub, programme, Value::from("Normal"), Origin::Ui).await;
+    until_bool(&hub, "chauffage:maison/away_lifted", true).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    let heating = restart(heating, |c| start_away(&hub, rooms(), "off", c)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    until_bool(&hub, "chauffage:maison/away_lifted", true).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, false).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
+    until_bool(&hub, "chauffage:maison/away_lifted", false).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    heating.cancel();
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_person_ordering_a_room_takes_it_out_of_the_absence_until_it_ends() {
+    let (hub, cancel) = stand_ins_running().await;
+    let heating = CancellationToken::new();
+    start_away(&hub, rooms(), "off", &heating);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // An automation's setpoint is the room's on return only.
+    let setpoint = room("occupied_heating_setpoint");
+    order_as(&hub, &setpoint, Value::Float(21.0), Origin::Automation).await;
+    until(&hub, &setpoint, 21.0).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+
+    // A person's: the room out of the absence, after a restart too.
+    order_as(&hub, &setpoint, Value::Float(22.0), Origin::Ui).await;
+    until_bool(&hub, &room("away_lifted"), true).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until_bool(&hub, "chauffage:maison/away", true).await;
+    let heating = restart(heating, |c| start_away(&hub, rooms(), "off", c)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    until_bool(&hub, &room("away_lifted"), true).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+
+    // The absence over: the room is like the others again.
+    away(&hub, false).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
     heating.cancel();
     cancel.cancel();
 }
@@ -1142,9 +1244,10 @@ async fn nobody_home_the_rooms_play_frost_guard_over_what_was_chosen() {
 #[tokio::test]
 async fn nobody_home_the_rooms_play_the_away_programme() {
     let (hub, cancel) = stand_ins_running().await;
-    start_away(&hub, "Vacances", &cancel);
+    start_away(&hub, rooms(), "Vacances", &cancel);
     let (today, _) = days();
     let room = |key: &str| format!("chauffage:parents/{key}");
+    let day = room(&format!("weekly_schedule_{today}"));
     until_text(&hub, "chauffage:maison/programme", "Normal").await;
     order(
         &hub,
@@ -1155,17 +1258,138 @@ async fn nobody_home_the_rooms_play_the_away_programme() {
     .unwrap();
     until(&hub, "vannes:v/sp", 20.0).await;
 
-    // The away programme played: setpoint and days are its own, the house's
-    // choice stays.
+    // The away programme played; the house's choice and its days stay.
     away(&hub, true).await;
     until(&hub, &room("occupied_heating_setpoint"), 16.0).await;
     until(&hub, "vannes:v/sp", 16.0).await;
-    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/16").await;
+    until_text(&hub, &day, "00:00/20").await;
     until_text(&hub, "chauffage:maison/programme", "Normal").await;
+
+    // `weekly_schedule_<day>` writes the chosen programme, played on return.
+    order(&hub, &day, Value::from("00:00/18")).await.unwrap();
+    until_text(
+        &hub,
+        &room(&format!("weekly_schedule_normal_{today}")),
+        "00:00/18",
+    )
+    .await;
+    until_text(
+        &hub,
+        &room(&format!("weekly_schedule_vacances_{today}")),
+        "00:00/16",
+    )
+    .await;
+    until(&hub, "vannes:v/sp", 16.0).await;
     away(&hub, false).await;
-    until(&hub, &room("occupied_heating_setpoint"), 20.0).await;
+    until(&hub, &room("occupied_heating_setpoint"), 18.0).await;
+    until(&hub, "vannes:v/sp", 18.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_forced_room_is_frost_guarded_while_nobody_is_home() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let forced = || {
+        toml::from_str::<File>(
+            r#"
+            [[heating]]
+            id = "bureau"
+            name = "Bureau"
+            sensor = "maison:piece/value"
+            valves = ["vannes:v/sp"]
+            initial = 20.0
+            regulation = "force"
+            "#,
+        )
+        .unwrap()
+        .heating
+    };
+    let (hub, cancel) = stand_ins_running().await;
+    start_away(&hub, forced(), "off", &cancel);
+    // Under its setpoint: wide open (20 + 4), heat asked for.
+    order(&hub, "maison:piece/value", Value::Float(19.5))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 24.0).await;
+    until_bool(&hub, "chauffage:bureau/heat_demand", true).await;
+    // Nobody home: the valve's lowest, not the forced setpoint.
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, "chauffage:bureau/heat_demand", false).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    away(&hub, false).await;
+    until(&hub, "vannes:v/sp", 24.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_writable_absence_point_is_never_followed() {
+    let (hub, cancel) = stand_ins_running().await;
+    start_away_on(&hub, rooms(), "maison:absent/on", "off", &cancel);
     until(&hub, "vannes:v/sp", 20.0).await;
-    until_text(&hub, &room(&format!("weekly_schedule_{today}")), "00:00/20").await;
+    order(&hub, "maison:absent/on", Value::Bool(true))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn an_agent_s_order_to_the_house_waits_for_a_person_when_a_room_is_protected() {
+    let options = HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_rooms: vec!["Chambre".into()],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    };
+    let (hub, cancel) = stand_ins_with(options).await;
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &cancel);
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    let at = point("chauffage:maison/programme");
+    let value = Value::from("Télétravail");
+    assert!(hub.would_hold(&at, Some(&value), Origin::Mcp).is_some());
+    assert!(hub.would_hold(&at, Some(&value), Origin::Ui).is_none());
+    let mode = point("chauffage:maison/system_mode");
+    assert!(
+        hub.would_hold(&mode, Some(&Value::from("off")), Origin::Mcp)
+            .is_some()
+    );
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn without_the_programmes_each_room_keeps_the_first_one_s_week() {
+    let (hub, cancel) = stand_ins_running().await;
+    let heating = CancellationToken::new();
+    start(&hub, rooms(), Some(table(TWO)), |_| {}, &heating);
+    let (today, _) = days();
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    let day = room(&format!("weekly_schedule_{today}"));
+    until_text(&hub, "chauffage:maison/programme", "Normal").await;
+    order(
+        &hub,
+        "chauffage:maison/programme",
+        Value::from("Télétravail"),
+    )
+    .await
+    .unwrap();
+    order(&hub, &day, Value::from("00:00/22")).await.unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+
+    // `[heating_house]` removed: Normal's week, not the one played last.
+    let heating = restart(heating, |c| start(&hub, rooms(), None, |_| {}, c)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    until_text(&hub, &day, "00:00/20").await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    assert!(hub.device(&DeviceId::from("chauffage:maison")).is_none());
+    heating.cancel();
     cancel.cancel();
 }
 

@@ -7,16 +7,18 @@
 //! - `today_as` (writable): `none`, or the day (`monday`…) every room plays
 //!   today; back to `none` at local midnight.
 //! - `system_mode` (writable): `auto` or `off`, written on every room.
-//! - `away` (with `away`): nobody home for `away_delay`, so every room
-//!   plays `away_mode` over what is chosen: the frost guard (every room,
-//!   whatever its own mode) or a programme. Nothing chosen is written over;
-//!   the return plays the choice again. Setting the house's `programme` or
-//!   `system_mode` lifts it until the next return. Worked out again from the
-//!   house's point after a restart.
+//! - `away` (with `away`, a read-only point): nobody home for `away_delay`,
+//!   so every room plays `away_mode` over what is chosen: the frost guard
+//!   (every room, whatever its own mode) or a programme. Nothing chosen is
+//!   written over; the return plays the choice again.
+//! - `away_lifted`: a person set the house's `programme` or `system_mode`,
+//!   which lifts the absence until the next return. A person's order to a
+//!   room takes that room out of it (its own `away_lifted`). Both, and the
+//!   absence itself, are kept across a restart.
 //!
 //! Each room keeps one week per programme, `weekly_schedule_<key>_<day>`
 //! ([`key`]); a day never set (empty) plays the first programme's. Its
-//! `weekly_schedule_<day>` points are the playing programme's.
+//! `weekly_schedule_<day>` points are the chosen programme's.
 //!
 //! ```toml
 //! [heating_house]
@@ -28,6 +30,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use anyhow::ensure;
@@ -37,7 +40,8 @@ use serde::Deserialize;
 
 use crate::schedule::DAYS;
 use crate::{
-    Heating, INSTANCE, Mode, Play, Room, RoomRun, is_point, show_weeks, text, valve_devices,
+    Heating, INSTANCE, Mode, Overlay, Play, Room, RoomRun, by_person, flag, is_point, show_weeks,
+    text, valve_devices,
 };
 
 /// The house's device: `chauffage:maison`.
@@ -169,40 +173,31 @@ pub(crate) struct HouseRun {
     /// The local date `today_as` was set on: over the next day.
     today_on: Option<jiff::civil::Date>,
     off: bool,
-    /// `away_mode`: a programme, or the frost guard (`None`).
-    away_mode: Option<usize>,
+    /// What the absence plays.
+    away_mode: Overlay,
     away: Away,
 }
 
 impl HouseRun {
-    /// What every room plays: the house's choice, or `away_mode` over it
-    /// while the absence holds.
+    /// What the house has every room play: its choice, and `away_mode`
+    /// over it while the absence holds.
     pub(crate) fn playing(&self) -> Play {
-        if !self.away.holds() {
-            return self.chosen;
-        }
-        match self.away_mode {
-            Some(programme) => Play {
-                programme,
-                ..self.chosen
-            },
-            None => Play {
-                off: true,
-                ..self.chosen
-            },
+        Play {
+            away: self.away.holds().then_some(self.away_mode),
+            ..self.chosen
         }
     }
 }
 
-/// The detected absence: worked out again from the house's point, never
-/// kept across a restart.
+/// The detected absence. Whether it plays and whether a person lifted it
+/// are points (`away`, `away_lifted`): kept across a restart.
 #[derive(Default)]
 struct Away {
     /// Nobody home since, as the house's point says.
     since: Option<Instant>,
-    /// Nobody home for `away_delay`: `away_mode` is played.
+    /// Nobody home for `away_delay`.
     applied: bool,
-    /// Someone set the house's programme or mode since: its choice is
+    /// A person set the house's programme or mode since: its choice is
     /// played until the next return.
     lifted: bool,
 }
@@ -255,17 +250,14 @@ pub(crate) fn house_device(ctx: &DriverCtx, house: &House, rooms: &[Room]) -> De
         ),
     ];
     if house.away.is_some() {
-        points.push(PointSpec {
-            key: "away".into(),
-            label: moli_i18n::tr!("pilotes.chauffage.maison.absence").into(),
-            kind: Kind::Binary,
-            access: Access {
-                read: true,
-                write: false,
-            },
-            unit: None,
-            semantic: Semantic::Other,
-        });
+        points.push(flag(
+            "away",
+            moli_i18n::tr!("pilotes.chauffage.maison.absence"),
+        ));
+        points.push(flag(
+            "away_lifted",
+            moli_i18n::tr!("pilotes.chauffage.maison.absence_levee"),
+        ));
     }
     let mut members: Vec<DeviceId> = rooms.iter().map(|r| ctx.device_id(&r.id)).collect();
     for device in rooms.iter().flat_map(valve_devices) {
@@ -288,8 +280,8 @@ pub(crate) fn house_device(ctx: &DriverCtx, house: &House, rooms: &[Room]) -> De
 
 impl Heating {
     /// What the house had before a restart, or the first programme in
-    /// `auto`. `today_as` holds only on the day it was set; the absence is
-    /// worked out again.
+    /// `auto`. `today_as` holds only on the day it was set; the absence and
+    /// its lifting as they were, until the house's point says otherwise.
     pub(crate) fn restore_house(&self, ctx: &DriverCtx, house: &House) -> HouseRun {
         let id = ctx.device_id(DEVICE);
         let programme = match ctx.current(&id, "programme") {
@@ -310,17 +302,27 @@ impl Heating {
             })
             .unwrap_or_default();
         let off = ctx.current(&id, "system_mode") == Some(Value::from("off"));
+        let watched = house.away.is_some();
+        let was = |key: &str| watched && ctx.current(&id, key) == Some(Value::Bool(true));
+        let applied = was("away");
+        let lifted = applied && was("away_lifted");
         let run = HouseRun {
             id,
             chosen: Play {
                 programme,
                 day,
-                off: false,
+                away: None,
             },
             today_on,
             off,
-            away_mode: house.position(&house.away_mode),
-            away: Away::default(),
+            away_mode: house
+                .position(&house.away_mode)
+                .map_or(Overlay::Off, Overlay::Programme),
+            away: Away {
+                since: applied.then(Instant::now),
+                applied,
+                lifted,
+            },
         };
         ctx.set_state(
             &run.id,
@@ -333,11 +335,28 @@ impl Heating {
             Value::from(day.map_or("none", |d| DAYS[d])),
         );
         ctx.set_state(&run.id, "system_mode", Value::from(house_mode(off)));
-        if house.away.is_some() {
-            ctx.set_state(&run.id, "away", Value::Bool(false));
+        if watched {
+            ctx.set_state(&run.id, "away", Value::Bool(run.away.applied));
+            ctx.set_state(&run.id, "away_lifted", Value::Bool(run.away.lifted));
         }
         ctx.set_availability(&run.id, true);
         run
+    }
+
+    /// The first programme's key of a `[heating_house]` removed since the
+    /// last start (its device still known from before): each room's one week
+    /// is that programme's again, not the one played last. Its device goes.
+    pub(crate) fn programmes_removed(&self, ctx: &DriverCtx) -> Option<String> {
+        let id = ctx.device_id(DEVICE);
+        let view = self.hub.device(&id)?;
+        let first = view.device.points.iter().find_map(|p| match &p.kind {
+            Kind::Enum { values } if p.key.as_ref() == "programme" => values.first().cloned(),
+            _ => None,
+        });
+        ctx.remove_device(&id);
+        let first = first?;
+        tracing::warn!(programme = %first, "heating: [heating_house] removed, every room keeps the first programme's week");
+        Some(key(&first))
     }
 
     /// Every room plays the house's programme and day again: its step in
@@ -359,11 +378,12 @@ impl Heating {
         self.replay(ctx, hrun.playing(), runs);
     }
 
-    /// Someone set the house's programme or mode: the absence, if it holds,
-    /// no longer plays until the next return.
+    /// A person set the house's programme or mode: the absence, if it
+    /// holds, no longer plays until the next return.
     fn lift(&self, ctx: &DriverCtx, hrun: &mut HouseRun, runs: &mut [RoomRun]) {
         if hrun.away.holds() {
             hrun.away.lifted = true;
+            ctx.set_state(&hrun.id, "away_lifted", Value::Bool(true));
             tracing::info!(
                 "heating: the house set by someone, the away mode lifted until the next return"
             );
@@ -392,7 +412,9 @@ impl Heating {
         );
     }
 
-    /// An order to `chauffage:maison`.
+    /// An order to `chauffage:maison`. Only a person's lifts the absence:
+    /// an automation or an agent that sets the house changes the choice
+    /// played on return.
     pub(crate) fn command_house(
         &self,
         ctx: &DriverCtx,
@@ -404,20 +426,17 @@ impl Heating {
             return;
         }
         let value = text(&command.value);
+        let person = by_person(command.origin);
         let result = match command.key.as_ref() {
             "programme" => match value.and_then(|v| house.position(v)) {
                 Some(programme) => {
                     hrun.chosen.programme = programme;
-                    ctx.set_state(
-                        &hrun.id,
-                        "programme",
-                        Value::from(house.programmes[programme].as_str()),
-                    );
-                    tracing::info!(
-                        programme = house.programmes[programme],
-                        "heating: every room plays this programme"
-                    );
-                    self.lift(ctx, hrun, runs);
+                    let name = house.programmes[programme].as_str();
+                    ctx.set_state(&hrun.id, "programme", Value::from(name));
+                    tracing::info!(programme = name, "heating: the house's programme");
+                    if person {
+                        self.lift(ctx, hrun, runs);
+                    }
                     self.replay(ctx, hrun.playing(), runs);
                     Ok(())
                 }
@@ -436,7 +455,9 @@ impl Heating {
             },
             "system_mode" => match value {
                 Some(mode @ ("auto" | "off")) => {
-                    self.lift(ctx, hrun, runs);
+                    if person {
+                        self.lift(ctx, hrun, runs);
+                    }
                     self.set_house_mode(ctx, hrun, runs, mode == "off");
                     Ok(())
                 }
@@ -489,10 +510,15 @@ impl Heating {
             }
             Some(false) => {
                 let away = std::mem::take(&mut hrun.away);
+                for run in runs.iter_mut().filter(|r| r.outside) {
+                    run.outside = false;
+                    ctx.set_state(&run.id, "away_lifted", Value::Bool(false));
+                }
                 if !away.applied {
                     return;
                 }
                 ctx.set_state(&hrun.id, "away", Value::Bool(false));
+                ctx.set_state(&hrun.id, "away_lifted", Value::Bool(false));
                 tracing::info!("heating: someone home, the house plays its own choice again");
                 if !away.lifted {
                     self.turn(ctx, hrun, runs);
@@ -504,15 +530,20 @@ impl Heating {
     }
 
     /// The house's absence point: true when nobody is home, `None` when not
-    /// known.
+    /// known, or when anyone may write it (an agent would empty the house
+    /// without the guard looking at its rooms).
     fn nobody_home(&self, point: &str) -> Option<bool> {
         let point = PointId::from(point);
-        let (device, _) = point.split()?;
-        if self
-            .hub
-            .device(&device)
-            .is_some_and(|d| d.online == Some(false))
-        {
+        let (device, key) = point.split()?;
+        let view = self.hub.device(&device)?;
+        if view.online == Some(false) {
+            return None;
+        }
+        let spec = view.device.points.iter().find(|p| p.key.as_ref() == key)?;
+        if spec.access.write {
+            if !self.away_refused.swap(true, Ordering::Relaxed) {
+                tracing::warn!(%point, "heating: the absence point is writable, never followed");
+            }
             return None;
         }
         match self.hub.state(&point)?.value {
