@@ -198,6 +198,14 @@ timezone = "Europe/Paris"
 # name = "Bureau"
 # sensor = "z2m:0x…/temperature"
 # valves = ["z2m:0x…/occupied_heating_setpoint"]
+# regulation = "shift"                  # or "force", or "none"
+# An open window or door: the room stops asking for heat for a while.
+# openings = ["z2m:0x…/contact"]        # optional: read-only contacts (true: closed)
+# opening_delay = 60                    # seconds open before acting
+# auto_opening = false                  # true: a fast drop of the sensor is an open window
+# auto_opening_drop = 3.0               # °C per hour, smoothed
+# auto_opening_max = 30                 # minutes at most, then the room resumes
+# opening_action = "off"                # the valves' lowest, or a setpoint in °C (never over theirs)
 #
 # The house's programmes: a week per programme in each room, and chauffage:maison
 # (programme, today_as, system_mode, away) to choose the one every room plays.

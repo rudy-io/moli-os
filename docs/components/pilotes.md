@@ -237,6 +237,13 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 # boost_default_minutes = 60 : la durée d'un boost quand seul `boost` est écrit
 # hold_default_minutes = 0 : en `auto`, combien de temps tient une consigne changée à la main
 #   (0 : jusqu'au créneau suivant)
+# openings = ["z2m:…/contact"] : les contacts de porte ou de fenêtre de la pièce (8 au plus)
+# opening_delay = 60 : secondes ouvert avant d'agir (0 à 3600)
+# auto_opening = false : une fenêtre ouverte vue à une chute de la sonde
+# auto_opening_drop = 3.0 : la chute, en °C par heure (1 à 20)
+# auto_opening_max = 30 : minutes au plus, puis la pièce reprend (5 à 120)
+# opening_action = "off" : les vannes à leur consigne la plus basse ; ou une consigne en °C
+#   (5 à 30, au demi-degré), jamais au-dessus de celle qu'elles auraient eue
 ```
 
 - **Points**, ceux d'une vanne Zigbee2MQTT, si bien que le tableau de bord en fait une carte de
@@ -301,7 +308,7 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 - **La demande de chaleur** (`heat_demand`, quel que soit le mode de régulation) : la sonde sous
   la consigne de plus de `hysteresis`, la pièce demande ; au-dessus de plus de `hysteresis`, elle
   ne demande plus ; entre les deux, elle garde son état (le bruit de la sonde ne la fait pas
-  osciller). Jamais en `off` ni la sonde muette. De quoi piloter une chaudière ou un circulateur
+  osciller). Jamais en `off`, la sonde muette, ni la pièce ouverte (voir plus bas). De quoi piloter une chaudière ou un circulateur
   depuis un automatisme, et la voir dans l'historique.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
   plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
@@ -336,12 +343,42 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   `valve_override_until` (RFC 3339). Changer la consigne, le mode ou le programme de la pièce
   met fin aux réglages à la main ; la correction n'apprend pas pendant ce temps. Un redémarrage
   de Moli les oublie : les vannes reçoivent de nouveau la consigne de la pièce.
+- **Une fenêtre ou une porte ouverte** (`crates/moli-heating/src/opening.rs`) : l'aération
+  ci-dessus, pour toute la pièce et sans geste. Avec `openings` (ou `auto_opening`), la pièce a
+  deux points de plus : `opening` (`none`, `contact`, `drop`, en lecture) et `opening_bypass`
+  (inscriptible : ignorer la détection, pour aérer en chauffant). Ouverte, la pièce ne demande
+  plus de chaleur (`heat_demand` faux), ses vannes reçoivent la consigne d'ouverture
+  (`opening_action`) et la correction n'apprend pas ; les réglages à la main en cours prennent
+  fin. **Une ouverture ne fait jamais monter une vanne** : elle reçoit la plus basse des deux,
+  celle qu'elle aurait eue (boost compris ; en `force`, consigne + boost − `force_offset`, la
+  pièce ne demandant plus) et celle de l'ouverture. Un boost ou un maintien en cours continue de
+  courir, son échéance inchangée, et reprend son effet à la fermeture. En `off` (le sien, ou
+  l'absence de la maison en hors-gel), rien à couper : `opening` reste `none` et les vannes ne
+  bougent pas, mais l'ouverture est suivie, si bien qu'au retour une fenêtre encore ouverte coupe
+  la pièce aussitôt. La raison est dite au journal.
+  - **Avec un contact** : ouvert depuis `opening_delay`, la pièce est ouverte ; refermé, elle
+    reprend aussitôt son mode et sa consigne. Un contact se lit : `contact` (vrai = fermé, la
+    convention de Moli et de Zigbee2MQTT) ou `doorcontact_state` (Tuya, vrai = ouvert). Un contact
+    hors ligne ou sans valeur compte pour fermé. Un point inscriptible n'est jamais un contact : un
+    agent qui l'écrirait couperait le chauffage d'une pièce sans passer par la garde. Le
+    thermostat l'écarte (dit une fois au journal), comme tout point qui n'est pas un contact.
+  - **Sans contact** (`auto_opening = true`, coupé par défaut) : la sonde de la pièce chute de
+    `auto_opening_drop` °C par heure ou plus. La pente se prend sur les relevés que le thermostat
+    lit déjà, chacun lissé par la médiane des trois derniers (un seul relevé bas ne fait rien),
+    sur 20 min au plus et 10 min au moins. Elle finit quand la température lissée remonte de
+    0,2 °C au-dessus de son plus bas, ou après `auto_opening_max` ; dans ce cas, aucune autre ne
+    commence avant autant de temps, si bien qu'une pièce qui refroidit sans fin chauffe au moins
+    la moitié du temps. Une sonde qui se tait n'est pas une chute : un silence de plus de 20 min
+    reprend la pente à zéro.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
   mal écrite (dont `correction = false` avec `regulation`, `force_offset` hors de 0,5 à 10 et
-  `hysteresis` hors de 0 à 2), une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
-  dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
-  ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
+  `hysteresis` hors de 0 à 2, et les réglages d'ouverture hors des bornes ci-dessus), une vanne
+  ou un contact qui est lui-même une pièce du chauffage (`chauffage:…`), une vanne
+  dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`), et un contact qui
+  est une aide de la maison (toujours inscriptible). L'unité d'une vanne, et ce qu'est un contact
+  d'un autre pilote, ne se voient qu'une fois son pilote lancé : c'est le thermostat qui les
+  vérifie.
 
 ### Les programmes de la maison (`[heating_house]`, `crates/moli-heating/src/house.rs`)
 

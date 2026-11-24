@@ -24,13 +24,19 @@
 //! - `valve_override_until`: when that ends (RFC 3339), empty without one.
 //! - `heat_demand`: the room asks for heat, its sensor under the setpoint
 //!   by more than `hysteresis`, until it is over it by as much
-//!   ([`regulation::demand`]); never in `off` nor with the sensor quiet.
+//!   ([`regulation::demand`]); never in `off`, with the sensor quiet, nor
+//!   while the room is open.
 //! - `boost` (writable, °C): added to the setpoint, the schedule's included,
 //!   for `boost_minutes` (writable; `boost_default_minutes` when only `boost`
 //!   is written), until `boost_until` (RFC 3339). Not in `off`.
 //! - `hold_minutes` (writable): in `auto`, how long the setpoint holds before
 //!   the schedule takes over again (0: until the next step), until
 //!   `hold_until` (RFC 3339). See [`temporary`].
+//! - `opening` (with `openings` or `auto_opening`): `none`, `contact` or
+//!   `drop`: the room is open, its valves get the opening's setpoint, never
+//!   over their own, and the shift learns nothing ([`opening`]). A boost or
+//!   a hold keeps running.
+//! - `opening_bypass` (writable): the detection ignored.
 //!
 //! With `[heating_house]`, the house's programmes and `chauffage:maison`
 //! ([`house`]): each room keeps a week per programme, and its
@@ -52,6 +58,10 @@
 //! # min = 5.0, max = 25.0: the setpoints the room accepts
 //! # initial = 19.0: the setpoint and schedule before anyone set one
 //! # max_boost = 3.0, boost_default_minutes = 60, hold_default_minutes = 0
+//! # openings = ["z2m:<contact>/contact"]: read-only contacts
+//! # opening_delay = 60 (seconds), auto_opening = false,
+//! # auto_opening_drop = 3.0 (°C per hour), auto_opening_max = 30 (minutes)
+//! # opening_action = "off" (the valves' lowest) or a setpoint in °C
 //! ```
 //!
 //! A valve is a writable setpoint in °C with bounds, on a device that is
@@ -69,6 +79,7 @@
 
 pub mod hand;
 pub mod house;
+pub mod opening;
 pub mod regulation;
 pub mod schedule;
 pub mod temporary;
@@ -104,6 +115,7 @@ const MODES: [&str; 3] = ["off", "heat", "auto"];
 const OVERRIDES: [&str; 3] = ["none", "manual", "airing"];
 const MAX_ROOMS: usize = 32;
 const MAX_VALVES: usize = 8;
+const MAX_OPENINGS: usize = 8;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -149,6 +161,48 @@ pub struct Room {
     /// next step of the schedule).
     #[serde(default)]
     pub hold_default_minutes: u32,
+    /// The room's window and door contacts, read-only ([`opening`]).
+    #[serde(default)]
+    pub openings: Vec<String>,
+    /// How long a contact is open before the room acts (seconds).
+    #[serde(default = "default_opening_delay")]
+    pub opening_delay: u64,
+    /// An open window found from a fast drop of the room's sensor.
+    #[serde(default)]
+    pub auto_opening: bool,
+    /// The drop that is an open window (°C per hour, smoothed).
+    #[serde(default = "default_auto_opening_drop")]
+    pub auto_opening_drop: f64,
+    /// A drop lasts this long at most (minutes).
+    #[serde(default = "default_auto_opening_max")]
+    pub auto_opening_max: u64,
+    /// What the valves get while the room is open.
+    #[serde(default)]
+    pub opening_action: OpeningAction,
+}
+
+/// The valves' setpoint while the room is open; never over the one they
+/// would have otherwise.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum OpeningAction {
+    /// `"off"`: the valves' lowest.
+    #[default]
+    #[serde(with = "off")]
+    Off,
+    /// A setpoint in °C.
+    Setpoint(f64),
+}
+
+mod off {
+    use serde::{Deserialize, Deserializer, de::Error};
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<(), D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "off" => Ok(()),
+            other => Err(D::Error::custom(format!("{other:?}: \"off\" or °C"))),
+        }
+    }
 }
 
 /// How a room's valves are given their setpoint.
@@ -176,6 +230,12 @@ impl Room {
             Regulation::AsIs
         })
     }
+
+    /// The room watches for an open window or door.
+    #[must_use]
+    pub fn detects_openings(&self) -> bool {
+        !self.openings.is_empty() || self.auto_opening
+    }
 }
 
 fn default_correction() -> bool {
@@ -201,6 +261,15 @@ fn default_max_boost() -> f64 {
 }
 fn default_boost_minutes() -> u32 {
     60
+}
+fn default_opening_delay() -> u64 {
+    60
+}
+fn default_auto_opening_drop() -> f64 {
+    3.0
+}
+fn default_auto_opening_max() -> u64 {
+    30
 }
 
 pub(crate) fn is_point(text: &str) -> bool {
@@ -285,6 +354,49 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
             room.hold_default_minutes <= MAX_MINUTES,
             "heating room {id}: hold_default_minutes from 0 to {MAX_MINUTES}"
         );
+        check_openings(room)?;
+    }
+    Ok(())
+}
+
+fn check_openings(room: &Room) -> anyhow::Result<()> {
+    let id = &room.id;
+    ensure!(
+        room.openings.len() <= MAX_OPENINGS,
+        "heating room {id}: {MAX_OPENINGS} openings at most"
+    );
+    let mut seen = HashSet::new();
+    for opening in &room.openings {
+        ensure!(
+            is_point(opening),
+            "heating room {id}: opening {opening:?} is not a point (device/key)"
+        );
+        ensure!(
+            !opening.starts_with(&format!("{INSTANCE}:")),
+            "heating room {id}: opening {opening:?} is a heating room, not a contact"
+        );
+        ensure!(
+            seen.insert(opening),
+            "heating room {id}: opening {opening:?} twice"
+        );
+    }
+    ensure!(
+        room.opening_delay <= 3600,
+        "heating room {id}: 0 <= opening_delay <= 3600 (seconds)"
+    );
+    ensure!(
+        (1.0..=20.0).contains(&room.auto_opening_drop),
+        "heating room {id}: 1 <= auto_opening_drop <= 20 (°C per hour)"
+    );
+    ensure!(
+        (5..=120).contains(&room.auto_opening_max),
+        "heating room {id}: 5 <= auto_opening_max <= 120 (minutes)"
+    );
+    if let OpeningAction::Setpoint(t) = room.opening_action {
+        ensure!(
+            (5.0..=30.0).contains(&t) && (regulation::half_degree(t) - t).abs() < 1e-9,
+            "heating room {id}: opening_action \"off\" or 5 to 30 °C, on the half degree"
+        );
     }
     Ok(())
 }
@@ -301,8 +413,9 @@ pub struct Heating {
     zone: jiff::tz::TimeZone,
     settle: Duration,
     /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
-    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`], and a
-    /// minute of a boost or a hold: shorter in the tests.
+    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`], a
+    /// minute of a boost, a hold or `auto_opening_max`, [`opening::WINDOW`],
+    /// [`opening::SPAN`]: shorter in the tests.
     floor: Duration,
     interval: Duration,
     tick: Duration,
@@ -310,6 +423,8 @@ pub struct Heating {
     airing_hold: Duration,
     fresh: Duration,
     minute: Duration,
+    slope_window: Duration,
+    slope_span: Duration,
     /// The absence point said once to be writable.
     away_refused: AtomicBool,
 }
@@ -331,6 +446,8 @@ impl Heating {
             airing_hold: hand::AIRING_HOLD,
             fresh: FRESH,
             minute: Duration::from_secs(60),
+            slope_window: opening::WINDOW,
+            slope_span: opening::SPAN,
             away_refused: AtomicBool::new(false),
         }
     }
@@ -344,6 +461,17 @@ enum Valve {
     /// Its device not there yet (its driver starts).
     Unknown,
     /// Something else: never written.
+    Other,
+}
+
+/// What a room's contact says.
+#[derive(Debug, PartialEq)]
+enum Contact {
+    Open,
+    /// Closed, or not known (its device not there, offline, no reading):
+    /// only a contact that says so is open.
+    Closed,
+    /// Not a contact Moli reads: never taken into account.
     Other,
 }
 
@@ -402,6 +530,38 @@ struct RoomRun {
     setpoint_hold: Option<Timed>,
     /// A person ordered the room during the absence: out of it until it ends.
     outside: bool,
+    open: OpenRun,
+}
+
+/// A room's openings, as followed.
+struct OpenRun {
+    /// Why the room is open, as shown; `bypass`: the detection ignored.
+    reason: Option<opening::Reason>,
+    bypass: bool,
+    /// Since when one of its contacts is open, and each one said once not
+    /// to be a contact.
+    since: Option<Instant>,
+    refused: Vec<bool>,
+    detector: opening::Detector,
+}
+
+impl OpenRun {
+    /// Closed, its bypass as before a restart.
+    fn restore(ctx: &DriverCtx, room: &Room, id: &DeviceId) -> Self {
+        let detects = room.detects_openings();
+        let bypass = detects && ctx.current(id, "opening_bypass") == Some(Value::Bool(true));
+        if detects {
+            ctx.set_state(id, "opening", Value::from(opening::Reason::name(None)));
+            ctx.set_state(id, "opening_bypass", Value::Bool(bypass));
+        }
+        Self {
+            reason: None,
+            bypass,
+            since: None,
+            refused: vec![false; room.openings.len()],
+            detector: opening::Detector::default(),
+        }
+    }
 }
 
 impl RoomRun {
@@ -568,6 +728,36 @@ fn temporary_points(room: &Room) -> [PointSpec; 5] {
     ]
 }
 
+/// `opening` and `opening_bypass`, for a room that detects openings.
+fn opening_points() -> [PointSpec; 2] {
+    [
+        PointSpec {
+            key: "opening".into(),
+            label: moli_i18n::tr!("pilotes.chauffage.ouverture").into(),
+            kind: Kind::Enum {
+                values: ["none", "contact", "drop"].map(Into::into).to_vec(),
+            },
+            access: Access {
+                read: true,
+                write: false,
+            },
+            unit: None,
+            semantic: Semantic::Other,
+        },
+        PointSpec {
+            key: "opening_bypass".into(),
+            label: moli_i18n::tr!("pilotes.chauffage.ouverture_ignoree").into(),
+            kind: Kind::Binary,
+            access: Access {
+                read: true,
+                write: true,
+            },
+            unit: None,
+            semantic: Semantic::Config,
+        },
+    ]
+}
+
 /// The devices of the room's valves, each once.
 fn valve_devices(room: &Room) -> Vec<DeviceId> {
     let mut devices: Vec<DeviceId> = Vec::new();
@@ -701,17 +891,13 @@ fn device(ctx: &DriverCtx, room: &Room, house: Option<&House>) -> Device {
             moli_i18n::tr!("pilotes.chauffage.hors_absence"),
         ));
     }
-    points.push(PointSpec {
-        key: "heat_demand".into(),
-        label: moli_i18n::tr!("pilotes.chauffage.demande").into(),
-        kind: Kind::Binary,
-        access: Access {
-            read: true,
-            write: false,
-        },
-        unit: None,
-        semantic: Semantic::Other,
-    });
+    points.push(flag(
+        "heat_demand",
+        moli_i18n::tr!("pilotes.chauffage.demande"),
+    ));
+    if room.detects_openings() {
+        points.extend(opening_points());
+    }
     points.extend(temporary_points(room));
     points.push(numeric(
         "valve_correction",
@@ -842,6 +1028,7 @@ fn restore(
     ctx.set_availability(&id, true);
     let outside = house.is_some_and(|h| h.away.is_some())
         && ctx.current(&id, "away_lifted") == Some(Value::Bool(true));
+    let open = OpenRun::restore(ctx, room, &id);
     let run = RoomRun {
         id,
         mode,
@@ -866,6 +1053,7 @@ fn restore(
         boost,
         setpoint_hold,
         outside,
+        open,
     };
     show_temporary(ctx, &run);
     show_weeks(ctx, &run, house, programme);
@@ -925,8 +1113,9 @@ fn mode_name(mode: Mode) -> &'static str {
     }
 }
 
-/// Whether the room asks for heat. In `force`, a change is the valves'
-/// to have soon; the sensor quiet, they get the room's setpoint as it is.
+/// Whether the room asks for heat (never while open). In `force`, a change
+/// is the valves' to have soon; the sensor quiet, they get the room's
+/// setpoint as it is.
 fn demand(
     ctx: &DriverCtx,
     room: &Room,
@@ -934,12 +1123,11 @@ fn demand(
     (temperature, mode): (Option<f64>, Mode),
     strategy: Regulation,
 ) {
+    let open = run.open.reason.is_some();
     let demand = match temperature {
-        Some(room_t) if mode != Mode::Off => Some(regulation::demand(
-            run.demand,
-            run.target(room.max) - room_t,
-            room.hysteresis,
-        )),
+        Some(room_t) if mode != Mode::Off => Some(
+            !open && regulation::demand(run.demand, run.target(room.max) - room_t, room.hysteresis),
+        ),
         _ => None,
     };
     if demand == run.demand {
@@ -975,10 +1163,26 @@ fn target(
     }
 }
 
+/// The setpoint a valve within `bounds` gets: `normal`, or while the room
+/// is open, its `action`'s, never over `normal`.
+fn opened(action: Option<OpeningAction>, normal: f64, bounds: (f64, f64)) -> f64 {
+    let open = match action {
+        None => return normal,
+        Some(OpeningAction::Off) => bounds.0,
+        Some(OpeningAction::Setpoint(t)) => regulation::half_degree(t).clamp(bounds.0, bounds.1),
+    };
+    open.min(normal)
+}
+
 impl Heating {
     /// A temperature that is still the room's: recent, from a device that
     /// answers.
     fn fresh(&self, point: &str) -> Option<f64> {
+        self.reading(point).map(|r| r.0)
+    }
+
+    /// [`Self::fresh`], and when it was read (Unix ms).
+    fn reading(&self, point: &str) -> Option<(f64, u64)> {
         let point = PointId::from(point);
         let (device, _) = point.split()?;
         if self
@@ -991,7 +1195,108 @@ impl Heating {
         let sample = self.hub.state(&point)?;
         let value = sample.value.as_f64().filter(|t| t.is_finite())?;
         let age = u128::from(now_ms().saturating_sub(sample.ts));
-        (age <= self.fresh.as_millis()).then_some(value)
+        (age <= self.fresh.as_millis()).then_some((value, sample.ts))
+    }
+
+    /// A contact of the room: a read-only point, `contact` (true: closed,
+    /// the house's convention) or `doorcontact_state` (true: open).
+    fn contact(&self, point: &str) -> Contact {
+        let point = PointId::from(point);
+        let Some((device, key)) = point.split() else {
+            return Contact::Other;
+        };
+        let Some(view) = self.hub.device(&device) else {
+            return Contact::Closed;
+        };
+        let Some(spec) = view.device.points.iter().find(|p| p.key.as_ref() == key) else {
+            return Contact::Closed;
+        };
+        let closed_when_true = spec.semantic == Semantic::Contact;
+        if spec.access.write || !(closed_when_true || key == "doorcontact_state") {
+            return Contact::Other;
+        }
+        if view.online == Some(false) {
+            return Contact::Closed;
+        }
+        match self.hub.state(&point).map(|s| s.value) {
+            Some(Value::Bool(b)) if b != closed_when_true => Contact::Open,
+            _ => Contact::Closed,
+        }
+    }
+
+    /// Whether the room is open, and why: a contact open for
+    /// `opening_delay`, or a drop of its sensor ([`opening`]). Played `off`
+    /// (its own mode, or nobody home), nothing to cut: not shown, but still
+    /// followed, so the room stays cut on return if it still is open. A
+    /// change is the valves' to have soon, and ends what was turned on them
+    /// by hand; a boost or a setpoint held keeps running.
+    fn look_openings(
+        &self,
+        ctx: &DriverCtx,
+        (room, run): (&Room, &mut RoomRun),
+        reading: Option<(f64, u64)>,
+        mode: Mode,
+    ) {
+        if !room.detects_openings() {
+            return;
+        }
+        let now = Instant::now();
+        let mut open = false;
+        let open_run = &mut run.open;
+        for (point, refused) in room.openings.iter().zip(&mut open_run.refused) {
+            match self.contact(point) {
+                Contact::Open => open = true,
+                Contact::Closed => {}
+                Contact::Other => {
+                    if !std::mem::replace(refused, true) {
+                        tracing::warn!(room = %room.id, %point, "heating: not a read-only contact, left out");
+                    }
+                }
+            }
+        }
+        open_run.since = open.then(|| open_run.since.unwrap_or(now));
+        let contact = open_run
+            .since
+            .is_some_and(|t| now - t >= Duration::from_secs(room.opening_delay));
+        if room.auto_opening {
+            if let Some((t, ts)) = reading {
+                open_run.detector.slope.read(ts, t, self.slope_window);
+            }
+            let max = self.minute * u32::try_from(room.auto_opening_max).unwrap_or(u32::MAX);
+            if let Some(change) =
+                open_run
+                    .detector
+                    .step(now, room.auto_opening_drop, max, self.slope_span)
+            {
+                tracing::info!(room = %room.id, change = ?change, "heating: temperature drop");
+            }
+        }
+        let reason = if open_run.bypass || mode == Mode::Off {
+            None
+        } else if contact {
+            Some(opening::Reason::Contact)
+        } else if open_run.detector.drop.is_some() {
+            Some(opening::Reason::Drop)
+        } else {
+            None
+        };
+        if reason == open_run.reason {
+            return;
+        }
+        let name = opening::Reason::name(reason);
+        if reason.is_some() {
+            tracing::info!(room = %room.id, reason = name, "heating: room open, it no longer asks for heat");
+        } else {
+            tracing::info!(room = %room.id, was = opening::Reason::name(open_run.reason), bypass = open_run.bypass, "heating: room closed again, its setpoint again");
+        }
+        open_run.reason = reason;
+        for valve in &mut run.valves {
+            valve.urgent = true;
+            if reason.is_some() {
+                valve.hold = None;
+            }
+        }
+        ctx.set_state(&run.id, "opening", Value::from(name));
     }
 
     /// Whether one of the room's valves still heats (none known: yes, as
@@ -1282,7 +1587,8 @@ impl Heating {
         run: &mut RoomRun,
         (settled, play): (bool, Play),
     ) {
-        let temperature = self.fresh(&room.sensor);
+        let reading = self.reading(&room.sensor);
+        let temperature = reading.map(|r| r.0);
         ctx.set_state(
             &run.id,
             "local_temperature",
@@ -1311,16 +1617,17 @@ impl Heating {
             }
             state.seen = Some(current);
         }
+        let mode = run.playing(play);
+        self.look_openings(ctx, (room, run), reading, mode);
         let hold = run.hold();
         show_hold(ctx, &run.id, hold);
         let strategy = room.strategy();
-        let mode = run.playing(play);
         demand(ctx, room, run, (temperature, mode), strategy);
         self.learn(
             room,
             run,
             (temperature, mode),
-            hold.is_none() && strategy == Regulation::Shift,
+            hold.is_none() && run.open.reason.is_none() && strategy == Regulation::Shift,
         );
         let shift = run.shift.get();
         let aim = run.target(room.max);
@@ -1346,6 +1653,7 @@ impl Heating {
                 continue;
             }
             let next = target(room, strategy, (mode, aim, run.demand), shift, bounds);
+            let next = opened(run.open.reason.map(|_| room.opening_action), next, bounds);
             // On the valve's own step, coarser than the half degree: what it holds.
             let next = regulation::on_step(next, step, bounds);
             let point = PointId::from(valve.as_str());
@@ -1474,6 +1782,14 @@ impl Heating {
                 Ok(())
             } else {
                 Err(moli_i18n::tr!("pilotes.chauffage.reglage_vanne_refuse"))
+            }
+        } else if key == "opening_bypass" && room.detects_openings() {
+            if let Value::Bool(bypass) = command.value {
+                run.open.bypass = bypass;
+                ctx.set_state(&run.id, key, Value::Bool(bypass));
+                Ok(())
+            } else {
+                Err(moli_i18n::tr!("pilotes.chauffage.point_inconnu"))
             }
         } else if let Some(result) = self.temporary_command(room, run, key, &command.value) {
             result

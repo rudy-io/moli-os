@@ -25,6 +25,10 @@ test('off, unreachable, airing and a valve turned by hand', () => {
   assert.deepEqual(radiatorState({ mode: 'auto', temperature: 18, target: 19, override: 'airing' }), { phase: 'airing' });
   assert.deepEqual(radiatorState({ mode: 'auto', temperature: 18, target: 21, override: 'manual' }), { phase: 'heating', hold: 'manual' });
   assert.equal(radiatorState({ mode: 'auto', temperature: 18, target: 19, override: 'none' }).hold, null);
+  // The room open, by a contact or a drop: the breeze, whatever else.
+  assert.deepEqual(radiatorState({ mode: 'off', override: 'manual', opening: 'contact' }), { phase: 'airing', opening: 'contact' });
+  assert.deepEqual(radiatorState({ mode: 'auto', temperature: 18, target: 19, opening: 'drop' }), { phase: 'airing', opening: 'drop' });
+  assert.equal(radiatorState({ mode: 'auto', temperature: 18, target: 19, opening: 'none' }).phase, 'heating');
 });
 
 test('the next change of the schedule: later today, tomorrow, or none', () => {

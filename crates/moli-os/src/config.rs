@@ -554,6 +554,34 @@ impl Config {
                 }
             }
         }
+        self.check_openings()
+    }
+
+    /// A contact is a reading: a writable one would let anyone who may
+    /// write it cut a room's heating, guard or not. A helper always is;
+    /// other drivers' points are checked by the heating once they run.
+    fn check_openings(&self) -> anyhow::Result<()> {
+        let helpers: Vec<&str> = self
+            .drivers
+            .iter()
+            .filter(|d| d.kind == "helpers")
+            .map(|d| d.id.as_str())
+            .collect();
+        for room in &self.heating {
+            for opening in &room.openings {
+                if helpers
+                    .iter()
+                    .any(|h| opening.split_once(':').is_some_and(|(i, _)| i == *h))
+                {
+                    bail!(
+                        "[[heating]] {:?}: opening {} is a helper, writable; \
+                         a contact must be a reading",
+                        room.id,
+                        opening
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -573,6 +601,23 @@ mod tests {
         let error = config.check().unwrap_err().to_string();
         assert!(error.contains("camera_snaphot"), "{error}");
         assert!(toml::from_str::<Config>("[mcp]\ndisabled = []\n").is_err());
+    }
+
+    #[test]
+    fn a_room_s_contact_is_never_a_helper() {
+        let config = |opening: &str| {
+            format!(
+                "[[driver]]\nid = \"aides\"\nkind = \"helpers\"\n\
+                 [[heating]]\nid = \"bureau\"\nname = \"Bureau\"\n\
+                 sensor = \"z2m:0x01/temperature\"\nvalves = [\"z2m:0x02/sp\"]\n\
+                 openings = [\"{opening}\"]\n"
+            )
+        };
+        let ok: Config = toml::from_str(&config("z2m:0x03/contact")).unwrap();
+        ok.check().unwrap();
+        let helper: Config = toml::from_str(&config("aides:fenetre/value")).unwrap();
+        let error = helper.check().unwrap_err().to_string();
+        assert!(error.contains("aides:fenetre/value"), "{error}");
     }
 
     #[test]
