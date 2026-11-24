@@ -8,7 +8,7 @@
   /** The internet box (home.json `infra.box`, `lib/box.js`): its
    *  temperatures as gauges, its rates, fans, disk and Wi-Fi. Only the
    *  points the house names; read only. */
-  let { box } = $props();
+  let { box, link = null, since = null } = $props();
 
   const read = reader(value);
   const unitOf = unitReader(device);
@@ -29,18 +29,27 @@
     {#if box.down || box.up}
       <span class="muted small num">↓ {num(down, 1)} · ↑ {num(up, 1)} Mbit/s</span>
     {/if}
+    {#if link}
+      {@const connected = value(link.id, 'connected')}
+      <span class="chip" class:good={connected === true} class:alert={connected === false}>{connected === false ? t('systeme.infra.internet_coupe') : t('systeme.infra.internet_ok')}</span>
+    {/if}
   </div>
 
   {#if box.temperatures?.length}
     <div class="gauges">
-      {#each box.temperatures as s (s.point)}
+      {#each box.temperatures as s, i (i)}
         <Gauge label={s.label} value={read(s.point)} unit="°" max={100} warn={[s.warn ?? 70, s.alert ?? 85]} />
       {/each}
     </div>
   {/if}
 
   <dl class="kv">
-    {#each box.fans ?? [] as f (f.point)}
+    {#if link}
+      <dt>{t('systeme.infra.connectee_depuis')}</dt><dd>{since ? since(value(link.id, 'uptime')) : '—'}</dd>
+      <dt>{t('systeme.infra.ligne')}</dt><dd class="num">↓ {value(link.id, 'line_down') ?? '—'} · ↑ {value(link.id, 'line_up') ?? '—'} Mbit/s</dd>
+      <dt>{t('systeme.infra.adresse_publique')}</dt><dd class="num">{value(link.id, 'external_ip') ?? '—'}</dd>
+    {/if}
+    {#each box.fans ?? [] as f, i (i)}
       {@const rpm = read(f.point)}
       <dt>{f.label}</dt>
       <dd class="num" class:warm={typeof rpm === 'number' && typeof f.warn === 'number' && rpm >= f.warn}>{t('systeme.infra.box.tours', { rpm: num(rpm) })}</dd>

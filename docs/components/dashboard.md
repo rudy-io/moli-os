@@ -161,9 +161,11 @@ telles que les appareils les nomment).
   `warn`), l'occupation du disque (`free` : % libre), la grappe (`degraded` : `true` si dégradée), le
   Wi-Fi ; les débits `down` et `up` en Mbit/s dans l'en-tête, convertis depuis l'unité que **le point
   déclare** (`rate_unit` seulement pour un point qui n'en déclare pas ; une unité qui n'est pas un
-  débit n'est pas convertie : « — »), et leur courbe des dernières 24 h. Entrent dans le bandeau
-  « à voir » : une température au-delà de `alert`, un ventilateur au-delà de `warn`, la grappe
-  dégradée, un disque plein à 90 % ou plus.
+  débit n'est pas convertie : « — »), et leur courbe des dernières 24 h, dans la même unité. Entrent
+  dans le bandeau « à voir » : une température au-delà de `alert`, un ventilateur au-delà de `warn`,
+  la grappe dégradée, un disque plein à 90 % ou plus. L'état de la ligne (l'appareil qui donne
+  `external_ip` : connectée, depuis quand, débits de la ligne, adresse publique) entre dans cette
+  carte, qui remplace alors la carte « box » d'avant : une seule carte par box.
 - `themes` et `theme` : les thèmes de la maison et celui qu'un nouvel écran prend (voir
   « Les thèmes » ci-dessous).
 - `menu` (facultatif) : le menu qu'un écran prend tant qu'il n'a rien choisi,

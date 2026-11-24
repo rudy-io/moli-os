@@ -8,8 +8,10 @@
    *  (kW with kW, A with A), a legend that hides or shows each curve and
    *  says its value now. Read again on its own, more often for a short
    *  window, never while the page is hidden. Configured in `home.json`
-   *  (`charts`): 8 points at most, from 1 minute to a week. */
-  let { title, minutes = 60, points = [] } = $props();
+   *  (`charts`): 8 points at most, from 1 minute to a week. `shown`: a
+   *  point drawn in another unit, `{ point: { unit, factor } }` (a box's
+   *  rates in Mbit/s, whatever their own unit). */
+  let { title, minutes = 60, points = [], shown = {} } = $props();
 
   const MAX_POINTS = 8;
   const COLORS = ['var(--cool)', 'var(--warm)', 'var(--alert)', 'var(--good)', 'var(--sun)', 'var(--ink-3)', 'var(--warm-ink)', 'var(--ink)'];
@@ -30,7 +32,8 @@
     const [id, key] = split(p);
     return device(id)?.points.find((s) => s.key === key);
   };
-  const unitOf = (p) => specOf(p)?.unit ?? '';
+  const factorOf = (p) => (Object.hasOwn(shown, p) && typeof shown[p]?.factor === 'number' ? shown[p].factor : 1);
+  const unitOf = (p) => (Object.hasOwn(shown, p) && shown[p]?.unit ? shown[p].unit : (specOf(p)?.unit ?? ''));
   const labelOf = (p) => {
     const [id, key] = split(p);
     return `${nameOf(id)} ▸ ${specOf(p)?.label ?? key}`;
@@ -38,7 +41,7 @@
   const now = (p) => {
     const [id, key] = split(p);
     const v = hub.devices[id]?.state?.[key]?.value;
-    return typeof v === 'number' ? v : null;
+    return typeof v === 'number' ? v * factorOf(p) : null;
   };
   const show = (v, unit) =>
     v == null ? '—' : `${v.toLocaleString(locale(), { maximumFractionDigits: Math.abs(v) < 10 ? 2 : 1 })}${unit ? ` ${unit}` : ''}`;
@@ -88,15 +91,15 @@
   });
 
   // The values to draw: bucket averages, or each change held until the next.
-  const line = (s) => {
+  const line = (s, k = 1) => {
     if (!s) return [];
-    if (s.buckets?.length) return s.buckets.filter((b) => typeof b.avg === 'number').map((b) => [b.ts, b.avg]);
+    if (s.buckets?.length) return s.buckets.filter((b) => typeof b.avg === 'number').map((b) => [b.ts, b.avg * k]);
     const out = [];
-    if (s.before && typeof s.before[1] === 'number') out.push([s.from, s.before[1]]);
+    if (s.before && typeof s.before[1] === 'number') out.push([s.from, s.before[1] * k]);
     for (const [ts, v] of s.raw ?? []) {
       if (typeof v !== 'number') continue;
       if (out.length) out.push([ts, out.at(-1)[1]]);
-      out.push([ts, v]);
+      out.push([ts, v * k]);
     }
     if (out.length) out.push([s.to, out.at(-1)[1]]);
     return out;
@@ -108,7 +111,7 @@
     drawn.forEach((p, i) => {
       const u = unitOf(p);
       if (!byUnit.has(u)) byUnit.set(u, []);
-      byUnit.get(u).push({ point: p, color: COLORS[i % COLORS.length], pts: line(series[p]) });
+      byUnit.get(u).push({ point: p, color: COLORS[i % COLORS.length], pts: line(series[p], factorOf(p)) });
     });
     return [...byUnit.entries()].map(([unit, curves]) => ({ unit, curves }));
   });
