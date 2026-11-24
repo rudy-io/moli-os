@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { device, value, reachable, num, act } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, clock, home } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import ScheduleEditor from './ScheduleEditor.svelte';
   import ValveChart from './ValveChart.svelte';
@@ -8,6 +8,7 @@
   import { pointOf, canWrite, numericRange, quantize, writableChoices, climateKeys } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
   import RadiatorTile from './RadiatorTile.svelte';
+  import { temporaryOf, boostChoices, hoursMinutes } from '../lib/temporary.js';
 
   // A thermostat that only heats: a Zigbee valve, a valve on another protocol,
   // or a room's thermostat kept by Moli (it drives the room's valves). Its
@@ -33,6 +34,16 @@
 
   // A room thermostat of Moli: a valve turned by hand is left as it is for a while.
   const override = $derived(pointOf(d, 'valve_override') ? value(id, 'valve_override') : null);
+  // A room thermostat of Moli: a boost for a while, a setpoint held for a while.
+  const boostable = $derived(canWrite(d, 'boost') && mode !== 'off');
+  const boosts = $derived(boostChoices(pointOf(d, 'boost')?.kind?.max));
+  const temporary = $derived(temporaryOf((key) => value(id, key), home.now));
+  const left = (minutes) => {
+    const { h, m } = hoursMinutes(minutes);
+    return h ? t('commun.vanne.temporaire.reste_h', { h, m }) : t('commun.vanne.temporaire.reste_min', { m });
+  };
+  const boost = (by) => act(`${id}/boost`, by, t('commun.vanne.boost.action', { name }));
+  const boostFor = (hours) => act(`${id}/boost_minutes`, hours * 60, t('commun.vanne.boost.action', { name }));
   let editing = $state(false);
   let charting = $state(false);
 
@@ -104,7 +115,29 @@
       <p class="muted">{t('commun.clim.consigne_val', { temp: num(shown, shown % 1 ? 1 : 0), unit: unit ?? '' })}</p>
     {/if}
   {/if}
-  {#if override === 'none' && mode === 'auto'}
+  {#if boostable && reachable(id)}
+    <div class="boost" role="group" aria-label={t('commun.vanne.boost.titre')}>
+      {#each boosts as by (by)}
+        <button class:active={temporary.boost?.by === by} onclick={() => boost(by)} aria-pressed={temporary.boost?.by === by} aria-label={t('commun.vanne.boost.label', { deg: by })}>{t('commun.vanne.boost.plus', { deg: by })}</button>
+      {/each}
+      {#if temporary.boost}
+        {#each [1, 2] as hours (hours)}
+          <button onclick={() => boostFor(hours)} aria-label={t('commun.vanne.boost.pendant', { h: hours })}>{t('commun.vanne.boost.heures', { h: hours })}</button>
+        {/each}
+        <button class="cancel" onclick={() => boost(0)}>{t('commun.vanne.boost.annuler')}</button>
+      {/if}
+    </div>
+    {#if temporary.boost}
+      <p class="muted num">{t('commun.vanne.boost.en_cours', { deg: num(temporary.boost.by, temporary.boost.by % 1 ? 1 : 0), heure: clock(temporary.boost.until), reste: left(temporary.boost.left) })}</p>
+    {/if}
+  {/if}
+  {#if temporary.hold && mode === 'auto'}
+    <p class="muted num">
+      {t('commun.vanne.maintien.en_cours', { heure: clock(temporary.hold.until), reste: left(temporary.hold.left) })}
+      <button class="fold" onclick={() => setMode('auto')}>{t('commun.vanne.reglage.reprendre')}</button>
+    </p>
+  {/if}
+  {#if override === 'none' && mode === 'auto' && !temporary.hold}
     <p class="muted">{t('commun.vanne.reglage.programme')}</p>
   {/if}
   {#if modes.length}
@@ -148,7 +181,8 @@
   }
 
   .setpoint button,
-  .modes button {
+  .modes button,
+  .boost button {
     border: none;
     background: var(--surface-2);
     color: var(--ink);
@@ -188,6 +222,25 @@
     color: var(--ink-3);
   }
 
+  .boost {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .boost button {
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .boost button.cancel {
+    background: none;
+    text-decoration: underline;
+  }
+
+  .boost button.active,
   .modes button.active {
     background: var(--ink);
     color: var(--surface);

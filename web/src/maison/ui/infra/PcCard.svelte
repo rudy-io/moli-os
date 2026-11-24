@@ -365,7 +365,7 @@
   .app.on i {
     background: var(--good);
     opacity: 1;
-    box-shadow: 0 0 0 3px rgb(44 154 136 / 20%);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent);
   }
 
   .primary {

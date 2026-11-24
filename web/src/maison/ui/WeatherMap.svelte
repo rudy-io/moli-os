@@ -90,7 +90,7 @@
     background: var(--warm);
     box-shadow:
       0 0 0 2px rgb(255 255 255 / 90%),
-      0 0 14px 3px rgb(240 165 58 / 55%);
+      0 0 14px 3px color-mix(in srgb, var(--warm) 55%, transparent);
   }
 
   .dot::after {

@@ -233,6 +233,10 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 #   consigne + 0,3 ; entre les deux, rien ne change (0 à 2 °C)
 # min = 5.0, max = 25.0 : les consignes que la pièce accepte
 # initial = 19.0 : la consigne et le programme avant qu'on les règle
+# max_boost = 3.0 : le boost le plus haut (°C, au demi-degré, de 0,5 à 10)
+# boost_default_minutes = 60 : la durée d'un boost quand seul `boost` est écrit
+# hold_default_minutes = 0 : en `auto`, combien de temps tient une consigne changée à la main
+#   (0 : jusqu'au créneau suivant)
 ```
 
 - **Points**, ceux d'une vanne Zigbee2MQTT, si bien que le tableau de bord en fait une carte de
@@ -243,7 +247,34 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
   `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
   l'autre), `heat_demand` (la pièce demande de la chaleur, en lecture : voir plus bas). En
-  `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
+  `auto`, une consigne changée à la main tient jusqu'au créneau suivant, ou
+  `hold_default_minutes` quand il est réglé.
+- **Changements temporaires** (`crates/moli-heating/src/temporary.rs`), qui finissent seuls :
+  - **Le boost** : `boost` (°C, réglable, de 0 à `max_boost`, au demi-degré ; 0 = aucun)
+    **s'ajoute** à la consigne en vigueur, programme compris : si un créneau change pendant le
+    boost, l'écart suit. La pièce vise consigne + boost (sans dépasser son `max`), la correction
+    apprend sur cette cible ; en `force`, la demande de chaleur et la consigne forcée en partent
+    aussi. Un `boost` écrit seul dure `boost_default_minutes` ; réécrit
+    pendant un boost, il change l'écart sans toucher à l'échéance. `boost_minutes` (réglable,
+    0 à 720) relance le boost en cours pour cette durée à partir de maintenant (0 l'arrête ;
+    refusé sans boost en cours : écrire d'abord `boost`) et se relit comme la durée demandée.
+    `boost_until` (lecture, RFC 3339, vide sans boost) donne l'échéance, pour un compte à
+    rebours. En `off`, pas de boost : le hors-gel reste le hors-gel.
+  - **La consigne maintenue** : en `auto`, `hold_minutes` (réglable, 0 à 720) fait tenir la
+    consigne actuelle ce temps-là, créneaux compris, puis le programme reprend (le créneau en
+    vigueur à ce moment). 0 : jusqu'au créneau suivant, comme sans maintien. Une consigne changée
+    pendant un maintien garde son échéance, si bien qu'une scène peut écrire la consigne et
+    `hold_minutes` dans l'ordre qu'elle veut : `orders = [{ point =
+    "chauffage:sport/occupied_heating_setpoint", value = 18.0 }, { point =
+    "chauffage:sport/hold_minutes", value = 180 }]`. `hold_until` (lecture, RFC 3339) donne
+    l'échéance. Refusé hors de `auto` (en `heat`, la consigne tient déjà).
+  - Les échéances sont gardées d'un redémarrage à l'autre (une échéance passée pendant l'arrêt
+    finit au premier coup d'œil). Écrire `system_mode` (même `auto` à nouveau : « reprendre le
+    programme ») annule le boost et le maintien. Chaque début et chaque fin que la pièce décide
+    seule (durée par défaut, échéance, changement de mode) est au journal, acteur
+    « Chauffage · <pièce> » ; ceux qu'on demande y sont déjà comme ordres.
+  - À ne pas confondre avec `valve_override` : celui-là dit qu'une **vanne** a été tournée à la
+    main, le boost et le maintien portent sur la consigne de la **pièce**.
 - **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
   reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
   chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
@@ -297,7 +328,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   d'agent admis par la garde, envoyé à la vanne elle-même, compte aussi comme une main (tenu
   jusqu'à 2 h au lieu d'être corrigé au tour suivant). Moli la laisse telle
   quelle au lieu de remettre la sienne (`crates/moli-heating/src/hand.rs`) : **2 h au plus**, et
-  seulement jusqu'au créneau suivant du programme. Tournée à son minimum (à un demi-degré près) ou
+  seulement jusqu'au prochain changement de la consigne de la pièce (créneau suivant du programme,
+  fin d'un maintien ou d'un boost). Tournée à son minimum (à un demi-degré près) ou
   3 °C ou plus sous la température de la pièce, c'est une **aération** : 30 min au plus, finie dès
   que la vanne est remontée (la pièce reprend alors sa consigne). La pièce le dit par
   `valve_override` (`none`, `manual`, `airing` ; écrire `none` reprend le programme) et
@@ -848,7 +880,17 @@ host = "192.168.1.x"
 - **Points** : `last_day` (date du dernier jour complet), `last_day_kwh`, `last_day_peak`, `hours` (les heures reçues, en JSON, pour un compteur `history = true` de `[energy]`).
 - **Identité** : un appareil `linky` par instance.
 - **Pièges** : service gratuit, non officiel, au quota partagé : une requête par jour à une heure propre au compteur, une seconde vers 14 h si la veille manque, aucune de plus au redémarrage (sauf au tout premier). Une mesure manquante écarte son heure et son jour. Les heures sont locales et nomment la fin de la mesure ; au passage à l'heure d'hiver, la même heure revient deux fois. Un jeton refusé arrête le pilote jusqu'à l'intervention d'un humain.
-- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes et le calendrier des requêtes.
+- **Sans courbe horaire** : quand Enedis répond 404 à la courbe de charge (« la sous-ressource demandée n'existe pas »), la même relève demande la consommation quotidienne (`consommation_quotidienne`) sur 31 jours, pour que les trous se comblent : `last_day` et `last_day_kwh` avancent, `last_day_peak` devient inconnu, et `hours` reçoit chaque jour **entier** (`day`, `to`, `kwh`) : l'enregistreur d'énergie le répartit sur ses heures (23, 24 ou 25) seulement s'il n'a encore aucune heure de ce jour, sans jamais compléter un jour que la courbe a donné en partie. La page Énergie a le bon total du jour, pas sa forme. `last_day` ne recule jamais. L'avertissement le dit, avec le motif d'Enedis. Vu en novembre 2026 sur un compteur dont la collecte horaire était pourtant active. Toute erreur reprend aussi le motif d'Enedis quand la réponse en donne un : une ligne courte, sans numéro de compteur.
+- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes, le calendrier des requêtes, la réponse quotidienne et le motif d'un refus.
+
+## `grdf` : compteur gaz Gazpar par l'espace client GRDF (`crates/moli-grdf`)
+
+- **Couvre** : la consommation d'un compteur Gazpar, jour par jour (journée gazière de 6 h à 6 h), avec un jour de retard ou plus. Lecture seule.
+- **Config** : `kind = "grdf"`, `pce` (les 14 chiffres du compteur). Secrets `email` et `password` : ceux de l'espace client `monespace.grdf.fr`.
+- **Points** : `last_day` (date du dernier jour reçu), `last_day_kwh`, `last_day_m3`, `index` (m³), `factor` (kWh/m³), `hours` (les jours reçus, répartis également sur leurs heures, en JSON, pour un compteur `role = "gas"`, `history = true` de `[energy]`).
+- **Identité** : un appareil `gazpar` par instance.
+- **Pièges** : pas d'API publique : connexion Okta comme la page de l'espace client (`session.rs`), jamais hors de `grdf.fr`, cookies rangés par hôte. Deux connexions par jour au plus, à des heures propres au compteur, aucune de plus au redémarrage (sauf au tout premier, qui remonte un an). Un mot de passe refusé (401, 403) ou une étape de plus (code) arrête le pilote : insister verrouillerait le compte ; un 400 (connexion changée) n'est qu'un statut. La première année est envoyée une seconde fois 10 min après, de mémoire, pour ce que l'enregistreur d'énergie aurait manqué. Un compteur gaz en `history` n'a ni `kwh_per_unit` ni `price_point`. Une page HTML au lieu des données = session perdue.
+- **Tests** : `src/model.rs` et `src/session.rs` sur `integrations/grdf/fixtures/` et un faux GRDF scripté : connexion complète, cookies, mot de passe refusé, étape de plus, redirection hors de GRDF, session perdue, répartition par heure, calendrier.
 
 ## `solcast` : prévision solaire des toitures (`crates/moli-solcast`)
 
@@ -1881,6 +1923,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `voltalis` | `moli-voltalis` | HTTPS vers le service, compte puis jeton de session | oui : marche, mode, consigne, programme | quatre radiateurs `VX_WIRE` (lecture) ; commandes sur l'un |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `enedis` | `moli-enedis` | HTTPS vers la Conso API, jeton du client | non | un compteur Linky (lecture, pas de 15 minutes) |
+| `grdf` | `moli-grdf` | HTTPS vers l'espace client GRDF, e-mail et mot de passe du client | non | un compteur Gazpar (compte réel, novembre 2026) |
 | `solcast` | `moli-solcast` | HTTPS vers l'API Solcast, clé du compte | non | aucun matériel ; réponses reconstituées d'après la documentation (vrai compte : à confirmer) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |

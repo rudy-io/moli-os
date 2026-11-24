@@ -170,7 +170,7 @@
 
   .mic.rec {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     animation: pulse 1.2s ease-in-out infinite;
   }
 
@@ -208,7 +208,7 @@
 
   .hangup {
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
   }
 
   .mic:disabled {

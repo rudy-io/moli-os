@@ -12,10 +12,15 @@
 - `hours` alimente le compteur `history = true` de `[energy]` : chaque kWh est classé à son heure
   réelle. Le prix fixe du compteur (`price`) s'applique ; heures creuses et pleines ne sont pas
   distinguées.
-- Il faut que la courbe de charge soit activée dans l'espace client Enedis ; sans elle, aucune donnée
-  n'arrive (la consommation journalière seule n'est pas lue).
+- Il faut que la courbe de charge soit activée dans l'espace client Enedis. Si Enedis ne la sert pas
+  (404, « la sous-ressource demandée n'existe pas »), la même relève lit la consommation quotidienne :
+  le total de chaque jour (31 derniers jours, pour combler les trous) arrive, sans le pic, et
+  l'avertissement donne le motif d'Enedis. `[energy]` reçoit chaque jour entier et ne le répartit
+  sur ses heures que s'il n'en a encore aucune : un jour donné en partie par la courbe n'est pas
+  complété. Vu en novembre 2026 : la courbe en 404 même sur un seul jour, collecte horaire active,
+  consentement valide ; la consommation quotidienne répondait.
 - Un jeton refusé (401, 403) arrête le pilote jusqu'à l'intervention d'un humain.
 - `fixtures/` : la forme d'une vraie réponse, avec un compteur, une date et des valeurs fictifs.
 - Vérifié sur un compteur réel (pas de 15 minutes, novembre 2026). Le passage à l'heure d'été ou
   d'hiver n'est testé que sur le code ; les pas de 30 ou 60 minutes aussi.
-- Reste : production, consommation journalière sans courbe de charge, heures creuses et pleines.
+- Reste : production, heures creuses et pleines.

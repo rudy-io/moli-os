@@ -330,6 +330,24 @@ export async function logout() {
   await refreshSession();
 }
 
+/** A point's own name (a power strip's outlet); `''` forgets it. True once saved. */
+export async function setPointLabel(id, key, name) {
+  try {
+    const res = await fetch(`/api/labels/${encodeURIComponent(id)}/points/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    const d = hub.devices[id];
+    if (d) d.label = await res.json();
+    return true;
+  } catch (err) {
+    toast(t('systeme.hub.etiquette_non_enregistree', { message: err.message }));
+    return false;
+  }
+}
+
 export async function setLabel(id, label) {
   try {
     const res = await fetch(`/api/labels/${encodeURIComponent(id)}`, {

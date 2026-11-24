@@ -244,7 +244,7 @@
 
   .btn.primary {
     background: var(--warm);
-    color: #fff;
+    color: var(--on-warm);
   }
 
   .btn:disabled {

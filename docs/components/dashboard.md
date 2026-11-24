@@ -58,8 +58,25 @@ La vue Airzone reste une vue de consultation. Le pilotage autorisé est accessib
 La page Installation présente d’abord les passerelles et leurs actions courantes. Les adresses, les identifiants, le retrait réversible et le remplacement sont repliés dans les réglages ; les diagnostics détaillés sont dans « Informations techniques ». L’assistant conserve l’aide sur l’appairage physique et la restauration des cartes sous « Besoin d’aide ? ». La découverte des zones déjà appairées reste automatique ; l’API locale n’offre ni appairage ni désappairage physique.
 
 
-Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
-Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
+Navigation : un menu à gauche par défaut (une barre en bas sur téléphone, défilable) ; pied du
+menu : Thème, Système, Atelier. Un menu plus long que l'écran défile, le pied reste en vue. Bulle « Demander à Moli » sur toutes les pages sauf Moli. Une pastille glisse
+d'un onglet à l'autre, une page arrive en fondu ; un onglet ajouté ou retiré se range en glissant.
+
+**Thème** ouvre une feuille : l'apparence (Auto / Jour / Nuit), les **couleurs** (un thème,
+aperçu dessiné ; voir « Les thèmes » plus bas) et les onglets du menu, chacun avec
+son interrupteur. Le thème choisi est retenu par écran (`maison-palette` dans le navigateur) ;
+sans choix, l'écran prend celui de la maison (`theme` de `home.json`), sinon Porcelaine. Seuls les onglets éteints sont mémorisés (`maison-onglets` dans le navigateur) :
+chaque écran a son menu, et un onglet qui apparaît plus tard (une première caméra) se montre de
+lui-même. Accueil ne s'éteint pas. Un onglet que la maison n'a rien pour remplir n'est pas listé.
+Une page éteinte s'ouvre toujours par son adresse (`#/plan`).
+
+La feuille règle aussi **le menu** de l'écran (`lib/menu.js`) : sa **position** (gauche, droite,
+haut, bas ; sur un téléphone il reste une barre, en haut ou en bas), sa **forme** (classique :
+icônes et noms ; compact : icônes seules, le nom en info-bulle et pour les lecteurs d'écran ;
+flottant : une carte détachée du bord) et **l'ordre** des onglets (flèches monter / descendre,
+« Revenir à l'ordre d'origine »). Accueil reste premier ; un onglet qui apparaît plus tard prend sa
+place d'origine après ceux qu'on a rangés. Retenu par écran (`maison-menu` dans le navigateur) ;
+sans choix, l'écran prend le `menu` de `home.json`, sinon le menu classique à gauche.
 
 ## La mise en page de la maison : `data/home.json`
 
@@ -147,6 +164,12 @@ telles que les appareils les nomment).
   débit n'est pas convertie : « — »), et leur courbe des dernières 24 h. Entrent dans le bandeau
   « à voir » : une température au-delà de `alert`, un ventilateur au-delà de `warn`, la grappe
   dégradée, un disque plein à 90 % ou plus.
+- `themes` et `theme` : les thèmes de la maison et celui qu'un nouvel écran prend (voir
+  « Les thèmes » ci-dessous).
+- `menu` (facultatif) : le menu qu'un écran prend tant qu'il n'a rien choisi,
+  `{ "position": "bottom", "shape": "floating", "order": ["salon", "plan"] }` ; `position` parmi
+  `left`, `right`, `top`, `bottom`, `shape` parmi `classic`, `compact`, `floating`, `order` les
+  adresses des onglets (sans Accueil). Un mot inconnu est ignoré.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
@@ -154,18 +177,74 @@ telles que les appareils les nomment).
   recharge de la voiture : un appui de travers coupe un cycle). La carte de la pièce dit ce qu'il
   consomme (« Lave-vaisselle · 1 850 W », dès 3 W) ; débranché, il ne dit rien (sauf dans une
   vue filtrée). Moli et les automatismes peuvent toujours le commander.
-- `outlets` : une multiprise dont chaque prise a son bouton, dans l'ordre donné, plus un bouton
-  pour toute la multiprise (« 2 sur 3 » ; un appui allume tout, ou éteint tout si tout est
-  allumé). Seuls les points inscriptibles comptent.
+- `outlets` : une multiprise a sa propre carte dans sa pièce, dessinée : une prise par sortie,
+  allumée (ambre, son voyant) ou éteinte, qu'un appui bascule ; une sortie nommée « USB » est
+  dessinée en ports USB. L'interrupteur de la carte allume tout, ou éteint tout si tout est
+  allumé, sortie par sortie (jamais le canal « toutes les sorties » de l'appareil : celui d'une
+  Meross se lit allumé quand des sorties sont éteintes). **Sans réglage**, un appareil rangé
+  parmi les prises qui a au moins deux points marche/arrêt inscriptibles et numérotés (`on_1`,
+  `switch_2`, `state_l3`…) et déjà lus est une multiprise, ses sorties dans l'ordre de leur
+  numéro, sous le nom de leur point. `outlets` les nomme et choisit lesquelles montrer, dans
+  l'ordre donné (`{ "meross-multi-1:…": { "on_1": "Écran", "on_5": "USB" } }`) ; `{}` en fait
+  un simple bouton. Seuls les points inscriptibles comptent. Le crayon de la carte nomme les
+  prises depuis le tableau de bord : chaque nom est gardé dans l'étiquette de l'appareil
+  (`labels.toml`, `points`, par `PUT /api/labels/{id}/points/{clé}`) et passe avant ceux de
+  `outlets` et du pilote ; un nom effacé redonne celui d'origine.
+
+## Les thèmes (`web/src/maison/lib/themes.js`)
+
+Moli en apporte quatre : **Porcelaine** (la base, `maison.css`), **Sauge**, **Océan** (un léger
+dégradé en fond) et **Terracotta** (police à empattements). La maison ajoute les siens dans
+`home.json` ; un thème du même `id` qu'un thème de Moli le remplace. Un thème ne dit que ce qu'il
+change, jour et nuit séparément ; le reste vient de Porcelaine ou de Nuit.
+
+```json
+{
+  "theme": "chez-nous",
+  "themes": [{
+    "id": "chez-nous",
+    "name": { "fr": "Chez nous", "en": "Our home" },
+    "font": "rounded",
+    "corners": "pill",
+    "background": { "image": "/api/plan/images/3f9c0a7e5b21d864.jpg", "dim": 0.35 },
+    "day":   { "bg": "#f6e6d8", "surface": "#fffaf6", "ink": "#2a1a12", "warm": "#e2763a", "cool": "#3f6fb5" },
+    "night": { "bg": "#170f0b", "surface": "#241913", "ink": "#f6ebe2", "warm": "#f08a4e",
+               "background": { "gradient": ["#170f0b", "#2a1810"] } }
+  }]
+}
+```
+
+- `id` : minuscules, chiffres, tirets (40 au plus). `name` : un texte, ou un par langue.
+- Couleurs (`day`, `night`) : les jetons de `maison.css`, en `#rrggbb` (ou `#rgb`, `#rrggbbaa`)
+  et rien d'autre : `bg`, `surface`, `surface-2`, `surface-3`, `ink`, `ink-2`, `ink-3`, `line`,
+  `warm` (allumé), `cool` (climat), `good`, `alert`, leurs `-soft`, `warm-ink`, `warm-deep`,
+  `warm-glow`, `sun`, et `on-warm` / `on-cool` / `on-good` / `on-alert` (le texte posé sur un
+  bouton de cette couleur). Ce qui n'est pas dit se **déduit** : `surface-2`, `surface-3` et `line`
+  de `surface` et `ink`, les `-soft` de leur accent, le texte sur un accent (blanc s'il se lit,
+  sinon l'encre sombre).
+- **Lisibilité** : chaque texte est mesuré contre son fond (contraste WCAG : 4,5 pour le texte,
+  4 pour `ink-3`, 3 pour le texte d'un bouton). Une couleur trop pâle est remplacée par celle de
+  Porcelaine ou de Nuit qui se lit ; la feuille Thème dit ce qui a été ignoré ou ajusté.
+- `font` : `figtree` (dans le paquet), `system`, `rounded`, `serif`, `mono` (polices de
+  l'appareil, rien à télécharger). `corners` : `square`, `soft`, `round` (défaut), `pill`.
+- `background` (pour les deux, ou dans `day` / `night`) : `image` (une image gardée par Moli,
+  celle d'un étage du plan : `/api/plan/images/<nom>` ; jamais une adresse ailleurs, que chaque
+  écran irait chercher chez un tiers), `gradient` (2 à 6
+  couleurs), `dim` (un voile de la couleur `bg`, de 0 à 0,9, pour que le texte reste lisible sur
+  une photo). Le fond reste immobile quand la page défile ; les cartes gardent leur `surface`.
+- Les couleurs voulues ne suivent pas le thème : vidéo des caméras, couleurs des lampes, ciel,
+  tracés de la carte, habillages du Plan, logo et orbe de Moli.
 
 ## Conception visuelle
 
 - Thème **porcelaine** le jour, **nuit** après le coucher du soleil (point `daylight` de la
-  météo) ; bascule Auto / Jour / Nuit (mémorisée dans le navigateur).
+  météo) ; choix Auto / Jour / Nuit dans la feuille Thème (mémorisé dans le navigateur).
 - Ambre = allumé, bleu = climat/froid, corail = attention. Grandes cibles tactiles, peu de mots,
   aucun jargon. Police Figtree Variable, icônes Material Design (sélection dans
   `lib/icons.js` : seules celles-ci sont dans le paquet).
-- Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style).
+- Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style). Une couleur de
+  l'interface passe par un jeton, jamais en dur : un thème la change (texte sur un bouton plein :
+  `var(--on-warm)`, pas `#fff`).
 - Règle de style : **pas de bordure gauche colorée** sur les cartes.
 - Une lampe injoignable n'est jamais affichée allumée (sa dernière valeur est une supposition).
 - Les ordres retenus par la garde ouvrent la feuille « C'est moi » (code PIN), qui sert aussi
@@ -286,8 +365,14 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   l'arrêt, bleus et traversés d'un courant d'air pendant une aération (`valve_override`) ; une
   petite molette dit une vanne réglée à la main. En mots : ce qu'il fait, « 18,2° pour 19° », puis
   le prochain changement du programme (« Programme · 17° à 22:00 ») ou la fin du réglage à la main,
-  avec **Reprendre le programme**. Toucher la tuile ouvre la carte de la vanne (consigne, modes),
-  sans son en-tête. Animations coupées avec `prefers-reduced-motion`.
+  avec **Reprendre le programme**, ou un boost (« Boost +2° · jusqu’à 15:30 ») ou une consigne
+  maintenue (« Consigne maintenue · programme repris à 18:00 »). Toucher la tuile ouvre la carte
+  de la vanne (consigne, modes), sans son en-tête. Animations coupées avec `prefers-reduced-motion`.
+  Un thermostat de pièce de Moli (point `boost` en écriture) a en plus, hors `off`, **+1 · +2**
+  (dans la limite de `max_boost`) ; pendant un boost, **1 h · 2 h** (`boost_minutes`), le compte à
+  rebours tiré de `boost_until` et **Annuler** (`boost` à 0). Une consigne maintenue (`hold_until`)
+  dit son échéance et son compte à rebours, avec **Reprendre le programme** (`system_mode` à `auto`,
+  qui annule aussi le boost). Calcul pur dans `lib/temporary.js`.
   La page **Chauffage** (`pages/Chauffage.svelte`) réunit, au-dessus de la pompe à chaleur, chaque
   thermostat qui a une table horaire (thermostats de pièce de Moli, `crates/moli-heating`, et vannes
   Zigbee2MQTT) : la carte de la vanne sans son repli de table horaire, la correction appliquée aux

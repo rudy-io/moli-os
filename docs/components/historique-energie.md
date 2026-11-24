@@ -48,7 +48,8 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   - `estimate = true` (appareil seulement, sans `integrate` ni `power`) : une **lumière connectée** qui ne mesure rien ; `point` = un point de la lampe ou d'un luminaire `lumieres:…`. Moli estime sa puissance d'après le profil mesuré de son modèle (powercalc, licence MIT, condensé par `scripts/light-profiles.py` dans `crates/moli-energy/src/estimate.rs` : LCA006, LTW001, LWA017, L530) : luminosité, blanc ou couleur, veille éteinte, **0 quand elle est coupée au mur** ; un luminaire = la somme de ses ampoules. Comptée dans le temps comme `integrate`, jamais ajoutée aux totaux, `estimated: true` dans l'API, « ≈ estimé » à l'écran. Modèle inconnu : pas d'estimation (jamais de chiffre inventé).
   - Pas repris de HA : ses capteurs « powercalc » (estimations, pas des mesures).
   - `history = true` : `point` donne une consommation déjà découpée par heure, en texte JSON
-    (`[{"hour": ms, "kwh": …}]`), pour un service qui répond un jour après (pilote `enedis`). Chaque
+    (`[{"hour": ms, "kwh": …}]`), pour un service qui répond un jour après (pilotes `enedis` et
+    `grdf` ; pour le gaz, `role = "gas"`, en kWh, sans `kwh_per_unit`). Chaque
     heure est classée à sa place, jamais étalée sur le moment du relevé ; ce qui est déjà classé
     reste. Le prix vient de `price`, pas de la période tarifaire. Si tous les compteurs `grid` et
     `total` sont ainsi en retard, la projection du mois s'arrête à la dernière heure reçue.
@@ -114,6 +115,11 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   (l'index HC n'est étalé que sur du temps HC).
 - Chiffre principal = la plus complète des deux mesures (`grid` et `total`, par exemple Linky
   et EM06).
+- **Jours entiers** (`history`) : une entrée peut aussi être un jour entier (`{"day": ms, "to": ms,
+  "kwh": …}`, de minuit à minuit, 23 à 25 heures), quand le service ne donne que le total du jour
+  (pilote `enedis` sans courbe). Il est réparti également sur ses heures **seulement si aucune heure
+  de ce compteur n'est déjà classée ce jour-là** : une courbe reçue, même en partie, n'est jamais
+  complétée, et rien ne compte deux fois.
 - **Historique repris de HA** (statistiques long terme, lecture seule) :
   `tools/home-assistant/ha-energy-export.py … | docker exec -i moli-os /moli-os energy
   import`, relançable sans doublon.

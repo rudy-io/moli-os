@@ -496,6 +496,50 @@ async fn a_forced_valve_opens_wide_or_shuts_on_the_room_sensor() {
 }
 
 #[tokio::test]
+async fn a_boost_moves_a_forced_room_s_demand_and_valves() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let rooms = toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 20.0
+        regulation = "force"
+        "#,
+    )
+    .unwrap()
+    .heating;
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+    })
+    .await;
+    let room = |key: &str| format!("chauffage:bureau/{key}");
+    // 20.9 for 20: shut, no heat asked for.
+    until_bool(&hub, &room("heat_demand"), false).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+
+    // +2: the room aims at 22, 20.9 is under it, the valve opens wide (22 + 4).
+    hub.command(&point(&room("boost")), Value::Float(2.0), Origin::Ui, None)
+        .await
+        .unwrap();
+    until_bool(&hub, &room("heat_demand"), true).await;
+    until(&hub, "vannes:v/sp", 26.0).await;
+
+    // The boost over: back to 20, shut again.
+    hub.command(&point(&room("boost")), Value::Float(0.0), Origin::Ui, None)
+        .await
+        .unwrap();
+    until_bool(&hub, &room("heat_demand"), false).await;
+    until(&hub, "vannes:v/sp", 16.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
 async fn a_forced_room_whose_sensor_went_quiet_gives_its_setpoint_as_it_is() {
     #[derive(Deserialize)]
     struct File {
@@ -527,10 +571,239 @@ async fn a_forced_room_whose_sensor_went_quiet_gives_its_setpoint_as_it_is() {
     cancel.cancel();
 }
 
+fn order_to(
+    hub: &Hub,
+    key: &str,
+    value: Value,
+) -> impl Future<Output = Result<(), String>> + use<> {
+    let hub = hub.clone();
+    let at = point(&format!("chauffage:parents/{key}"));
+    async move {
+        hub.command(&at, value, Origin::Ui, None)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// How long until the room's `key` (RFC 3339), empty: `None`.
+fn left(hub: &Hub, key: &str) -> Option<Duration> {
+    let value = hub
+        .state(&point(&format!("chauffage:parents/{key}")))
+        .map(|s| s.value)?;
+    let end = temporary::read(Some(&value))?;
+    Some(Duration::from_millis(end.saturating_sub(now_ms())))
+}
+
+/// What the room journaled on its own, by point: (key, from, to).
+fn journaled(hub: &Hub) -> Vec<(String, Value, Value)> {
+    hub.journal(100)
+        .iter()
+        .filter(|e| e.actor.as_deref() == Some("Chauffage · Chambre"))
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } => Some((
+                name.strip_prefix("chauffage:parents/")?.to_owned(),
+                from.clone()?,
+                to.clone(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_boost_adds_to_the_setpoint_for_a_while() {
+    let (hub, cancel) = house_with(|h| {
+        h.tick = Duration::from_millis(20);
+        h.interval = Duration::ZERO;
+        h.minute = Duration::from_millis(20);
+    })
+    .await;
+    let order = |key: &str, value: Value| order_to(&hub, key, value);
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until(&hub, "chauffage:parents/boost", 0.0).await;
+    assert_eq!(left(&hub, "boost_until"), None);
+    assert!(
+        order("boost_minutes", Value::Int(30)).await.is_err(),
+        "no boost yet"
+    );
+
+    // +2 °C on the schedule's 20, for its 60 minutes by default.
+    order("boost", Value::Float(2.0)).await.unwrap();
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until(&hub, "chauffage:parents/boost_minutes", 60.0).await;
+    let first = left(&hub, "boost_until").unwrap();
+    assert!(first <= Duration::from_millis(1200), "{first:?}");
+    assert!(journaled(&hub).contains(&("boost_minutes".into(), Value::Int(0), Value::Int(60))));
+
+    // Longer, then +1 only: the end stays where it was.
+    order("boost_minutes", Value::Int(600)).await.unwrap();
+    until(&hub, "chauffage:parents/boost_minutes", 600.0).await;
+    order("boost", Value::Float(1.0)).await.unwrap();
+    until(&hub, "vannes:v/sp", 21.0).await;
+    let end = left(&hub, "boost_until").unwrap();
+    assert!(end > Duration::from_secs(11), "{end:?}");
+
+    // Never above the room's max (25).
+    order("system_mode", Value::from("heat")).await.unwrap();
+    until(&hub, "chauffage:parents/boost", 0.0).await;
+    order("occupied_heating_setpoint", Value::Float(24.0))
+        .await
+        .unwrap();
+    order("boost", Value::Float(3.0)).await.unwrap();
+    until(&hub, "vannes:v/sp", 25.0).await;
+
+    // Over on its own: the setpoint again, and journaled.
+    order("boost_minutes", Value::Int(5)).await.unwrap();
+    until(&hub, "vannes:v/sp", 24.0).await;
+    until(&hub, "chauffage:parents/boost", 0.0).await;
+    until(&hub, "chauffage:parents/boost_minutes", 0.0).await;
+    assert_eq!(left(&hub, "boost_until"), None);
+    assert!(journaled(&hub).contains(&("boost".into(), Value::Float(3.0), Value::Float(0.0))));
+
+    // Off is frost guard, boost or not.
+    for bad in [3.5, 1.2, -1.0] {
+        assert!(order("boost", Value::Float(bad)).await.is_err(), "{bad}");
+    }
+    order("system_mode", Value::from("off")).await.unwrap();
+    assert!(order("boost", Value::Float(1.0)).await.is_err());
+    order("boost", Value::Float(0.0)).await.unwrap();
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_setpoint_held_gives_way_to_the_schedule() {
+    let mut rooms = rooms();
+    rooms[0].hold_default_minutes = 15;
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+        h.interval = Duration::ZERO;
+        h.minute = Duration::from_millis(20);
+    })
+    .await;
+    let order = |key: &str, value: Value| order_to(&hub, key, value);
+    until(&hub, "vannes:v/sp", 20.0).await;
+    assert_eq!(left(&hub, "hold_until"), None);
+
+    // Changed by hand: held for its 15 minutes, then the schedule's 20.
+    order("occupied_heating_setpoint", Value::Float(22.0))
+        .await
+        .unwrap();
+    until(&hub, "chauffage:parents/hold_minutes", 15.0).await;
+    assert!(left(&hub, "hold_until").unwrap() <= Duration::from_millis(300));
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 20.0).await;
+    until(&hub, "vannes:v/sp", 20.0).await;
+    until(&hub, "chauffage:parents/hold_minutes", 0.0).await;
+    assert_eq!(left(&hub, "hold_until"), None);
+    let log = journaled(&hub);
+    assert!(log.contains(&("hold_minutes".into(), Value::Int(0), Value::Int(15))));
+    assert!(log.contains(&("hold_minutes".into(), Value::Int(15), Value::Int(0))));
+
+    // A scene's order either way: the hold asked for is kept.
+    order("hold_minutes", Value::Int(600)).await.unwrap();
+    order("occupied_heating_setpoint", Value::Float(18.0))
+        .await
+        .unwrap();
+    until(&hub, "vannes:v/sp", 18.0).await;
+    until(&hub, "chauffage:parents/hold_minutes", 600.0).await;
+
+    // A new step of the schedule waits for the end of the hold.
+    for day in DAYS {
+        order(&format!("weekly_schedule_{day}"), Value::from("00:00/19"))
+            .await
+            .unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 18.0).await;
+    order("hold_minutes", Value::Int(2)).await.unwrap();
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 19.0).await;
+    until(&hub, "vannes:v/sp", 19.0).await;
+
+    // 0: until the next step, as without a hold.
+    order("hold_minutes", Value::Int(600)).await.unwrap();
+    order("hold_minutes", Value::Int(0)).await.unwrap();
+    until(&hub, "chauffage:parents/hold_minutes", 0.0).await;
+    assert!(order("hold_minutes", Value::Int(721)).await.is_err());
+    assert!(order("hold_minutes", Value::Float(1.5)).await.is_err());
+
+    // A change of mode ends it; out of auto, nothing to hold.
+    order("hold_minutes", Value::Int(600)).await.unwrap();
+    order("system_mode", Value::from("heat")).await.unwrap();
+    until(&hub, "chauffage:parents/hold_minutes", 0.0).await;
+    assert!(order("hold_minutes", Value::Int(60)).await.is_err());
+    order("occupied_heating_setpoint", Value::Float(21.0))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    until(&hub, "chauffage:parents/hold_minutes", 0.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_boost_and_a_hold_outlive_a_restart() {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("maison"),
+        Arc::new(moli_helpers::Helpers::new(stand_ins()).unwrap()),
+        cancel.clone(),
+    );
+    spawn_driver(
+        &hub,
+        InstanceId::from("vannes"),
+        Arc::new(Valves),
+        cancel.clone(),
+    );
+    until(&hub, "vannes:v/sp", 16.0).await;
+    let start = || {
+        let mut heating = Heating::new(hub.clone(), rooms(), jiff::tz::TimeZone::UTC);
+        heating.settle = Duration::ZERO;
+        heating.floor = Duration::ZERO;
+        heating.tick = Duration::from_millis(20);
+        let stop = cancel.child_token();
+        let task = spawn_driver(
+            &hub,
+            InstanceId::from(INSTANCE),
+            Arc::new(heating),
+            stop.clone(),
+        );
+        (task, stop)
+    };
+    let order = |key: &str, value: Value| order_to(&hub, key, value);
+
+    let (task, stop) = start();
+    until(&hub, "vannes:v/sp", 20.0).await;
+    order("occupied_heating_setpoint", Value::Float(18.0))
+        .await
+        .unwrap();
+    order("hold_minutes", Value::Int(180)).await.unwrap();
+    order("boost", Value::Float(1.5)).await.unwrap();
+    until(&hub, "vannes:v/sp", 19.5).await;
+    until(&hub, "chauffage:parents/hold_minutes", 180.0).await;
+    let state = |key: &str| {
+        hub.state(&point(&format!("chauffage:parents/{key}")))
+            .map(|s| s.value)
+    };
+    let ends = (state("boost_until"), state("hold_until"));
+    assert!(ends.0.as_ref().is_some_and(|v| *v != Value::Null));
+    stop.cancel();
+    task.await.unwrap();
+
+    let (_task, _stop) = start();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 18.0).await;
+    until(&hub, "chauffage:parents/boost", 1.5).await;
+    until(&hub, "chauffage:parents/boost_minutes", 60.0).await;
+    until(&hub, "chauffage:parents/hold_minutes", 180.0).await;
+    assert_eq!((state("boost_until"), state("hold_until")), ends);
+    until(&hub, "vannes:v/sp", 19.5).await;
+    cancel.cancel();
+}
+
 #[test]
 fn bad_rooms_are_refused() {
     assert!(check(&rooms()).is_ok());
-    let cases: [fn(&mut Room); 13] = [
+    let cases: [fn(&mut Room); 18] = [
         |r| r.id = "a:b".into(),
         |r| r.name = " ".into(),
         |r| r.sensor = "piece".into(),
@@ -547,6 +820,11 @@ fn bad_rooms_are_refused() {
         |r| r.force_offset = 0.0,
         |r| r.force_offset = 12.0,
         |r| r.hysteresis = -0.1,
+        |r| r.max_boost = 0.0,
+        |r| r.max_boost = 1.2,
+        |r| r.max_boost = 10.5,
+        |r| r.boost_default_minutes = 0,
+        |r| r.hold_default_minutes = 721,
     ];
     for (i, change) in cases.iter().enumerate() {
         let mut list = rooms();

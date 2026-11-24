@@ -157,12 +157,12 @@
     color: #e9a23b;
   }
   .logic .tile {
-    background: color-mix(in srgb, #4b74f2 14%, var(--surface));
-    color: #4b74f2;
+    background: color-mix(in srgb, var(--cool) 14%, var(--surface));
+    color: var(--cool);
   }
   .action .tile {
-    background: color-mix(in srgb, #2c9a88 14%, var(--surface));
-    color: #2c9a88;
+    background: color-mix(in srgb, var(--good) 14%, var(--surface));
+    color: var(--good);
   }
   .wait .tile {
     background: color-mix(in srgb, #8a92a4 16%, var(--surface));

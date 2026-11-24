@@ -32,6 +32,7 @@ moli-host = { path = "crates/moli-host" }
 moli-history = { path = "crates/moli-history" }
 moli-profile = { path = "crates/moli-profile" }
 moli-enedis = { path = "crates/moli-enedis" }
+moli-grdf = { path = "crates/moli-grdf" }
 moli-solcast = { path = "crates/moli-solcast" }
 moli-linky-tic = { path = "crates/moli-linky-tic" }
 moli-energy = { path = "crates/moli-energy" }

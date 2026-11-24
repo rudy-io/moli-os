@@ -35,3 +35,20 @@ test('a camera, a door, a motion sensor or the alarm brings the Caméras tab', (
   assert.equal(camerasUseful(house(dev('tuya:siren', [point('on')], { label: { room: 'Sécurité' } })), [], {}), true);
   assert.equal(camerasUseful({}, [], { doors: [{ id: 'tuya:x', name: 'Entrée' }] }), true);
 });
+
+test('turned-off tabs: read, toggled, and never Accueil', async () => {
+  const { readHidden, toggleHidden, menuTabs } = await import('./tabs.js');
+  assert.deepEqual(readHidden(null), []);
+  assert.deepEqual(readHidden('pas du json'), []);
+  assert.deepEqual(readHidden('{"plan":true}'), []);
+  assert.deepEqual(readHidden('["plan", "", 3, "parler"]'), ['plan', 'parler']);
+
+  let hidden = toggleHidden([], 'plan', false);
+  hidden = toggleHidden(hidden, 'dehors', false);
+  assert.deepEqual(hidden, ['dehors', 'plan']);
+  assert.deepEqual(toggleHidden(hidden, 'plan', true), ['dehors']);
+  assert.deepEqual(toggleHidden(hidden, '', false), hidden, 'Accueil stays');
+
+  const tabs = [{ path: '' }, { path: 'plan' }, { path: 'salon' }, { path: 'dehors' }];
+  assert.deepEqual(menuTabs(tabs, ['plan', 'dehors', '']).map((x) => x.path), ['', 'salon']);
+});

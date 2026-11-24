@@ -329,6 +329,8 @@ impl Approvals {
 pub enum LabelError {
     #[error("unknown device")]
     UnknownDevice,
+    #[error("unknown point")]
+    UnknownPoint,
     #[error("could not persist labels: {0}")]
     Persist(#[from] std::io::Error),
     #[error("{0}")]
@@ -368,6 +370,7 @@ impl LabelPatch {
         Label {
             name: merge(self.name, current.name),
             room: merge(self.room, current.room),
+            points: current.points,
         }
     }
 }
@@ -1641,6 +1644,95 @@ impl Hub {
             started,
         );
         result
+    }
+
+    /// Names one point of a device (a power strip's outlet); `""` forgets
+    /// the name. Like a device's name: an agent may name a point nobody
+    /// named yet, never rename one. `named_elsewhere`: the family already
+    /// named it outside Moli's labels (`home.json` `outlets`), which counts
+    /// as a name.
+    pub async fn set_point_label(
+        &self,
+        device: &DeviceId,
+        key: &str,
+        name: &str,
+        named_elsewhere: bool,
+        origin: Origin,
+        actor: Option<String>,
+    ) -> Result<Label, LabelError> {
+        let started = Instant::now();
+        let renames = matches!(origin, Origin::Ui | Origin::System | Origin::Household);
+        let result = self
+            .write_point_label(device, key, name, renames || !named_elsewhere, renames)
+            .await;
+        let outcome = match &result {
+            Ok(_) => Outcome::Ok,
+            Err(e) => Outcome::Err(e.to_string()),
+        };
+        let label = result.as_ref().ok().cloned().unwrap_or_default();
+        self.record(
+            origin,
+            actor,
+            Action::Label {
+                device: device.clone(),
+                label,
+            },
+            outcome,
+            started,
+        );
+        result
+    }
+
+    /// `may_name`: the caller may name a point that has no name yet;
+    /// `may_rename`: also one that has. Judged under the write lock, so a
+    /// name a person gives at the same moment is never overwritten.
+    async fn write_point_label(
+        &self,
+        device: &DeviceId,
+        key: &str,
+        name: &str,
+        may_name: bool,
+        may_rename: bool,
+    ) -> Result<Label, LabelError> {
+        let _guard = self.0.label_write.lock().await;
+        let mut next = {
+            let model = self.read();
+            let known = model.devices.get(device).ok_or(LabelError::UnknownDevice)?;
+            if known.point(key).is_none() {
+                return Err(LabelError::UnknownPoint);
+            }
+            let named = model
+                .labels
+                .get(device)
+                .is_some_and(|l| l.points.contains_key(key));
+            if !may_name || (named && !may_rename) {
+                return Err(LabelError::Guarded(moli_i18n::tr!(
+                    "serveur.garde.renommer_humain"
+                )));
+            }
+            model.labels.clone()
+        };
+        let mut label = next.get(device).cloned().unwrap_or_default();
+        let name = clean_label(name);
+        if name.is_empty() {
+            label.points.remove(key);
+        } else {
+            label.points.insert(key.to_owned(), name);
+        }
+        if label.is_empty() {
+            next.remove(device);
+        } else {
+            next.insert(device.clone(), label.clone());
+        }
+        if let Some(path) = &self.0.opts.labels_path {
+            labels::save(path, &next).await?;
+        }
+        self.write().labels = next;
+        self.emit(Event::LabelChanged {
+            device: device.clone(),
+            label: label.clone(),
+        });
+        Ok(label)
     }
 
     /// Only a human may move a device out of (or between) protected rooms:

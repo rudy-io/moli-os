@@ -373,7 +373,7 @@
     border-radius: 50%;
     border: 0;
     background: var(--alert);
-    color: #fff;
+    color: var(--on-alert);
     display: grid;
     place-items: center;
     box-shadow: var(--shadow-lift);

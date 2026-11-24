@@ -10,7 +10,8 @@
 //!
 //! - `local_temperature`: the room's sensor (unknown when it went quiet).
 //! - `occupied_heating_setpoint` (writable): what the room should be at. In
-//!   `auto`, a change holds until the next step of the schedule.
+//!   `auto`, a change holds until the next step of the schedule, or for
+//!   `hold_default_minutes` when set.
 //! - `system_mode` (writable): `auto` follows the schedule, `heat` holds the
 //!   setpoint, `off` gives the valves their lowest setpoint (frost guard).
 //! - `weekly_schedule_<day>` (writable): `00:00/17 06:30/20 22:00/17`.
@@ -24,6 +25,12 @@
 //! - `heat_demand`: the room asks for heat, its sensor under the setpoint
 //!   by more than `hysteresis`, until it is over it by as much
 //!   ([`regulation::demand`]); never in `off` nor with the sensor quiet.
+//! - `boost` (writable, °C): added to the setpoint, the schedule's included,
+//!   for `boost_minutes` (writable; `boost_default_minutes` when only `boost`
+//!   is written), until `boost_until` (RFC 3339). Not in `off`.
+//! - `hold_minutes` (writable): in `auto`, how long the setpoint holds before
+//!   the schedule takes over again (0: until the next step), until
+//!   `hold_until` (RFC 3339). See [`temporary`].
 //!
 //! ```toml
 //! [[heating]]
@@ -40,6 +47,7 @@
 //! # force_offset = 4.0, hysteresis = 0.3
 //! # min = 5.0, max = 25.0: the setpoints the room accepts
 //! # initial = 19.0: the setpoint and schedule before anyone set one
+//! # max_boost = 3.0, boost_default_minutes = 60, hold_default_minutes = 0
 //! ```
 //!
 //! A valve is a writable setpoint in °C with bounds, on a device that is
@@ -58,6 +66,7 @@
 pub mod hand;
 pub mod regulation;
 pub mod schedule;
+pub mod temporary;
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -71,6 +80,7 @@ use serde::Deserialize;
 
 use regulation::{Shift, valve_heats, valve_setpoint, worth_sending};
 use schedule::{DAYS, Step, format_day, parse_day, step_at, to_next_step};
+use temporary::{Boost, MAX_MINUTES, Timed};
 
 /// The instance that runs the rooms.
 pub const INSTANCE: &str = "chauffage";
@@ -121,6 +131,16 @@ pub struct Room {
     /// The setpoint and every day's schedule before anyone set them.
     #[serde(default = "default_initial")]
     pub initial: f64,
+    /// The highest `boost` (°C), on the half degree.
+    #[serde(default = "default_max_boost")]
+    pub max_boost: f64,
+    /// How long a boost lasts when only `boost` is written.
+    #[serde(default = "default_boost_minutes")]
+    pub boost_default_minutes: u32,
+    /// In `auto`, how long a setpoint changed by hand holds (0: until the
+    /// next step of the schedule).
+    #[serde(default)]
+    pub hold_default_minutes: u32,
 }
 
 /// How a room's valves are given their setpoint.
@@ -167,6 +187,12 @@ fn default_max() -> f64 {
 }
 fn default_initial() -> f64 {
     19.0
+}
+fn default_max_boost() -> f64 {
+    3.0
+}
+fn default_boost_minutes() -> u32 {
+    60
 }
 
 fn is_point(text: &str) -> bool {
@@ -239,6 +265,18 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
             (0.0..=2.0).contains(&room.hysteresis),
             "heating room {id}: 0 <= hysteresis <= 2"
         );
+        ensure!(
+            room.max_boost >= 0.5 && temporary::boost_ok(room.max_boost, 10.0),
+            "heating room {id}: max_boost from 0.5 to 10, on the half degree"
+        );
+        ensure!(
+            (1..=MAX_MINUTES).contains(&room.boost_default_minutes),
+            "heating room {id}: boost_default_minutes from 1 to {MAX_MINUTES}"
+        );
+        ensure!(
+            room.hold_default_minutes <= MAX_MINUTES,
+            "heating room {id}: hold_default_minutes from 0 to {MAX_MINUTES}"
+        );
     }
     Ok(())
 }
@@ -254,14 +292,15 @@ pub struct Heating {
     zone: jiff::tz::TimeZone,
     settle: Duration,
     /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
-    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`]:
-    /// shorter in the tests.
+    /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`], and a
+    /// minute of a boost or a hold: shorter in the tests.
     floor: Duration,
     interval: Duration,
     tick: Duration,
     hand_hold: Duration,
     airing_hold: Duration,
     fresh: Duration,
+    minute: Duration,
 }
 
 impl Heating {
@@ -279,6 +318,7 @@ impl Heating {
             hand_hold: hand::HAND_HOLD,
             airing_hold: hand::AIRING_HOLD,
             fresh: FRESH,
+            minute: Duration::from_secs(60),
         }
     }
 }
@@ -342,6 +382,9 @@ struct RoomRun {
     read: Option<Instant>,
     /// The room asks for heat; none in `off` or with the sensor quiet.
     demand: Option<bool>,
+    boost: Option<Boost>,
+    /// In `auto`, the setpoint held until then, whatever the schedule says.
+    setpoint_hold: Option<Timed>,
 }
 
 impl RoomRun {
@@ -352,6 +395,12 @@ impl RoomRun {
             valve.urgent = true;
             valve.hold = None;
         }
+    }
+
+    /// What the room should be at: its setpoint and its boost, within its
+    /// bounds.
+    fn target(&self, max: f64) -> f64 {
+        (self.setpoint + self.boost.map_or(0.0, |b| b.by)).min(max)
     }
 
     /// The hold the room shows: airing first, then by hand; and its end (the
@@ -394,6 +443,63 @@ fn numeric(
         unit: Some(Unit::Celsius),
         semantic,
     }
+}
+
+/// A writable length in whole minutes (0 to [`MAX_MINUTES`]).
+fn minutes(key: &str, label: String) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: label.into(),
+        kind: Kind::Numeric {
+            min: Some(0.0),
+            max: Some(f64::from(MAX_MINUTES)),
+            step: Some(1.0),
+        },
+        access: Access {
+            read: true,
+            write: true,
+        },
+        unit: Some(Unit::Minute),
+        semantic: Semantic::Other,
+    }
+}
+
+/// A read-only end (RFC 3339).
+fn until(key: &str, label: String) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: label.into(),
+        kind: Kind::Text,
+        access: Access {
+            read: true,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Other,
+    }
+}
+
+/// The room's boost and setpoint held ([`temporary`]).
+fn temporary_points(room: &Room) -> [PointSpec; 5] {
+    [
+        numeric(
+            "boost",
+            moli_i18n::tr!("pilotes.chauffage.boost"),
+            true,
+            Some((0.0, room.max_boost)),
+            Semantic::Other,
+        ),
+        minutes(
+            "boost_minutes",
+            moli_i18n::tr!("pilotes.chauffage.boost_duree"),
+        ),
+        until("boost_until", moli_i18n::tr!("pilotes.chauffage.boost_fin")),
+        minutes("hold_minutes", moli_i18n::tr!("pilotes.chauffage.maintien")),
+        until(
+            "hold_until",
+            moli_i18n::tr!("pilotes.chauffage.maintien_fin"),
+        ),
+    ]
 }
 
 /// The devices of the room's valves, each once.
@@ -491,6 +597,7 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
         unit: None,
         semantic: Semantic::Other,
     });
+    points.extend(temporary_points(room));
     points.push(numeric(
         "valve_correction",
         moli_i18n::tr!("pilotes.chauffage.correction"),
@@ -558,8 +665,30 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
     // A hold is not kept across a restart: the valves get the room's again.
     show_hold(ctx, &id, None);
     ctx.set_state(&id, "heat_demand", Value::Bool(false));
+    // A boost or a setpoint held is, until its end (gone by: ended at the
+    // first look, and said so).
+    let minutes = |key: &str| ctx.current(&id, key).as_ref().and_then(temporary::minutes);
+    let until = |key: &str| temporary::read(ctx.current(&id, key).as_ref());
+    let boost = ctx
+        .current(&id, "boost")
+        .and_then(|v| v.as_f64())
+        .filter(|b| *b > 0.0 && temporary::boost_ok(*b, room.max_boost) && mode != Mode::Off)
+        .zip(until("boost_until"))
+        .map(|(by, until_ms)| Boost {
+            by,
+            timed: Timed {
+                minutes: minutes("boost_minutes").unwrap_or(0),
+                until_ms,
+            },
+        });
+    let setpoint_hold = until("hold_until")
+        .filter(|_| mode == Mode::Auto)
+        .map(|until_ms| Timed {
+            minutes: minutes("hold_minutes").unwrap_or(0),
+            until_ms,
+        });
     ctx.set_availability(&id, true);
-    RoomRun {
+    let run = RoomRun {
         id,
         mode,
         setpoint,
@@ -580,7 +709,11 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         shift,
         read: None,
         demand: None,
-    }
+        boost,
+        setpoint_hold,
+    };
+    show_temporary(ctx, &run);
+    run
 }
 
 fn text(value: &Value) -> Option<&str> {
@@ -598,6 +731,26 @@ fn show_hold(ctx: &DriverCtx, id: &DeviceId, hold: Option<hand::Hold>) {
         .map_or(Value::Null, |t| Value::from(t.to_string().as_str()));
     ctx.set_state(id, "valve_override", Value::from(kind));
     ctx.set_state(id, "valve_override_until", until);
+}
+
+/// The room's boost and setpoint held, and their ends.
+fn show_temporary(ctx: &DriverCtx, run: &RoomRun) {
+    let id = &run.id;
+    let minutes = |t: Option<Timed>| Value::Int(t.map_or(0, |t| i64::from(t.minutes)));
+    let boost = run.boost.map(|b| b.timed);
+    ctx.set_state(id, "boost", Value::Float(run.boost.map_or(0.0, |b| b.by)));
+    ctx.set_state(id, "boost_minutes", minutes(boost));
+    ctx.set_state(
+        id,
+        "boost_until",
+        temporary::show(boost.map(|t| t.until_ms)),
+    );
+    ctx.set_state(id, "hold_minutes", minutes(run.setpoint_hold));
+    ctx.set_state(
+        id,
+        "hold_until",
+        temporary::show(run.setpoint_hold.map(|t| t.until_ms)),
+    );
 }
 
 fn mode_name(mode: Mode) -> &'static str {
@@ -620,7 +773,7 @@ fn demand(
     let demand = match temperature {
         Some(room_t) if run.mode != Mode::Off => Some(regulation::demand(
             run.demand,
-            run.setpoint - room_t,
+            run.target(room.max) - room_t,
             room.hysteresis,
         )),
         _ => None,
@@ -754,6 +907,10 @@ impl Heating {
         };
         if run.step != Some((day, index)) {
             run.step = Some((day, index));
+            // Held: the step is applied when the hold ends.
+            if run.setpoint_hold.is_some() {
+                return;
+            }
             run.setpoint = temp;
             run.changed();
             ctx.set_state(&run.id, "occupied_heating_setpoint", Value::Float(temp));
@@ -770,6 +927,111 @@ impl Heating {
         let minutes = u64::from(to_next_step(&run.week[day], minute));
         let seconds = u64::from(now.second().unsigned_abs());
         Some(Duration::from_secs((minutes * 60).saturating_sub(seconds)))
+    }
+
+    /// How long before the room's own target changes: its setpoint held
+    /// ends, or else the next step of the schedule; or its boost ends.
+    fn to_next_change(&self, run: &RoomRun) -> Option<Duration> {
+        let now = now_ms();
+        let setpoint = match run.setpoint_hold {
+            Some(hold) => Some(hold.left(now)),
+            None => self.to_next_step(run),
+        };
+        let boost = run.boost.map(|b| b.timed.left(now));
+        setpoint.into_iter().chain(boost).min()
+    }
+
+    /// Journals a change the room made on its own, as « Heating · <room> ».
+    fn journal(&self, room: &Room, run: &RoomRun, key: &str, from: Value, to: Value) {
+        let actor = moli_i18n::tr!("pilotes.chauffage.acteur", piece = room.name);
+        self.hub.record_setting(
+            Origin::System,
+            Some(actor),
+            PointId::new(&run.id, key).as_str(),
+            Some(from),
+            to,
+        );
+    }
+
+    /// Ends the boost; journaled unless asked for (the order already is).
+    fn end_boost(&self, room: &Room, run: &mut RoomRun, why: &str) {
+        if let Some(boost) = run.boost.take() {
+            run.changed();
+            if why != "asked" {
+                self.journal(
+                    room,
+                    run,
+                    "boost",
+                    Value::Float(boost.by),
+                    Value::Float(0.0),
+                );
+            }
+            tracing::info!(room = %room.id, by = boost.by, why, "heating: boost over");
+        }
+    }
+
+    fn end_setpoint_hold(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, why: &str) {
+        if let Some(hold) = run.setpoint_hold.take() {
+            let minutes = Value::Int(i64::from(hold.minutes));
+            self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
+            tracing::info!(room = %room.id, why, "heating: setpoint hold over, the schedule again");
+            run.step = None;
+            self.follow(ctx, run);
+        }
+    }
+
+    /// A boost or a setpoint held whose end has come.
+    fn expire(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun) {
+        let now = now_ms();
+        if run.boost.is_some_and(|b| b.timed.due(now)) {
+            self.end_boost(room, run, "due");
+        }
+        if run.setpoint_hold.is_some_and(|h| h.due(now)) {
+            self.end_setpoint_hold(ctx, room, run, "due");
+        }
+    }
+
+    /// A boost of `by` °C: the one in force changed, or a new one for
+    /// `boost_default_minutes`; 0 ends it.
+    fn set_boost(&self, room: &Room, run: &mut RoomRun, by: f64) {
+        if by <= 0.0 {
+            self.end_boost(room, run, "asked");
+            return;
+        }
+        run.changed();
+        if let Some(boost) = &mut run.boost {
+            boost.by = by;
+            return;
+        }
+        let minutes = room.boost_default_minutes;
+        let timed = Timed::start(minutes, now_ms(), self.minute);
+        run.boost = Some(Boost { by, timed });
+        self.journal(
+            room,
+            run,
+            "boost_minutes",
+            Value::Int(0),
+            Value::Int(i64::from(minutes)),
+        );
+        tracing::info!(room = %room.id, by, minutes, "heating: boost");
+    }
+
+    /// A setpoint changed by hand in `auto`: held for `hold_default_minutes`
+    /// unless already held (its end kept, whatever the order of a scene).
+    fn hold_by_default(&self, room: &Room, run: &mut RoomRun) {
+        let minutes = room.hold_default_minutes;
+        if run.mode != Mode::Auto || run.setpoint_hold.is_some() || minutes == 0 {
+            return;
+        }
+        run.setpoint_hold = Some(Timed::start(minutes, now_ms(), self.minute));
+        self.journal(
+            room,
+            run,
+            "hold_minutes",
+            Value::Int(0),
+            Value::Int(i64::from(minutes)),
+        );
+        tracing::info!(room = %room.id, minutes, "heating: setpoint held");
     }
 
     /// A valve's setpoint moved by someone else than Moli: held as it is
@@ -805,11 +1067,19 @@ impl Heating {
             let now = Instant::now();
             let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
             let heating = self.heating(room, room_t);
-            run.shift.update(run.setpoint - room_t, elapsed, heating);
+            run.shift
+                .update(run.target(room.max) - room_t, elapsed, heating);
             run.read = Some(now);
         } else {
             run.read = None;
         }
+    }
+
+    /// Ends what is due, then regulates the room.
+    async fn look(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, settled: bool) {
+        self.expire(ctx, room, run);
+        show_temporary(ctx, run);
+        self.regulate(ctx, room, run, settled).await;
     }
 
     /// Reads the room and its valves, and writes the valves that need it.
@@ -820,7 +1090,7 @@ impl Heating {
             "local_temperature",
             temperature.map_or(Value::Null, Value::Float),
         );
-        let next_step = self.to_next_step(run);
+        let next_step = self.to_next_change(run);
         // Each valve's hold: one turned by hand since the last look, one over.
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
             if state.hold.is_some_and(|h| now_ms() >= h.until_ms) {
@@ -854,6 +1124,7 @@ impl Heating {
             hold.is_none() && strategy == Regulation::Shift,
         );
         let shift = run.shift.get();
+        let aim = run.target(room.max);
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
             // Kept until the valve may be written: a change made while Moli
             // starts, or before its valve is known, is not lost.
@@ -875,13 +1146,7 @@ impl Heating {
             if temperature.is_none() && !urgent {
                 continue;
             }
-            let next = target(
-                room,
-                strategy,
-                (run.mode, run.setpoint, run.demand),
-                shift,
-                bounds,
-            );
+            let next = target(room, strategy, (run.mode, aim, run.demand), shift, bounds);
             // On the valve's own step, coarser than the half degree: what it holds.
             let next = regulation::on_step(next, step, bounds);
             let point = PointId::from(valve.as_str());
@@ -931,6 +1196,7 @@ impl Heating {
                     run.setpoint = regulation::half_degree(t).clamp(room.min, room.max);
                     run.changed();
                     ctx.set_state(&run.id, key, Value::Float(run.setpoint));
+                    self.hold_by_default(room, run);
                     Ok(())
                 }
                 _ => Err(moli_i18n::tr!("pilotes.chauffage.consigne_refusee")),
@@ -938,6 +1204,11 @@ impl Heating {
         } else if key == "system_mode" {
             match text(&command.value).and_then(Mode::parse) {
                 Some(mode) => {
+                    self.end_boost(room, run, "mode");
+                    if let Some(hold) = run.setpoint_hold.take() {
+                        let minutes = Value::Int(i64::from(hold.minutes));
+                        self.journal(room, run, "hold_minutes", minutes, Value::Int(0));
+                    }
                     run.mode = mode;
                     run.step = None;
                     run.changed();
@@ -956,6 +1227,8 @@ impl Heating {
             } else {
                 Err(moli_i18n::tr!("pilotes.chauffage.reglage_vanne_refuse"))
             }
+        } else if let Some(result) = self.temporary_command(room, run, key, &command.value) {
+            result
         } else if let Some(day) = key
             .strip_prefix("weekly_schedule_")
             .and_then(|d| DAYS.iter().position(|x| *x == d))
@@ -975,6 +1248,62 @@ impl Heating {
             Err(moli_i18n::tr!("pilotes.chauffage.point_inconnu"))
         };
         command.reply(result);
+    }
+
+    /// An order to the room's boost or setpoint held; `None` for another point.
+    fn temporary_command(
+        &self,
+        room: &Room,
+        run: &mut RoomRun,
+        key: &str,
+        value: &Value,
+    ) -> Option<Result<(), String>> {
+        Some(match key {
+            "boost" => match value.as_f64() {
+                Some(by) if temporary::boost_ok(by, room.max_boost) => {
+                    if by > 0.0 && run.mode == Mode::Off {
+                        Err(moli_i18n::tr!("pilotes.chauffage.boost_coupe"))
+                    } else {
+                        self.set_boost(room, run, by);
+                        Ok(())
+                    }
+                }
+                _ => Err(moli_i18n::tr!(
+                    "pilotes.chauffage.boost_refuse",
+                    max = room.max_boost
+                )),
+            },
+            "boost_minutes" => match temporary::minutes(value) {
+                Some(0) => {
+                    self.end_boost(room, run, "asked");
+                    Ok(())
+                }
+                Some(minutes) => match &mut run.boost {
+                    Some(boost) => {
+                        boost.timed = Timed::start(minutes, now_ms(), self.minute);
+                        Ok(())
+                    }
+                    None => Err(moli_i18n::tr!("pilotes.chauffage.boost_absent")),
+                },
+                None => Err(moli_i18n::tr!("pilotes.chauffage.duree_refusee")),
+            },
+            "hold_minutes" => match temporary::minutes(value) {
+                Some(0) => {
+                    // The setpoint holds until the next step, as without a hold.
+                    run.setpoint_hold = None;
+                    Ok(())
+                }
+                Some(_) if run.mode != Mode::Auto => {
+                    Err(moli_i18n::tr!("pilotes.chauffage.maintien_auto"))
+                }
+                Some(minutes) => {
+                    run.setpoint_hold = Some(Timed::start(minutes, now_ms(), self.minute));
+                    Ok(())
+                }
+                None => Err(moli_i18n::tr!("pilotes.chauffage.duree_refusee")),
+            },
+            _ => return None,
+        })
     }
 }
 
@@ -1005,13 +1334,13 @@ impl Driver for Heating {
                         let (room, run) = (&self.rooms[index], &mut runs[index]);
                         self.command(ctx, room, run, command);
                         let settled = started.elapsed() >= self.settle;
-                        self.regulate(ctx, room, run, settled).await;
+                        self.look(ctx, room, run, settled).await;
                     }
                     _ = tick.tick() => {
                         let settled = started.elapsed() >= self.settle;
                         for (room, run) in self.rooms.iter().zip(&mut runs) {
                             self.follow(ctx, run);
-                            self.regulate(ctx, room, run, settled).await;
+                            self.look(ctx, room, run, settled).await;
                         }
                     }
                 }

@@ -408,6 +408,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/ambiances", get(rest::ambiances))
         .route("/api/ambiance", post(rest::ambiance))
         .route("/api/labels/{id}", put(rest::set_label))
+        .route("/api/labels/{id}/points/{key}", put(rest::set_point_label))
         .route("/api/journal", get(rest::journal))
         .route("/api/approvals", get(rest::approvals))
         .route("/api/approvals/{id}", post(rest::decide))
