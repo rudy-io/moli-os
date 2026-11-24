@@ -33,6 +33,7 @@ mod whereabouts;
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
 mod appli;
+pub mod device_setup;
 mod outside;
 mod phones;
 mod plan;
@@ -108,6 +109,8 @@ impl Household {
 pub struct Options {
     /// Bounded human-only Airzone onboarding, owned by the executable.
     pub airzone_setup: Option<Arc<dyn airzone_setup::AirzoneSetup>>,
+    /// A device added by its address from the dashboard, owned by the executable.
+    pub device_setup: Option<Arc<dyn device_setup::DeviceSetup>>,
     /// Host names (or IPs) this instance is reached by, besides localhost.
     pub allowed_hosts: Vec<String>,
     /// PIN that opens a human session in the dashboard. `None`: nobody is
@@ -377,7 +380,16 @@ fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Rou
             "/api/integrations/airzone/{instance}/mode",
             upload(post(airzone_setup::set_mode), 1024, humans),
         )
+        .route(
+            "/api/integrations/devices/probe",
+            upload(post(device_setup::probe), 1024, humans),
+        )
+        .route(
+            "/api/integrations/devices",
+            upload(post(device_setup::install), 2048, humans),
+        )
         .merge(overkiz::routes())
+        .layer(Extension(device_setup::Setup(options.device_setup.clone())))
         .layer(Extension(airzone_setup::Setup(
             options.airzone_setup.clone(),
         )))

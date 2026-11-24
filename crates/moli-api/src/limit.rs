@@ -40,6 +40,10 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     if path == "/api/integrations/airzone" || path.starts_with("/api/integrations/airzone/") {
         return Some(("airzone_setup", 6));
     }
+    // Each probe asks a device of the network; each addition starts a driver.
+    if path == "/api/integrations/devices" || path.starts_with("/api/integrations/devices/") {
+        return Some(("device_setup", 6));
+    }
     if path == "/api/command" || path.starts_with("/api/labels/") {
         return Some(if from_dashboard {
             ("dashboard", 100)

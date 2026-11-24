@@ -3367,3 +3367,82 @@ async fn mcp_tools_carry_their_annotations() {
     assert_eq!(of("save_automation_draft")["destructiveHint"], json!(false));
     assert_eq!(of("send_command")["openWorldHint"], json!(true));
 }
+
+/// Counts what reached the backend: a refused caller must reach nothing.
+#[derive(Debug, Default)]
+struct CountedDeviceSetup(std::sync::atomic::AtomicUsize);
+
+impl moli_api::device_setup::DeviceSetup for CountedDeviceSetup {
+    fn probe(
+        &self,
+        _request: moli_api::device_setup::DeviceProbe,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::device_setup::DevicePreview, moli_api::device_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async {
+            Ok(moli_api::device_setup::DevicePreview {
+                status: "silent",
+                ..Default::default()
+            })
+        })
+    }
+    fn install(
+        &self,
+        _request: moli_api::device_setup::DeviceInstall,
+        _actor: String,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::device_setup::DeviceInstalled, moli_api::device_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async { Err(moli_api::device_setup::SetupError::new("silent")) })
+    }
+}
+
+#[tokio::test]
+async fn only_a_person_adds_a_device_never_an_agent_nor_the_tablet_without_its_code() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedDeviceSetup::default());
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        device_setup: Some(setup.clone()),
+        ..moli_api::Options::default()
+    };
+    let probe = json!({"host":"192.168.1.40"});
+    let install = json!({"host":"192.168.1.40","identity":"abc","name":"Lampe"});
+    let routes = [
+        ("/api/integrations/devices/probe", &probe),
+        ("/api/integrations/devices", &install),
+    ];
+    let addr = serve(&hub, &options).await;
+    for (who, headers) in [
+        // An agent through the API (`Api`), and one that says it is MCP.
+        ("agent", ""),
+        ("mcp", "x-moli-origin: mcp\r\n"),
+        // The household's dashboard without the code (`Household`).
+        ("tablet", "x-moli-origin: ui\r\n"),
+    ] {
+        for (route, body) in routes {
+            let (status, body) = request_with(&addr, "POST", route, Some(body), headers).await;
+            assert_eq!(status, 403, "{who} reached {route}: {body}");
+        }
+    }
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+    // A person with the house's code reaches the backend. Another server:
+    // the refusals above spent these routes' budget (six per 10 s).
+    let addr = serve(&hub, &options).await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    // The fake backend: nobody answers the probe (200, `silent`), nor the addition (502).
+    for ((route, body), expected) in routes.into_iter().zip([200, 502]) {
+        let (status, body) = request_with(&addr, "POST", route, Some(body), &human).await;
+        assert_eq!(status, expected, "{route}: {body}");
+        assert!(body.contains("silent"), "{route}: {body}");
+    }
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+}

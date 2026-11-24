@@ -16,6 +16,8 @@ secret = "key"
 identity = "all.payload.all.system.hardware.uuid"
 mac = "all.payload.all.system.hardware.macAddress"
 name_from = "all.payload.all.system.hardware.type"
+# The models it is the profile for: added from the dashboard by its address.
+recognize = ["mss110", "mss210"]
 
 # Identity and the relay state (digest), in one message.
 [[request]]

@@ -177,6 +177,8 @@
   <!-- In the Moli app on an Android tablet only. -->
   <WallCard />
 
+  <a class="somfy-entry" href="#/ajouter"><Icon name="plus" size={24} /><span><strong>{t('ajout.titre')}</strong><br />{t('ajout.entree')}</span><Icon name="chevron-right" size={20} /></a>
+
   <section class="gateway-entry" aria-label={t('systeme.airzone.title')}>
     <div><h2>{t('systeme.airzone.title')}</h2><p>{t('systeme.airzone.help')}</p></div>
     <div class="gateway-links"><a href="#/airzone/installation">{t('airzone_gateways.manage')}<Icon name="chevron-right" size={18} /></a><a href="#/airzone/add">{t('systeme.airzone.add')}<Icon name="chevron-right" size={18} /></a></div>
