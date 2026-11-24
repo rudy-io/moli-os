@@ -42,6 +42,7 @@ mod session;
 pub mod settings;
 mod sse;
 mod system;
+mod vehicles;
 mod visibility;
 mod weather;
 
@@ -140,6 +141,9 @@ pub struct Options {
     pub household: Option<Household>,
     /// The household's phones (the Moli app), when a `phones` driver runs.
     pub phones: Option<moli_phones::Gateway>,
+    /// The household's vehicles (Torque uploads, garage book), when a
+    /// `vehicles` driver runs.
+    pub vehicles: Option<moli_vehicles::Gateway>,
     /// The house's computers' Moli agents, when a host driver runs.
     pub machines: Option<moli_host::agents::Agents>,
     /// The sky over the house (forecast, satellite), when its position is
@@ -222,6 +226,13 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         // Under /api/mobile: behind Cloudflare Access like the dashboard
         // (/api/phones is the phones' own way in, Access lets it through).
         .route("/api/mobile/phones", get(phones::list))
+        // Torque's uploads carry the vehicle's token (Access lets
+        // /api/torque through, like /api/phones).
+        .route(
+            "/api/torque/{token}",
+            get(vehicles::torque).post(vehicles::torque),
+        )
+        .route("/api/vehicles", get(vehicles::list))
         .route("/api/mobile/phones/{id}", put(phones::assign))
         .route("/api/phones/{id}", axum::routing::delete(phones::remove))
         .route(
@@ -468,6 +479,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
+        .layer(Extension(vehicles::VehiclesGate(options.vehicles.clone())))
         .layer(Extension(appli::AppDir(data_dir)))
         .layer(Extension(Arc::new(appli::Handoffs::default())))
         .layer(Extension(humans))

@@ -40,6 +40,9 @@ pub(crate) enum Via {
     /// The Moli app on a phone, reporting with its own token: it reaches
     /// one route only (its reports), where the token is checked.
     Phone,
+    /// A vehicle's Torque app, uploading with its own token: it reaches one
+    /// route only (its uploads), where the token is checked.
+    Vehicle,
     /// Someone trying a demo house: anyone, anywhere.
     Visitor,
     /// From the Internet, a person signed in with their password.
@@ -181,6 +184,7 @@ impl Caller {
             Via::Access { .. } => "access",
             Via::Outside => "outside",
             Via::Phone => "phone",
+            Via::Vehicle => "vehicle",
             Via::Visitor => "visitor",
             Via::Person => "person",
         }
@@ -299,6 +303,18 @@ fn phone_report(path: &str) -> Option<&str> {
         .then_some(id)
 }
 
+/// `/api/torque/<token>`: a vehicle's upload (the token is checked by the
+/// route).
+fn torque_upload(path: &str) -> bool {
+    path.strip_prefix("/api/torque/").is_some_and(|token| {
+        !token.is_empty()
+            && token.len() <= 128
+            && token
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
+}
+
 /// Middleware: identifies the caller and leaves it in the request.
 pub(crate) async fn identify(
     State(gate): State<Gate>,
@@ -332,6 +348,15 @@ pub(crate) async fn identify(
         caller = Caller {
             key: format!("phone:{id}"),
             via: Via::Phone,
+            person: None,
+        };
+    }
+    // A vehicle's upload carries its own token in its address (Torque
+    // cannot send a header): the one other way in from outside.
+    if caller.via == Via::Outside && torque_upload(request.uri().path()) {
+        caller = Caller {
+            key: "vehicle".to_owned(),
+            via: Via::Vehicle,
             person: None,
         };
     }
@@ -516,6 +541,11 @@ mod tests {
         );
         assert_eq!(phone_report("/api/phones/../devices/report"), None);
         assert_eq!(phone_report("/api/phones/p1/report/x"), None);
+        assert!(torque_upload("/api/torque/abc-DEF_123"));
+        assert!(!torque_upload("/api/torque/"));
+        assert!(!torque_upload("/api/torque/a/b"));
+        assert!(!torque_upload("/api/torque/../devices"));
+        assert!(!torque_upload("/api/torques/abc"));
         assert_eq!(phone_report("/api/devices"), None);
     }
 

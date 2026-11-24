@@ -71,6 +71,7 @@ moli-heating.workspace = true
 moli-presence.workspace = true
 moli-telegram.workspace = true
 moli-phones.workspace = true
+moli-vehicles.workspace = true
 moli-assistant.workspace = true
 moli-automation.workspace = true
 anyhow.workspace = true

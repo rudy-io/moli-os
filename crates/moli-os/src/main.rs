@@ -512,6 +512,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         mcp_disabled_tools: config.mcp.disabled_tools()?,
         household: Some(household),
         phones: gates.phones,
+        vehicles: gates.vehicles,
         machines: gates.machines,
         weather: weather(&config),
         timezone: Some(config.zone.name.clone()),
@@ -1452,6 +1453,7 @@ const KINDS: &[&str] = &[
     "presence",
     "telegram",
     "phones",
+    "vehicles",
     "moonraker",
     "ipp",
     "host",
@@ -1598,6 +1600,7 @@ fn spawn_household(
 #[derive(Default)]
 struct Gateways {
     phones: Option<moli_phones::Gateway>,
+    vehicles: Option<moli_vehicles::Gateway>,
     machines: Option<moli_host::agents::Agents>,
 }
 
@@ -1620,6 +1623,12 @@ fn spawn_drivers(
                 let (gateway, phones_driver) = moli_phones::open(options, &config.server.data_dir)?;
                 gates.phones = Some(gateway);
                 Arc::new(phones_driver)
+            }
+            "vehicles" => {
+                let options = driver.options.clone().try_into().with_context(context)?;
+                let (gateway, vehicles) = moli_vehicles::open(options, &config.server.data_dir)?;
+                gates.vehicles = Some(gateway);
+                Arc::new(vehicles)
             }
             "host" => {
                 let options = driver.options.clone().try_into().with_context(context)?;
@@ -1769,6 +1778,13 @@ fn build_driver(
         "presence" => configured_driver(config, moli_presence::Presence::new)?,
         "phones" => Arc::new(
             moli_phones::open(
+                config.options.clone().try_into().with_context(context)?,
+                data_dir,
+            )?
+            .1,
+        ),
+        "vehicles" => Arc::new(
+            moli_vehicles::open(
                 config.options.clone().try_into().with_context(context)?,
                 data_dir,
             )?
