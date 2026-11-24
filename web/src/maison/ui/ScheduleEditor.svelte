@@ -12,6 +12,8 @@
   const spec = $derived(scheduleSpec(d));
   let edited = $state(null);
   let applyTo = $state([]);
+  // Copying the day as the valve holds it, unchanged, to other days.
+  let copying = $state(false);
   let saving = $state(false);
 
   const current = $derived(day && spec?.days.includes(day) ? day : spec?.days[0]);
@@ -19,7 +21,9 @@
   const known = $derived(typeof stored === 'string' && stored.length > 0);
   const steps = $derived(spec ? (edited ?? parseDay(spec, stored)) : []);
   const dirty = $derived(!!spec && edited != null && (!known || !sameDay(spec, edited, parseDay(spec, stored))));
-  const targets = $derived(applyTo.length ? applyTo : current ? [current] : []);
+  // Editing writes the day shown and the days added; copying, only the days chosen.
+  const targets = $derived(copying ? applyTo.filter((k) => k !== current) : applyTo.length ? applyTo : current ? [current] : []);
+  const others = $derived(spec ? spec.days.filter((k) => k !== current) : []);
   const spot = $derived(spec ? suggestMinute(spec, steps) : null);
 
   // Which of a TRV-ZBT's groups the texts belong to.
@@ -38,24 +42,37 @@
     void day;
     edited = null;
     applyTo = [];
+    copying = false;
   });
 
-  const edit = (next) => (edited = next);
+  const edit = (next) => {
+    edited = next;
+    copying = false;
+    applyTo = [];
+  };
+  const cancel = () => {
+    edited = null;
+    copying = false;
+    applyTo = [];
+  };
+  // Every other day, or back to none.
+  function all() {
+    const full = others.every((k) => targets.includes(k));
+    applyTo = full ? [] : copying ? [...others] : [current, ...others];
+  }
   const toggle = (key) => (applyTo = targets.includes(key) ? targets.filter((k) => k !== key) : [...targets, key]);
 
   async function save() {
-    if (!spec || !dirty || saving || !reachable(id)) return;
-    const text = formatDay(spec, edited);
+    if (!spec || saving || !reachable(id)) return;
+    if (!dirty && !(copying && targets.length)) return;
+    const text = formatDay(spec, dirty ? edited : steps);
     saving = true;
     const { stopped } = await writeDays(
       targets.filter((key) => spec.days.includes(key)),
       (key) => act(`${id}/weekly_schedule_${key}`, text, t('commun.vanne.prog.label', { name })),
     );
     saving = false;
-    if (!stopped) {
-      edited = null;
-      applyTo = [];
-    }
+    if (!stopped) cancel();
   }
 
   // A field the table did not take back shows what the table holds again.
@@ -117,17 +134,25 @@
     <button class="add" disabled={spot == null} onclick={() => edit(addStep(spec, steps, spot))}>
       {steps.length >= spec.maxSteps ? t('commun.vanne.prog.plein', { max: spec.maxSteps }) : t('commun.vanne.prog.ajouter')}
     </button>
-    {#if dirty}
-      <div class="days" role="group" aria-label={t('commun.vanne.prog.appliquer')}>
-        <span class="muted">{t('commun.vanne.prog.appliquer')}</span>
+    {#if dirty || copying}
+      {@const what = copying ? t('commun.vanne.prog.copier_vers', { day: dayName(current) }) : t('commun.vanne.prog.appliquer')}
+      <div class="days" role="group" aria-label={what}>
+        <span class="muted">{what}</span>
         {#each spec.days as key (key)}
           <button class:active={targets.includes(key)} disabled={key === current} onclick={() => toggle(key)} aria-pressed={targets.includes(key)}>{dayName(key)}</button>
         {/each}
+        {#if others.length > 1}
+          <button class="all" onclick={all}>{t('commun.vanne.prog.tous')}</button>
+        {/if}
       </div>
       <div class="actions">
-        <button onclick={() => (edited = null)}>{t('commun.annuler')}</button>
-        <button class="primary" disabled={saving || !reachable(id)} onclick={save}>{t('commun.vanne.prog.enregistrer')}</button>
+        <button onclick={cancel}>{t('commun.annuler')}</button>
+        <button class="primary" disabled={saving || !reachable(id) || (copying && !targets.length)} onclick={save}>
+          {copying ? t('commun.vanne.prog.copier_action') : t('commun.vanne.prog.enregistrer')}
+        </button>
       </div>
+    {:else if known && others.length}
+      <button class="add" disabled={!reachable(id)} onclick={() => (copying = true)}>{t('commun.vanne.prog.copier')}</button>
     {/if}
   </div>
 {/if}
@@ -214,6 +239,11 @@
 
   .add {
     justify-self: start;
+  }
+
+  .all {
+    background: none;
+    text-decoration: underline;
   }
 
   .actions {

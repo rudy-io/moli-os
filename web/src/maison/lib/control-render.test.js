@@ -881,6 +881,11 @@ test('the editor shows the day the valve states: seven days, a time and a setpoi
   assert.doesNotMatch(html, /Enregistrer/);
 });
 
+test('a day the valve holds can be copied to other days, one it does not hold cannot', () => {
+  assert.match(show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_monday: '00:00/17 06:00/20' }), /Copier vers d’autres jours/);
+  assert.doesNotMatch(show('ScheduleEditor', schedulePoints(), valveValues), /Copier vers/);
+});
+
 test('a valve that never reports its schedule says saving replaces it', () => {
   assert.match(show('ScheduleEditor', schedulePoints(), valveValues), /remplace celle de la vanne/);
 });
