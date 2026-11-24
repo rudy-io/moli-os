@@ -192,7 +192,8 @@ timezone = "Europe/Paris"
 # azimuth = 180                 # where the façade looks, clockwise from north
 
 # Heating: a room's own thermostat on the room's sensor (docs/components/pilotes.md,
-# « Chauffage »), as instance chauffage, one device per room.
+# « Chauffage »), as instance chauffage, one device per room, and the heat source
+# its demand starts.
 # [[heating]]
 # id = "bureau"                         # stable: chauffage:bureau
 # name = "Bureau"
@@ -206,6 +207,18 @@ timezone = "Europe/Paris"
 # away = "personnes:maison/everyone_away"              # optional: true when nobody is home
 # away_delay = 30                                      # minutes of absence before acting
 # away_mode = "off"                                    # "off" (frost guard) or a programme's name
+#
+# The heat source the rooms' demand starts (chauffage:<id>, read-only).
+# [[heating_source]]
+# id = "chaudiere"              # device chauffage:chaudiere, never rename
+# name = "Chaudière"
+# switch = "zwave:…/on"         # the relay: a writable on/off point
+# rooms = []                    # empty: every [[heating]] room
+# min_rooms = 1                 # rooms asking before it starts
+# delay = 0                     # seconds of demand before starting (0 to 3600)
+# min_on = 5                    # minutes, against short cycling (0 to 120)
+# min_off = 5
+# keepalive = 15                # minutes: the state sent again, even unchanged (0: never; up to 240)
 
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]

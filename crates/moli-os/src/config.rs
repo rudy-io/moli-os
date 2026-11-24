@@ -80,6 +80,10 @@ pub struct Config {
     /// per room, no house device).
     #[serde(default)]
     pub heating_house: Option<moli_heating::House>,
+    /// The heat sources (a boiler's relay…) the rooms start, each its
+    /// device `chauffage:<id>`.
+    #[serde(default, rename = "heating_source")]
+    pub heating_sources: Vec<moli_heating::Source>,
     /// The home's own assistant (absent: no conversation in the dashboard).
     /// Its API key: `moli-os secrets set assistant api_key`.
     #[serde(default)]
@@ -541,6 +545,22 @@ impl Config {
                 );
             }
         }
+        moli_heating::source::check(
+            &self.heating_sources,
+            &self.heating,
+            self.heating_house.as_ref(),
+        )
+        .map_err(|e| anyhow::anyhow!("[[heating_source]] {e}"))?;
+        for source in &self.heating_sources {
+            if guard.code_each_time_on(&source.switch) {
+                bail!(
+                    "[[heating_source]] {:?}: {} wants the code each time \
+                     ([[guard.code_each_time]]); the heating cannot switch it",
+                    source.id,
+                    source.switch
+                );
+            }
+        }
         // The heating writes its valves by itself, with no code typed.
         for room in &self.heating {
             for valve in &room.valves {
@@ -625,6 +645,58 @@ mod tests {
         assert!(
             toml::from_str::<Config>("[heating_house]\nprogrammes = []\nmode = \"off\"\n").is_err()
         );
+    }
+
+    #[test]
+    fn heating_sources_are_checked_with_the_rooms() {
+        let room = |id: &str| {
+            format!(
+                "[[heating]]\nid = \"{id}\"\nname = \"{id}\"\n\
+                 sensor = \"z2m:0x0{}/temperature\"\nvalves = [\"z2m:0x1{}/sp\"]\n",
+                id.len(),
+                id.len()
+            )
+        };
+        let rooms = format!("{}{}", room("bureau"), room("salon"));
+        let source = |extra: &str| {
+            format!(
+                "{rooms}[[heating_source]]\nid = \"chaudiere\"\nname = \"Chaudière\"\n\
+                 switch = \"zwave:7/on\"\n{extra}"
+            )
+        };
+        let accepted = |text: &str| toml::from_str::<Config>(text).is_ok_and(|c| c.check().is_ok());
+        assert!(accepted(&source("")));
+        assert!(accepted(&source("rooms = [\"bureau\"]\nkeepalive = 0\n")));
+        let second = "[[heating_source]]\nid = \"pac\"\nname = \"PAC\"\nswitch = \"zwave:8/on\"\n";
+        for refused in [
+            source(&format!("rooms = [\"bureau\"]\n{second}rooms = [\"bureau\"]\n")),
+            source(&format!("{second}rooms = [\"salon\"]\n")),
+            source("rooms = [\"grenier\"]\n"),
+            source("min_rooms = 3\n"),
+            source("min_on = -1\n"),
+            source("delay = 7200\n"),
+            source("keepalive = 600\n"),
+            source("switch = \"chauffage:bureau/heat_demand\"\n").replace("switch = \"zwave:7/on\"\n", ""),
+            source("").replace("id = \"chaudiere\"", "id = \"salon\""),
+            format!(
+                "[[guard.code_each_time]]\npoint = \"zwave:7/on\"\nvalues = [\"true\"]\n{}",
+                source("")
+            ),
+            "[[heating_source]]\nid = \"chaudiere\"\nname = \"Chaudière\"\nswitch = \"zwave:7/on\"\n"
+                .to_owned(),
+        ] {
+            assert!(!accepted(&refused), "{refused}");
+        }
+        assert!(accepted(&format!(
+            "{}rooms = [\"bureau\"]\n{second}rooms = [\"salon\"]\n",
+            source("")
+        )));
+        // `maison` is the house's device once there is a [heating_house].
+        let maison = source("").replace("id = \"chaudiere\"", "id = \"maison\"");
+        assert!(accepted(&maison));
+        assert!(!accepted(&format!(
+            "{maison}[heating_house]\nprogrammes = [\"Normal\"]\n"
+        )));
     }
 
     #[test]

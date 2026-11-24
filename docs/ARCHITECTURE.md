@@ -78,7 +78,7 @@ La carte vivante de ce schéma est dans le dashboard : `#/systeme` (« Comment �
 | `moli-energy` | kWh et € par heure, Linky + circuits, import HA | [historique & énergie](components/historique-energie.md) |
 | `moli-automation` | automatismes en graphe, moteur déterministe, validation humaine | [automatismes](components/automatismes.md) |
 | `moli-helpers` | aides de la maison (mode, alarme, budget), comme les `input_*` de HA | [pilotes](components/pilotes.md) |
-| `moli-heating` | thermostat de pièce : sonde de la pièce, programme, consigne corrigée des vannes | [pilotes](components/pilotes.md) |
+| `moli-heating` | thermostat de pièce : sonde de la pièce, programme, consigne corrigée des vannes ; la source de chaleur (relais de chaudière) | [pilotes](components/pilotes.md) |
 | `moli-assistant` | Moli : conversation, création d'automatismes, import HA, textes | [moli](components/moli.md) |
 | `moli-api` | REST, SSE, MCP, sessions humaines, garde Host, bornes, dashboard embarqué | [api](components/api.md) |
 | `moli-os` | binaire : CLI, config TOML, démarrage, sauvegarde, santé | [exploitation](components/exploitation.md) |

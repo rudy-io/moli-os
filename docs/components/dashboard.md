@@ -398,7 +398,16 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   (au quart d'heure, entre ses voisines) ou se déplace aux flèches ; le jour part en lâchant (aux
   flèches : quand elles se reposent), par `act`. « Copier la semaine vers » écrit les sept jours dans
   une autre pièce, aux bornes de celle-ci, jour après jour, et s'arrête au premier ordre retenu
-  (pièce protégée : le code). L'onglet apparaît dès qu'un tel thermostat ou une pompe à chaleur existe.
+  (pièce protégée : le code). L'onglet apparaît dès qu'un tel thermostat, une pompe à chaleur ou une
+  source de chaleur existe.
+  **La source de chaleur** (`[[heating_source]]`, `chauffage:<id>`) : reconnue à ses points
+  (`demand`, `demanding`, `runtime_today`, `starts_today` : `isHeatSource` dans
+  `lib/capabilities.js`, jamais à son modèle, qui est traduit), elle a son propre type (`source`)
+  au lieu d'une prise. Elle n'est sur aucune carte de pièce, mais en tête de la page Chauffage, une
+  carte **en lecture seule** par source : en marche ou à l'arrêt, les pièces qui demandent, les
+  minutes de marche et les démarrages du jour, et si son relais est joignable. Aucun interrupteur :
+  un ordre à la main se battrait avec la régulation. Son relais (le membre de `chauffage:<id>`)
+  disparaît des pièces, comme les membres d'un luminaire.
   La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub

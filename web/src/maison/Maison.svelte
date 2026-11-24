@@ -72,7 +72,7 @@
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'pac', label: 'commun.nav.pac', icon: 'fire', shown: () => !!home.config?.heatpump?.device },
-    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating' || (isValve(d) && scheduleSpec(d))) },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => ['heating', 'source'].includes(deviceKind(d)) || (isValve(d) && scheduleSpec(d))) },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => printersPresent(hub.devices) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },

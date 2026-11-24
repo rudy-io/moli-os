@@ -301,8 +301,8 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 - **La demande de chaleur** (`heat_demand`, quel que soit le mode de régulation) : la sonde sous
   la consigne de plus de `hysteresis`, la pièce demande ; au-dessus de plus de `hysteresis`, elle
   ne demande plus ; entre les deux, elle garde son état (le bruit de la sonde ne la fait pas
-  osciller). Jamais en `off` ni la sonde muette. De quoi piloter une chaudière ou un circulateur
-  depuis un automatisme, et la voir dans l'historique.
+  osciller). Jamais en `off` ni la sonde muette. C'est elle qui démarre la chaudière ou le
+  circulateur (la source de chaleur, plus bas), et on la voit dans l'historique.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
   plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
   toutes les 30 s, et le changement attend la vanne qui n'est pas encore là), jamais dans les 3 min
@@ -342,6 +342,72 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   `hysteresis` hors de 0 à 2), une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
   dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
   ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
+- **Temps de chauffe** : chaque pièce a aussi `heating_minutes_today`, les minutes de
+  `heat_demand` depuis minuit (heure de la maison).
+
+### La source de chaleur (`[[heating_source]]`, `crates/moli-heating/src/source.rs`)
+
+Avec des radiateurs à eau, les vannes ne font que laisser passer l'eau : il faut aussi que la
+chaudière (ou la pompe à chaleur, le circulateur) tourne. Une source de chaleur est le **relais**
+qui la commande (récepteur de thermostat, contact sec, prise) : Moli l'allume quand ses pièces
+demandent de la chaleur et l'éteint sinon. Chaque source publie `chauffage:<id>`.
+
+```toml
+[[heating_source]]
+id = "chaudiere"                # stable : chauffage:chaudiere
+name = "Chaudière"
+switch = "zwave:…/on"           # le relais : un point marche/arrêt inscriptible
+rooms = []                      # vide : toutes les pièces [[heating]]
+min_rooms = 1                   # pièces qui doivent demander pour démarrer
+delay = 0                       # secondes de demande avant de démarrer (0 à 3600)
+min_on = 5                      # minutes : anti court-cycle (0 à 120)
+min_off = 5                     # (0 à 120)
+keepalive = 15                  # minutes : l'état est renvoyé à ce rythme, même inchangé (0 : jamais ; 240 au plus)
+```
+
+- **La demande** vient du `heat_demand` des pièces, calculé sur leur sonde avec son hystérésis,
+  jamais de ce que disent les vannes (une vanne injoignable garde « ouverte », une vanne grippée
+  annonce « chauffe » sans rien ouvrir). Une pièce en `off` ou à la sonde muette ne demande rien.
+  La demande suit ce que la pièce **joue** : sa cible boost compris (un boost qui la met sous sa
+  cible la fait demander), et le mode de la maison (une pièce mise hors-gel par l'absence ne
+  demande rien, une pièce qu'une personne a sortie de l'absence, si). Le thermostat lit son
+  propre état des pièces, sans repasser par le hub.
+- **Démarrer, arrêter** : au moins `min_rooms` pièces demandent depuis `delay` secondes, la source
+  démarre ; aucune (ou moins de `min_rooms`), elle s'arrête. Jamais moins de `min_on` minutes en
+  marche ni `min_off` minutes à l'arrêt : une demande qui revient trop tôt attend.
+- **Points** (en lecture) : `on` (l'état donné au relais), `demand` (assez de pièces demandent),
+  `demanding` (les noms des pièces qui demandent, séparés par des virgules), `runtime_today`
+  (minutes de marche depuis minuit, l'état voulu faisant foi), `starts_today` (démarrages depuis
+  minuit). L'historique garde `on` et `demand` : combien de temps la chaudière a tourné, et pour qui.
+  Le relais est le **membre** de l'appareil de la source. Le tableau de bord la montre en lecture
+  seule sur la page Chauffage, et son relais n'y paraît plus comme une prise dans sa pièce.
+- **Les compteurs du jour** (`runtime_today`, `starts_today`, `heating_minutes_today`) repartent
+  de zéro à minuit, heure de la maison. Un redémarrage de Moli le même jour les reprend là où ils
+  étaient (la valeur gardée dans le cache d'état, si elle a été écrite aujourd'hui), à la minute
+  près. L'état voulu (`on`) est repris aussi : une chaudière en marche avant le redémarrage ne
+  compte pas un démarrage de plus.
+- **Les ordres** passent par le hub au nom de la maison (`system`), acteur « Chauffage · <nom> »
+  au journal, sous la garde comme ceux des vannes. En **mode miroir**, ils sont refusés et
+  journalisés comme tout ordre. Rien n'est décidé ni envoyé dans les 3 min qui suivent un
+  démarrage (comme pour les vannes) ; ensuite, l'état voulu est envoyé une fois, puis à chaque
+  changement.
+- **Le maintien** (`keepalive`) : beaucoup de récepteurs de chaudière (un Secure SRT322 en
+  Z-Wave, de nombreux contacts secs sans fil) se mettent en sécurité s'ils n'ont reçu aucun ordre
+  depuis un moment (une vingtaine de minutes pour le SRT322) : l'état est renvoyé toutes les
+  `keepalive` minutes, même inchangé. 15 par défaut ; 0 pour un relais qui n'en a pas besoin.
+- **Un relais refusé ou injoignable** est réessayé au rythme de `keepalive` (15 min avec
+  `keepalive = 0`) ; le journal le dit une fois, puis une fois encore quand le relais répond de
+  nouveau.
+- **Plusieurs sources** (deux circuits, une chaudière et une pompe à chaleur) : chacune ses
+  pièces. `moli-os check-config` refuse une pièce dans deux sources (une source sans `rooms` les
+  prend toutes), une pièce inconnue dans `rooms` ou nommée deux fois, un `id` déjà pris par une
+  pièce ou par une autre source (et `maison` avec `[heating_house]`, l'appareil de la maison), un
+  relais piloté par deux sources, un `switch` qui n'est pas un
+  point d'un autre appareil (pas un `chauffage:…`) ou qui demande le code à chaque fois,
+  `min_rooms` hors de 1 au nombre de pièces de la source, des durées négatives ou au-delà des
+  bornes ci-dessus, et une source sans aucune pièce `[[heating]]`. Que le relais soit bien
+  inscriptible ne se voit qu'une fois son pilote lancé : sinon, ses ordres sont refusés et le
+  journal le dit.
 
 ### Les programmes de la maison (`[heating_house]`, `crates/moli-heating/src/house.rs`)
 

@@ -4,7 +4,7 @@
 import { orderError } from './errors.js';
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, enumChoice, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints, alarmPoint } from './capabilities.js';
+import { canWrite, enumChoice, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints, alarmPoint, isHeatSource } from './capabilities.js';
 import { coverPositionTarget } from './cover-controls.js';
 
 export { hub };
@@ -337,6 +337,7 @@ export function deviceKind(d) {
   if (known) return known;
   if (alarmPoint(d)) return 'alarm';
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
+  if (isHeatSource(d)) return 'source';
   // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
   if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
   if (has(d, 'target_temperature') || (has(d, 'heat_setpoint') && has(d, 'cool_setpoint')) || isValve(d)) return 'climate';
@@ -366,10 +367,12 @@ export function roomList() {
   const map = new Map(defs.filter((r) => !r.added).map((r) => [r.name, []]));
   // A fixture's bulbs and relay show inside it, not beside it.
   const inFixture = new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? []));
+  // A heat source's relay is driven by Moli alone: no plug to press in its room.
+  const inSource = new Set(Object.values(hub.devices).filter(isHeatSource).flatMap((d) => d.members ?? []));
   for (const d of Object.values(hub.devices)) {
-    if (hidden(d.id) || inFixture.has(d.id)) continue;
-    // A heat pump and its circuits live on the Chauffage page, not on a room's card.
-    if (deviceKind(d) === 'heating') continue;
+    if (hidden(d.id) || inFixture.has(d.id) || inSource.has(d.id)) continue;
+    // A heat pump, its circuits and a heat source live on the Chauffage page, not on a room's card.
+    if (['heating', 'source'].includes(deviceKind(d))) continue;
     const room = roomOf(d);
     if (!room) continue;
     if (!map.has(room)) map.set(room, []);

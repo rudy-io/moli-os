@@ -32,6 +32,7 @@ before(async () => {
   components.Salon = (await vite.ssrLoadModule('/src/maison/pages/Salon.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
   components.Dehors = (await vite.ssrLoadModule('/src/maison/pages/Dehors.svelte')).default;
+  components.Chauffage = (await vite.ssrLoadModule('/src/maison/pages/Chauffage.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -1533,4 +1534,47 @@ test('a helper is no plug: a switch is a pad saying Oui / Non, a value a chip wi
   assert.match(text, /class="pad[^"]*helper[^"]*"[^>]*title="Lave-linge en cours · Aide"/);
   assert.match(text, /class="chip[^"]*helper[^"]*"/);
   assert.doesNotMatch(text.split('Lave-linge en cours')[0].split('<button').pop(), new RegExp(icons.socket.slice(0, 20)));
+});
+
+function boilerHouse(relayOnline = true) {
+  const binary = { type: 'binary' };
+  const read = (key, kind) => point(key, kind, false);
+  const state = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }]));
+  hub.devices = {
+    'chauffage:chaudiere': {
+      id: 'chauffage:chaudiere', native_name: 'Chaudière', model: 'Source de chaleur', manufacturer: 'Moli', label: {}, online: true,
+      members: ['zwave:7'],
+      points: [read('on', binary), read('demand', binary), read('demanding', { type: 'text' }), read('runtime_today', number(0, null, 1)), read('starts_today', number(0, null, 1))],
+      state: state({ on: true, demand: true, demanding: 'Bureau, Salon', runtime_today: 42, starts_today: 3 }),
+    },
+    'zwave:7': {
+      id: 'zwave:7', native_name: 'Récepteur', model: null, label: { room: 'Workshop' }, online: relayOnline,
+      members: [], points: [point('on', binary, true, 'on_off')], state: state({ on: true }),
+    },
+    'tuya:prise': {
+      id: 'tuya:prise', native_name: 'Prise bureau', model: null, label: { room: 'Workshop' }, online: true,
+      members: [], points: [point('on', binary, true, 'on_off')], state: state({ on: false }),
+    },
+  };
+}
+
+test('a heat source is no plug, and its relay leaves the rooms', () => {
+  boilerHouse();
+  assert.equal(home.deviceKind(hub.devices['chauffage:chaudiere']), 'source');
+  assert.equal(home.deviceKind(hub.devices['zwave:7']), 'plug');
+  const rooms = home.roomList();
+  const ids = rooms.flatMap((r) => [...r.plugs, ...r.sensors, ...r.lights].map((d) => d.id));
+  assert.deepEqual(ids, ['tuya:prise'], 'only the plain plug stays');
+});
+
+test('the Chauffage page shows each heat source read-only', () => {
+  boilerHouse();
+  const html = render(components.Chauffage, { props: {} }).body;
+  assert.match(html, /Chaudière/);
+  assert.match(html, /Bureau, Salon/);
+  assert.match(html, />42/);
+  assert.equal(buttons(html).length, 0, 'no switch');
+  assert.ok(!/Injoignable|Unreachable/.test(html));
+  boilerHouse(false);
+  assert.match(render(components.Chauffage, { props: {} }).body, /Injoignable|Unreachable/);
 });
