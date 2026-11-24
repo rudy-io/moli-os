@@ -1538,6 +1538,47 @@ async fn a_person_s_boost_or_hold_takes_the_room_out_of_the_absence_once_taken()
 }
 
 #[tokio::test]
+async fn a_person_s_hold_outlives_the_return_and_ending_one_never_lifts_the_absence() {
+    let (hub, cancel) = stand_ins_running().await;
+    start_away(&hub, rooms(), "off", &cancel);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 20.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // Ending a boost or a hold, or none: the room stays away.
+    for (key, value) in [
+        ("boost", Value::Float(0.0)),
+        ("boost_minutes", Value::Int(0)),
+        ("hold_minutes", Value::Int(0)),
+    ] {
+        assert!(try_as(&hub, &room(key), value, Origin::Ui).await, "{key}");
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+
+    // Held at 22 for 2 h by a person: out of the absence, and still held
+    // once someone is back.
+    order(&hub, &room("occupied_heating_setpoint"), Value::Float(22.0))
+        .await
+        .unwrap();
+    order(&hub, &room("hold_minutes"), Value::Int(120))
+        .await
+        .unwrap();
+    until_bool(&hub, &room("away_lifted"), true).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    away(&hub, false).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
+    until_bool(&hub, &room("away_lifted"), false).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    until(&hub, &room("occupied_heating_setpoint"), 22.0).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    assert!(left(&hub, "hold_until").is_some());
+    cancel.cancel();
+}
+
+#[tokio::test]
 async fn a_hold_over_during_the_absence_gives_the_played_programme_s_step() {
     let (hub, cancel) = stand_ins_running().await;
     let mut held = rooms();

@@ -418,8 +418,11 @@ programmes = ["Normal", "Télétravail", "Vacances"]   # le premier est celui pa
     **une fois l'ordre accepté** : un ordre refusé (un maintien hors `auto`, une durée sans boost
     en cours) ne la sort pas. Elle joue alors son mode et son programme comme si personne n'était
     parti : le créneau en vigueur du programme choisi, puis le boost ou le maintien demandé (une
-    consigne écrite reste celle écrite). Celui d'un automatisme ou d'un agent est seulement gardé
-    pour le retour.
+    consigne écrite reste celle écrite), et **les garde au retour** : le retour ne rejoue que les
+    pièces que l'absence atteignait encore. **Arrêter** un boost ou un maintien (`boost`,
+    `boost_minutes` ou `hold_minutes` à 0) ne sort pas la pièce de l'absence : un clic sur
+    « arrêter » dans une maison vide ne la remet pas à chauffer. Celui d'un automatisme ou d'un
+    agent est seulement gardé pour le retour.
   - **Au redémarrage**, l'absence en cours, sa levée et les pièces qui en sont sorties sont
     gardées (ce sont des points, relus du cache d'état) : un redémarrage ne remet ni le chauffage
     au minimum sous le nez de quelqu'un qui l'avait levée, ni une maison vide à chauffer pendant

@@ -361,13 +361,15 @@ impl Heating {
 
     /// Every room plays the house's programme and day again: its step in
     /// force is applied anew, over a setpoint held too (`all`: in every
-    /// room; else in those the absence reaches).
+    /// room; else in those the absence reaches, a room a person took out of
+    /// it keeping what it was given).
     fn replay(&self, ctx: &DriverCtx, play: Play, runs: &mut [RoomRun], all: bool) {
         for (room, run) in self.rooms.iter().zip(runs.iter_mut()) {
             show_weeks(ctx, run, self.house.as_ref(), play.programme);
-            if all || !run.outside {
-                self.drop_setpoint_hold(room, run, "house");
+            if !all && run.outside {
+                continue;
             }
+            self.drop_setpoint_hold(room, run, "house");
             run.step = None;
             self.follow(ctx, run, play);
         }
@@ -378,7 +380,10 @@ impl Heating {
     /// turned on them by hand or held; its start ends the boosts too.
     fn turn(&self, ctx: &DriverCtx, hrun: &HouseRun, runs: &mut [RoomRun], starting: bool) {
         for (room, run) in self.rooms.iter().zip(runs.iter_mut()) {
-            if starting && !run.outside {
+            if run.outside {
+                continue;
+            }
+            if starting {
                 self.end_boost(room, run, "away");
             }
             run.changed();
@@ -518,18 +523,19 @@ impl Heating {
             }
             Some(false) => {
                 let away = std::mem::take(&mut hrun.away);
+                if away.applied {
+                    ctx.set_state(&hrun.id, "away", Value::Bool(false));
+                    ctx.set_state(&hrun.id, "away_lifted", Value::Bool(false));
+                    tracing::info!("heating: someone home, the house plays its own choice again");
+                    // Before the rooms taken out are like the others again:
+                    // they keep what a person gave them (a hold, a boost).
+                    if !away.lifted {
+                        self.turn(ctx, hrun, runs, false);
+                    }
+                }
                 for run in runs.iter_mut().filter(|r| r.outside) {
                     run.outside = false;
                     ctx.set_state(&run.id, "away_lifted", Value::Bool(false));
-                }
-                if !away.applied {
-                    return;
-                }
-                ctx.set_state(&hrun.id, "away", Value::Bool(false));
-                ctx.set_state(&hrun.id, "away_lifted", Value::Bool(false));
-                tracing::info!("heating: someone home, the house plays its own choice again");
-                if !away.lifted {
-                    self.turn(ctx, hrun, runs, false);
                 }
             }
             // Not known (its driver starts, or it went quiet): nothing changes.

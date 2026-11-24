@@ -1396,25 +1396,20 @@ impl Heating {
             return;
         }
         let key = command.key.as_ref();
-        // A person's order to what the room is at, during the absence: the
-        // room is out of it, once the order is taken.
-        let leaving = matches!(
-            key,
-            "occupied_heating_setpoint"
-                | "system_mode"
-                | "boost"
-                | "boost_minutes"
-                | "hold_minutes"
-        ) && by_person(command.origin)
-            && run.away(play).is_some();
-        run.outside |= leaving;
-        let result = self.room_order(ctx, room, run, play, &command);
-        if leaving {
-            if result.is_ok() {
-                self.leave_absence(ctx, room, run, play, key);
-            } else {
-                run.outside = false;
+        // A person asking the room for heat during the absence (a setpoint, a
+        // mode, a boost or a hold; not ending one): the room is out of it,
+        // once the order is taken.
+        let asks = match key {
+            "occupied_heating_setpoint" | "system_mode" => true,
+            "boost" | "boost_minutes" | "hold_minutes" => {
+                command.value.as_f64().is_some_and(|v| v > 0.0)
             }
+            _ => false,
+        };
+        let leaving = asks && by_person(command.origin) && run.away(play).is_some();
+        let result = self.room_order(ctx, room, run, play, &command);
+        if leaving && result.is_ok() {
+            self.leave_absence(ctx, room, run, play, key);
         }
         command.reply(result);
     }
@@ -1430,6 +1425,7 @@ impl Heating {
         play: Play,
         key: &str,
     ) {
+        run.outside = true;
         ctx.set_state(&run.id, "away_lifted", Value::Bool(true));
         tracing::info!(room = %room.id, "heating: room ordered by someone, out of the absence until it ends");
         run.changed();
