@@ -44,9 +44,11 @@ fn stand_ins() -> moli_helpers::Config {
 
 /// A radiator valve: its setpoint in °C (5 to 30), as it was written; in
 /// the « Bureau ». And a shutter whose position says it is in °C (a driver's
-/// mistake): never a valve.
-#[derive(Debug)]
-struct Valves;
+/// mistake): never a valve. `written`: the setpoints written to « v ».
+#[derive(Debug, Default)]
+struct Valves {
+    written: Arc<std::sync::Mutex<Vec<f64>>>,
+}
 
 fn setpoint_point(key: &str, unit: Unit, semantic: Semantic) -> PointSpec {
     PointSpec {
@@ -136,6 +138,9 @@ impl Driver for Valves {
                     Some(v) if &*command.device.native_name == "entiere" => Value::Float(v.floor()),
                     _ => command.value.clone(),
                 };
+                if &*command.device.native_name == "v" {
+                    self.written.lock().unwrap().extend(value.as_f64());
+                }
                 ctx.set_state(&command.device.id, &command.key, value);
                 command.reply(Ok(()));
             }
@@ -225,6 +230,10 @@ async fn stand_ins_running() -> (Hub, CancellationToken) {
 }
 
 async fn stand_ins_with(options: HubOptions) -> (Hub, CancellationToken) {
+    stand_ins_of(options, Valves::default()).await
+}
+
+async fn stand_ins_of(options: HubOptions, valves: Valves) -> (Hub, CancellationToken) {
     let hub = Hub::new(options).unwrap();
     let cancel = CancellationToken::new();
     spawn_driver(
@@ -236,7 +245,7 @@ async fn stand_ins_with(options: HubOptions) -> (Hub, CancellationToken) {
     spawn_driver(
         &hub,
         InstanceId::from("vannes"),
-        Arc::new(Valves),
+        Arc::new(valves),
         cancel.clone(),
     );
     until(&hub, "maison:volume/value", 16.0).await;
@@ -553,6 +562,67 @@ async fn a_forced_valve_opens_wide_or_shuts_on_the_room_sensor() {
 }
 
 #[tokio::test]
+async fn a_forced_valve_is_written_only_when_the_demand_changes() {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    let rooms = toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        regulation = "force"
+        "#,
+    )
+    .unwrap()
+    .heating;
+    let valves = Valves::default();
+    let written = valves.written.clone();
+    let (hub, cancel) = stand_ins_of(HubOptions::default(), valves).await;
+    start(
+        &hub,
+        rooms,
+        None,
+        |h| h.tick = Duration::from_millis(20),
+        &cancel,
+    );
+    let local = "chauffage:bureau/local_temperature";
+    let read = |values: &'static [f64]| {
+        let hub = hub.clone();
+        async move {
+            for &value in values {
+                hub.command(
+                    &point("maison:piece/value"),
+                    Value::Float(value),
+                    Origin::Ui,
+                    None,
+                )
+                .await
+                .unwrap();
+                until(&hub, local, value).await;
+                tokio::time::sleep(Duration::from_millis(60)).await;
+            }
+        }
+    };
+    // 20.9 for 22: opened wide (22 + 4), once.
+    until(&hub, "vannes:v/sp", 26.0).await;
+    // Noise around 22, inside the hysteresis: nothing written.
+    read(&[21.8, 22.2, 21.9, 22.1, 21.75, 22.25]).await;
+    // Over it once: shut (22 − 4), then noise again.
+    read(&[22.4, 21.8, 22.2, 21.9, 22.1]).await;
+    until(&hub, "vannes:v/sp", 18.0).await;
+    // Under it once: open again, then noise again.
+    read(&[21.6, 22.2, 21.8, 22.25, 21.75]).await;
+    until(&hub, "vannes:v/sp", 26.0).await;
+    assert_eq!(*written.lock().unwrap(), [26.0, 18.0, 26.0]);
+    cancel.cancel();
+}
+
+#[tokio::test]
 async fn a_boost_moves_a_forced_room_s_demand_and_valves() {
     #[derive(Deserialize)]
     struct File {
@@ -808,7 +878,7 @@ async fn a_boost_and_a_hold_outlive_a_restart() {
     spawn_driver(
         &hub,
         InstanceId::from("vannes"),
-        Arc::new(Valves),
+        Arc::new(Valves::default()),
         cancel.clone(),
     );
     until(&hub, "vannes:v/sp", 16.0).await;
@@ -860,7 +930,7 @@ async fn a_boost_and_a_hold_outlive_a_restart() {
 #[test]
 fn bad_rooms_are_refused() {
     assert!(check(&rooms()).is_ok());
-    let cases: [fn(&mut Room); 18] = [
+    let cases: [fn(&mut Room); 21] = [
         |r| r.id = "a:b".into(),
         |r| r.name = " ".into(),
         |r| r.sensor = "piece".into(),
@@ -877,6 +947,9 @@ fn bad_rooms_are_refused() {
         |r| r.force_offset = 0.0,
         |r| r.force_offset = 12.0,
         |r| r.hysteresis = -0.1,
+        |r| r.hysteresis = 0.0,
+        |r| r.hysteresis = 0.05,
+        |r| r.hysteresis = 2.1,
         |r| r.max_boost = 0.0,
         |r| r.max_boost = 1.2,
         |r| r.max_boost = 10.5,

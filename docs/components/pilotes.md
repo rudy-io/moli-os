@@ -230,7 +230,7 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 #   "force" : + force_offset tant que la pièce demande de la chaleur, − force_offset sinon
 # force_offset = 4.0 : l'écart du forçage (0,5 à 10 °C)
 # hysteresis = 0.3 : la pièce demande de la chaleur sous consigne − 0,3, plus au-dessus de
-#   consigne + 0,3 ; entre les deux, rien ne change (0 à 2 °C)
+#   consigne + 0,3 ; entre les deux, rien ne change (0,1 à 2 °C)
 # min = 5.0, max = 25.0 : les consignes que la pièce accepte
 # initial = 19.0 : la consigne et le programme avant qu'on les règle
 # max_boost = 3.0 : le boost le plus haut (°C, au demi-degré, de 0,5 à 10)
@@ -339,7 +339,7 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
   mal écrite (dont `correction = false` avec `regulation`, `force_offset` hors de 0,5 à 10 et
-  `hysteresis` hors de 0 à 2), une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
+  `hysteresis` hors de 0,1 à 2), une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
   dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
   ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
 

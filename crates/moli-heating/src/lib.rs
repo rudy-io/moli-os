@@ -270,8 +270,8 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
             "heating room {id}: 0.5 <= force_offset <= 10"
         );
         ensure!(
-            (0.0..=2.0).contains(&room.hysteresis),
-            "heating room {id}: 0 <= hysteresis <= 2"
+            (0.1..=2.0).contains(&room.hysteresis),
+            "heating room {id}: 0.1 <= hysteresis <= 2"
         );
         ensure!(
             room.max_boost >= 0.5 && temporary::boost_ok(room.max_boost, 10.0),
