@@ -609,7 +609,9 @@ async fn transport_failures_are_typed_without_disclosing_addresses_or_response_d
             0,
             Failure::Api,
         ),
-        (StatusCode::OK, "{}", 100, Failure::Timeout),
+        // Margins, not exact times: under a loaded `check.sh` a local answer took over 30 ms
+        // and was read as a timeout (2026-11-21, 1 run in 3).
+        (StatusCode::OK, "{}", 1500, Failure::Timeout),
     ] {
         let app = Router::new().fallback(any(move || async move {
             tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -634,7 +636,7 @@ async fn transport_failures_are_typed_without_disclosing_addresses_or_response_d
             &config,
             &ReadRequest::Version,
             ReadMethod::Post,
-            Duration::from_millis(30),
+            Duration::from_millis(400),
         )
         .await
         .unwrap_err();
