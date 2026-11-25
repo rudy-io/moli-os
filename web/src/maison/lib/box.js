@@ -42,10 +42,15 @@ export function unitReader(device) {
 /** Mbit/s in one unit of each rate. */
 const TO_MBITS = { 'bit/s': 1e-6, 'B/s': 8e-6, 'kbit/s': 0.001, 'kB/s': 0.008, 'Mbit/s': 1, 'MB/s': 8, 'Gbit/s': 1000 };
 
+/** Mbit/s in one `unit`, or null when it is not a rate's unit. */
+export function mbitsFactor(unit) {
+  return typeof unit === 'string' && Object.hasOwn(TO_MBITS, unit) ? TO_MBITS[unit] : null;
+}
+
 /** A rate → Mbit/s (one decimal); null when the unit is not one of a rate. */
 export function mbits(rate, unit) {
-  const factor = TO_MBITS[unit];
-  if (typeof rate !== 'number' || !Number.isFinite(rate) || factor === undefined) return null;
+  const factor = mbitsFactor(unit);
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || factor === null) return null;
   return Math.round(rate * factor * 10) / 10;
 }
 

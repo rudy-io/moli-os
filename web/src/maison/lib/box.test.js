@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reader, unitReader, mbits, boxIssues } from './box.js';
+import { reader, unitReader, mbits, mbitsFactor, boxIssues } from './box.js';
 
 const values = {
   'box:main/temp_hdd0': 56,
@@ -51,6 +51,11 @@ test('rates become Mbit/s from a known unit only', () => {
   assert.equal(mbits(1000, '%'), null, 'not a rate');
   assert.equal(mbits(null, 'kB/s'), null);
   assert.equal(mbits(Number.NaN, 'kB/s'), null);
+  // A word that is a property of every object is no unit.
+  assert.equal(mbits(1000, 'constructor'), null);
+  assert.equal(mbits(1000, 'toString'), null);
+  assert.equal(mbitsFactor('kB/s'), 0.008);
+  assert.equal(mbitsFactor('__proto__'), null);
 });
 
 test('a hot disk and a fast fan need a look; the rest is fine', () => {

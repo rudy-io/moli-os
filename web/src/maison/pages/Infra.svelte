@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { hub, home, value, relative, nameOf } from '../lib/home.svelte.js';
+  import { hub, home, value, relative, nameOf, device } from '../lib/home.svelte.js';
   import { nasGroups, parts } from '../lib/nas.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
@@ -12,7 +12,7 @@
   import ProxmoxCard from '../ui/infra/ProxmoxCard.svelte';
   import { proxmoxNodes, proxmoxIssues } from '../lib/proxmox.js';
   import BoxCard from '../ui/infra/BoxCard.svelte';
-  import { boxIssues, reader } from '../lib/box.js';
+  import { boxIssues, reader, unitReader, mbitsFactor } from '../lib/box.js';
 
   /** The house's machines, the digital side of « is everything fine at
    *  home? »: the server (live from Moli), its disks and containers (the host
@@ -41,6 +41,16 @@
   const box = $derived(devices.find((d) => d.points.some((p) => p.key === 'external_ip')));
   // The internet box, from the points home.json names (`infra.box`, lib/box.js).
   const boxCfg = $derived(home.config?.infra?.box ?? null);
+  // Its rates' curve in Mbit/s, like the card's header (a unit that is not a rate's: as it is).
+  const boxRates = $derived.by(() => {
+    const out = {};
+    const unitOf = unitReader(device);
+    for (const p of [boxCfg?.down, boxCfg?.up].filter(Boolean)) {
+      const factor = mbitsFactor(unitOf(p) ?? boxCfg.rate_unit ?? null);
+      if (factor !== null) out[p] = { unit: 'Mbit/s', factor };
+    }
+    return out;
+  });
   const nases = $derived(nasGroups(devices));
   const sv = (k) => (server ? value(server.id, k) : null);
   // Proxmox nodes (the `proxmox` driver): their parts and their problems.
@@ -121,7 +131,7 @@
 
   {#if issues.length}
     <ul class="issues">
-      {#each issues as issue (issue)}<li><Icon name="warning" size={15} />{issue}</li>{/each}
+      {#each issues as issue, i (i)}<li><Icon name="warning" size={15} />{issue}</li>{/each}
     </ul>
   {/if}
 
@@ -231,7 +241,8 @@
     {/each}
 
     {#if boxCfg}
-      <BoxCard box={boxCfg} />
+      <!-- The line's state (the device with a public address) inside it: one card per box. -->
+      <BoxCard box={boxCfg} link={box} {since} />
     {/if}
 
     {#each guestCharts as c (c.instance)}
@@ -243,10 +254,11 @@
         title={t('systeme.infra.historique.debit', { box: boxCfg.name ?? t('systeme.infra.box.titre') })}
         minutes={1440}
         points={[boxCfg.down, boxCfg.up].filter(Boolean)}
+        shown={boxRates}
       />
     {/if}
 
-    {#if box}
+    {#if box && !boxCfg}
       <section class="card">
         <div class="card-head">
           <h2><Icon name="lan" size={18} />{box.label?.name || box.native_name}</h2>
