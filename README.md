@@ -57,7 +57,8 @@ Guide (in French): [`docs/components/installation.md`](docs/components/installat
 **With an agent**: open this repository in Claude Code and ask it to install Moli: the
 `installer-moli` skill (`.claude/skills/`) walks you through it, your codes and secrets
 always typed by you. Other agents read [`AGENTS.md`](AGENTS.md). Once running, point an
-agent at `http://<host>:8790/mcp`.
+agent at `http://<host>:8790/mcp`, or at `…/mcp/readonly` if it only needs to look
+(recommended: the server refuses writes there).
 
 ## Develop
 
