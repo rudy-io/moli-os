@@ -1972,7 +1972,9 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Couvre** : le nœud (processeur, mémoire, disque système, durée d'allumage, mises à jour en attente, version), un
   appareil par conteneur et machine virtuelle (en marche, processeur, mémoire, disque des conteneurs), par stockage
   actif (occupation, libre), la dernière sauvegarde (`vzdump` : résultat, heure, durée, âge de la dernière réussie) et
-  un par disque (SMART, vie restante). Chaque partie qui peut aller mal porte `problem` (sens `alert`) et `detail`.
+  un par disque (SMART, vie restante). Chaque partie qui peut aller mal porte `problem` (sens `alert`) et `detail` :
+  ce qui ne va pas, sinon une courte phrase sur son état (« en marche depuis 3 j · mémoire 35 % · disque 41 % »,
+  « réussie il y a 3 h · 10 min »), pour la page « Parc ».
 - **Protocole** : l'API REST de Proxmox, HTTPS (8006), certificat **épinglé au premier contact** (`PinnedHttps`,
   empreinte sous `cert`) ; `GET` seulement, en-tête `PVEAPIToken` : ni session ni mot de passe, rien dans une adresse.
 - **Configuration** : `host`, `token_id` (`utilisateur@royaume!nom`), `port` (8006), `node` (défaut : le seul nœud),
