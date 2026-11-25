@@ -1,5 +1,6 @@
 //! Endpoint-local capabilities for standard Matter device families.
 pub(crate) mod covering;
+pub(crate) mod electrical;
 pub(crate) mod lighting;
 pub(crate) mod lock;
 pub(crate) mod thermostat;
@@ -85,6 +86,7 @@ pub(crate) struct Expanded {
     covering: Option<covering::Covering>,
     thermostat: Option<thermostat::Thermostat>,
     lock: Option<lock::Lock>,
+    electrical: Option<electrical::Electrical>,
 }
 
 impl Expanded {
@@ -94,6 +96,7 @@ impl Expanded {
             covering: covering::Covering::discover(endpoint, report),
             thermostat: thermostat::Thermostat::discover(endpoint, report),
             lock: lock::Lock::discover(endpoint, report),
+            electrical: electrical::Electrical::discover(endpoint, report),
         }
     }
     pub(crate) fn points(&self) -> Vec<moli_core::PointSpec> {
@@ -102,6 +105,7 @@ impl Expanded {
             self.covering.as_ref().map(covering::Covering::points),
             self.thermostat.as_ref().map(thermostat::Thermostat::points),
             self.lock.as_ref().map(lock::Lock::points),
+            self.electrical.as_ref().map(electrical::Electrical::points),
         ]
         .into_iter()
         .flatten()
@@ -114,6 +118,7 @@ impl Expanded {
             self.covering.as_ref().map(|f| f.paths(ep)),
             self.thermostat.as_ref().map(|f| f.paths(ep)),
             self.lock.as_ref().map(|f| f.paths(ep)),
+            self.electrical.as_ref().map(|f| f.paths(ep)),
         ]
         .into_iter()
         .flatten()
@@ -130,6 +135,7 @@ impl Expanded {
             self.covering.as_mut().map(|f| f.update(path, value)),
             self.thermostat.as_mut().map(|f| f.update(path, value)),
             self.lock.as_mut().map(|f| f.update(path, value)),
+            self.electrical.as_mut().map(|f| f.update(path, value)),
         ]
         .into_iter()
         .flatten()
@@ -157,6 +163,7 @@ pub(crate) fn supported_cluster(cluster: u32) -> bool {
             covering::CLUSTERS,
             thermostat::CLUSTERS,
             lock::CLUSTERS,
+            electrical::CLUSTERS,
         ]
         .iter()
         .any(|clusters| clusters.contains(&cluster))
@@ -169,6 +176,7 @@ pub(crate) fn metadata_attribute(path: AttributePath) -> bool {
             covering::METADATA,
             thermostat::METADATA,
             lock::METADATA,
+            electrical::METADATA,
         ]
         .iter()
         .any(|attrs| attrs.contains(&(path.cluster, path.attribute)))
@@ -180,6 +188,7 @@ pub(crate) fn policy_paths(endpoint: u16, report: &Report) -> Vec<matter_control
         covering::METADATA,
         thermostat::METADATA,
         lock::METADATA,
+        electrical::METADATA,
     ]
     .into_iter()
     .flatten()
@@ -275,6 +284,7 @@ pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::
                 covering::DISCOVERY,
                 thermostat::DISCOVERY,
                 lock::DISCOVERY,
+                electrical::DISCOVERY,
             ] {
                 for (c, a) in attrs {
                     if *c == cluster {
@@ -351,6 +361,52 @@ mod tests {
         );
         assert!(color_refresh_paths(path(0x300, 8), &Tlv::Null, &report).is_empty());
         assert!(color_refresh_paths(path(0x300, 8), &Tlv::Uint(255), &report).is_empty());
+    }
+    #[test]
+    fn a_measured_plug_reads_its_metering_metadata_and_merges_its_points() {
+        let servers = Tlv::Array([6, 0x90, 0x91].map(Tlv::Uint).to_vec());
+        let paths = discovery_paths(&[(path(0x1d, 1), servers)]).unwrap();
+        for cluster in [0x90, 0x91] {
+            let globals: Vec<_> = paths
+                .iter()
+                .filter(|p| p.cluster == Some(cluster))
+                .filter_map(|p| p.attribute)
+                .collect();
+            assert_eq!(globals, [0xfff9, 0xfffb, 0xfffc, 0xfffd]);
+            assert!(supported_cluster(cluster));
+            assert!(metadata_attribute(path(cluster, 0xfffc)));
+            assert!(!metadata_attribute(path(cluster, 8)));
+        }
+        let mut report = Vec::new();
+        for (cluster, features, attrs) in [(0x90, 0, vec![8]), (0x91, 0b0101, vec![1])] {
+            report.extend([
+                (path(cluster, 0xfffc), Tlv::Uint(features)),
+                (path(cluster, 0xfffd), Tlv::Uint(1)),
+                (
+                    path(cluster, 0xfffb),
+                    Tlv::Array(attrs.into_iter().map(Tlv::Uint).collect()),
+                ),
+                (path(cluster, 0xfff9), Tlv::Array(vec![])),
+            ]);
+        }
+        let mut expanded = Expanded::discover(1, &report);
+        let keys: Vec<_> = expanded
+            .points()
+            .iter()
+            .map(|p| p.key.to_string())
+            .collect();
+        assert_eq!(keys, ["power", "energy"]);
+        assert_eq!(expanded.paths(1).len(), 2);
+        assert!(policy_paths(1, &report).is_empty());
+        assert_eq!(
+            expanded.update(path(0x90, 8), &Tlv::Int(42_000)),
+            vec![("power", moli_core::Value::Float(42.0))]
+        );
+        assert!(
+            expanded
+                .plan("power", &moli_core::Value::Float(1.0))
+                .is_none()
+        );
     }
     #[test]
     fn malformed_or_ambiguous_global_metadata_does_not_activate_features() {

@@ -1212,6 +1212,63 @@ mod tests {
         }
     }
     #[test]
+    fn a_measured_plug_is_one_device_with_native_metering_points() {
+        let mut report = vec![
+            (
+                path(1, 0x1d, 0),
+                Tlv::Array(vec![Tlv::Structure(vec![(
+                    Tag::Context(0),
+                    Tlv::Uint(0x10a),
+                )])]),
+            ),
+            (
+                path(1, 0x1d, 1),
+                Tlv::Array([6, 0x90, 0x91].map(Tlv::Uint).to_vec()),
+            ),
+        ];
+        for (cluster, features, attrs) in [(0x90, 2, vec![4, 0x0c, 8]), (0x91, 0b0101, vec![1])] {
+            report.extend([
+                (path(1, cluster, 0xfffc), Tlv::Uint(features)),
+                (path(1, cluster, 0xfffd), Tlv::Uint(1)),
+                (
+                    path(1, cluster, 0xfffb),
+                    Tlv::Array(attrs.into_iter().map(Tlv::Uint).collect()),
+                ),
+                (path(1, cluster, 0xfff9), Tlv::Array(vec![])),
+            ]);
+        }
+        let found = endpoints(&report);
+        assert_eq!(found.len(), 1);
+        let mut meta = found[&1].clone();
+        let points = meta.points();
+        let keys: Vec<_> = points.iter().map(|p| p.key.as_ref()).collect();
+        assert_eq!(keys, ["on", "power", "voltage", "current", "energy"]);
+        assert!(
+            points
+                .iter()
+                .all(|p| p.key.as_ref() == "on" || !p.access.write)
+        );
+        let subscribed = subscription_paths(&report, &found);
+        for (cluster, attribute) in [(0x90, 8), (0x90, 4), (0x90, 0x0c), (0x91, 1)] {
+            assert!(
+                subscribed
+                    .iter()
+                    .any(|p| p.cluster == Some(cluster) && p.attribute == Some(attribute)),
+                "{cluster:#x}/{attribute:#x}"
+            );
+        }
+        let energy = Tlv::Structure(vec![(Tag::Context(0), Tlv::Uint(1_500_000))]);
+        assert_eq!(
+            meta.state_updates(path(1, 0x91, 1), &energy),
+            vec![("energy", Value::Float(1.5))]
+        );
+        assert_eq!(
+            meta.state_updates(path(1, 0x90, 8), &Tlv::Null),
+            vec![("power", Value::Null)]
+        );
+        assert!(meta.plan("power", &Value::Float(1.0), false).is_none());
+    }
+    #[test]
     fn an_unanswered_order_reports_an_unknown_state() {
         for unknown in [
             matter_controller::Error::OutcomeUnknown { node_id: 1 },

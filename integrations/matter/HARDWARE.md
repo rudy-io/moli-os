@@ -72,3 +72,40 @@ suppression-only build still lost the first heartbeat; the firewall evidence and
 fixed-port result distinguish the actual idle-loss cause from that separate
 protocol correction. This is a bounded observation, not a long-term reliability
 or radio certification claim.
+
+## Electrical measurement on an IKEA GRILLPLATS — 2026-11-24
+
+Read-only validation of the 0x0090 / 0x0091 clusters on one IKEA GRILLPLATS smart
+plug (Matter 1.4 over Thread, firmware `1.4.6` from BasicInformation). Moli ran as a
+separate test instance with only the Matter driver, production attestation roots and
+its own vault. No command was sent to the plug; every load change was made by hand.
+No household identifiers, setup codes or addresses are included.
+
+- The plug was commissioned onto an existing OpenThread border router with another
+  controller, then shared to Moli through a commissioning window (multi-admin). It is
+  a Thread end device.
+- OnOff is on endpoint 1; both measurement clusters are on endpoint 2. Moli therefore
+  lists two devices for one plug, and the power badge of the plug does not show
+  consumption. This is the documented separate-endpoint limit, observed on real hardware.
+- ElectricalPowerMeasurement announces ALTC and attributes `0x04`, `0x05`, `0x07`,
+  `0x08`, `0x0A`, `0x0C` among others. ElectricalEnergyMeasurement announces IMPE and
+  CUME only, so `energy_returned` is correctly absent.
+- The subscription asked for 21 attribute paths in total; the plug accepted it and
+  negotiated a 60 s maximum interval.
+- Moli's points matched the raw attribute values exactly (unit conversions only).
+  Reports arrive within seconds, grouped under one timestamp, and only on change.
+  Resolution: 1 V, 1 mA, 0.1 W, 1 Wh.
+- No reference instrument was available. Validation relies on invariants the plug must
+  satisfy by itself: `voltage x RMS current` equals apparent power within 1-2 %,
+  `voltage x active current` equals active power, active power never exceeds apparent
+  power, and idle readings are exactly zero. They held on a three-speed fan (power
+  factor 0.88-1.00), a phone charger (0.46), a hair straightener while heating (0.99)
+  and with nothing plugged in. Absolute accuracy is therefore not claimed.
+- ActiveCurrent under-reads a non-resistive load (phone charger: 42 mA against 90 mA
+  RMS), so `current` uses RMSCurrent, with ApparentCurrent as a fallback; both were
+  identical on every load where both answered.
+- `energy` rose in 1 Wh steps, consistent with the integrated power; the raw value was
+  not compared reading by reading.
+
+Not validated: energy accuracy over hours, power-loss and reconnection behavior,
+other vendors, a plug with both clusters on the OnOff endpoint, `energy_returned`.

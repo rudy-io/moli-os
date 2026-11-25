@@ -14,6 +14,7 @@ fonctions et des attributs/commandes annoncés par chaque endpoint.
 | Serrure / `0101` | état `locked` et état brut ; commandes lock/unlock temporisées lorsque la politique connue les autorise, avec approbation de la garde |
 | Température / `0402`, humidité / `0405`, présence / `0406` | Mesures en lecture seule, valeurs nulles/inconnues explicites |
 | Contact/fuite / `0045` | Lecture typée selon DeviceType contact `0015` ou fuite `0043` ; type absent ou ambigu non exposé |
+| Mesure électrique / `0090`, énergie / `0091` | Lecture seule : `power` (W), `apparent_power` (VA), `voltage` (V), `current` (A, courant efficace RMSCurrent `0x0C`, pas le courant actif) selon l'AttributeList ; `energy` (kWh, index importé) avec ImportedEnergy + CumulativeEnergy, `energy_returned` (kWh, index exporté) avec ExportedEnergy + CumulativeEnergy |
 
 Pour `brightness = 0`, le pilote utilise `Off` seulement si OnOff annonce la
 commande. Sinon il utilise `MoveToLevelWithOnOff` si annoncé; il ne rabat pas
@@ -48,11 +49,29 @@ inexploitable est signalé comme issue inconnue et n'est pas réessayé. Un stat
 Matter explicitement refusé est définitif et le hub ne le relance pas. Vérifier
 l'état observé avant de soumettre un nouvel ordre.
 
+Les mesures électriques sont en unités fixes dans la spécification (mV, mA, mW, mVA,
+mWh) : rien à découvrir, la conversion est exacte jusqu'à 2^53 ; au-delà, ou sur une
+valeur nulle, un type inattendu ou un index négatif, le point passe à Null. L'énergie
+périodique (`PeriodicEnergy…`) n'est jamais exposée : elle repart de zéro à chaque
+période et passerait pour une remise à zéro du compteur. Les points ont les sémantiques
+natives (`power`, `energy`…) : l'historique, les courbes et la pastille d'une prise
+mesurée les prennent tels quels, et `energy` se déclare comme compteur `appliance` de
+`[[energy.meter]]` (voir `docs/components/historique-energie.md`). Une mesure portée
+par un autre endpoint que la prise (capteur électrique `0510` à part) devient un
+appareil distinct : c'est le cas de la IKEA GRILLPLATS (l'On/Off sur un endpoint, la
+mesure sur un autre), qui donne donc deux appareils dans Moli. `current` est le courant
+efficace : `RMSCurrent` (`0x0C`), ou à défaut `ApparentCurrent` (`0x07`), jamais
+`ActiveCurrent` (`0x05`), qui n'est que la composante en phase et sous-estime une charge
+électronique (un chargeur de téléphone : 42 mA au lieu de 90 mA). Validé sur une GRILLPLATS
+(firmware 1.4.6, [rapport](HARDWARE.md)) et par tests unitaires ; `energy_returned`,
+l'énergie exportée et les autres marques ne le sont que par tests unitaires
+([matrice communautaire](COMMUNITY-TESTS.md)).
+
 ## Limites
 
 Ce tableau ne garantit pas toutes les fonctions de tous les produits certifiés.
 Inclinaison des stores, gestion de codes/PIN, déverrouillage avec durée, programmes
-thermostat, ventilation, scènes/groupes, événements de boutons, énergie et clusters
+thermostat, ventilation, scènes/groupes, événements de boutons et clusters
 non listés ne sont pas encore mappés. Les prises et lampes OnOff ont la même commande ;
 leur catégorie Matter n'est pas conservée pour les distinguer dans l'interface.
 Les variations de conformité ou d'ACL peuvent rendre un endpoint partiellement accessible.

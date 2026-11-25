@@ -8,8 +8,9 @@ already on an IP network, including Thread devices reachable through an existing
 router. Bluetooth commissioning is not part of this contribution: the vendored stack is
 trimmed to what Moli builds and tests, so a Thread device is onboarded with its own app or
 another controller first and then driven over IP; see [thread.md](thread.md).
-Physical validation covers OnOff on the Hue bridge only: covers, lock and thermostat
-ran on the virtual accessory, not on hardware.
+Physical validation covers OnOff on the Hue bridge, and read-only electrical
+measurement on one IKEA GRILLPLATS plug ([report](HARDWARE.md)): covers, lock and
+thermostat ran on the virtual accessory, not on hardware.
 The default release image exceeds the project's 25 MB budget. An optional compact
 build is measured below that budget, at the cost of symbolized local backtraces; see
 `docs/components/exploitation.md` and `docs/PERFORMANCE.md`.
@@ -75,8 +76,8 @@ abort that discovery cycle instead of publishing a partial device list.
 Bridged NodeLabel is used as a display name when present and bounded; renaming
 refreshes discovery without changing identity. Missing labels keep the generated name.
 Rediscovery preserves surviving devices and compatible samples; only disappeared
-endpoints are removed. Upsert prunes obsolete or incompatible point readings. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
-and sensor measurements. On lights advertising Level Control with OnOff, setting
+endpoints are removed. Upsert prunes obsolete or incompatible point readings. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks,
+sensor measurements and electrical metering (power, voltage, current, cumulative energy). On lights advertising Level Control with OnOff, setting
 `brightness` while the lamp is off turns it on at that level (Matter
 MoveToLevelWithOnOff). The exact capability gates and limitations are in
 [COMPATIBILITY.md](COMPATIBILITY.md). BooleanState is contact only for device
