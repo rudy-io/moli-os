@@ -46,6 +46,9 @@ const MAX_EXTRAS: usize = 60;
 const DRIVING_FOR_MS: u64 = 120_000;
 /// Two uploads further apart than this: no distance counted from speed.
 const MAX_GAP_MS: u64 = 15_000;
+/// More than this between two readings of the ECU's counter: not believed
+/// (a cleared then refilled counter, another car's dongle).
+const MAX_UNHEARD_KM: f64 = 3_000.0;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +207,11 @@ pub struct Book {
     /// The fault codes last reported.
     #[serde(default)]
     pub dtc: Vec<String>,
+    /// The ECU's « distance since codes cleared » last seen (PID 01 31):
+    /// what it counted while Moli heard nothing (Torque closed, a trip
+    /// without network) is counted at the next upload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_since_clear: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -599,7 +607,6 @@ struct Live {
     session_start_km: f64,
     last_ms: u64,
     speed: Option<f64>,
-    since_clear: Option<f64>,
     extras: Vec<String>,
     mil_from_pid: Option<(bool, u32)>,
     saved_km: f64,
@@ -702,7 +709,6 @@ impl State<'_> {
             live.session.clone_from(&sample.session);
             live.session_start_km = book.counted_km;
             live.speed = None;
-            live.since_clear = None;
             book_changed = true;
             tracing::info!(vehicle = id, "vehicle: new Torque session");
         }
@@ -730,21 +736,27 @@ impl State<'_> {
             }
         }
 
-        // Distance: the ECU's own counter when logged, else speed × time.
+        // Distance: the ECU's own counter when logged (kept between trips,
+        // so a trip Moli did not hear is counted too), else speed × time.
         let gap = now.saturating_sub(live.last_ms);
         let mut driven = 0.0;
         if let Some(&clear) = sample.values.get("k31") {
-            if let Some(before) = live.since_clear {
+            if let Some(before) = book.last_since_clear {
                 let delta = clear - before;
-                if (0.0..=5.0).contains(&delta) {
+                // Below zero: codes were cleared, the counter starts again.
+                if (0.0..=MAX_UNHEARD_KM).contains(&delta) {
                     driven = delta;
                 }
             }
-            live.since_clear = Some(clear);
-        } else if let Some(&speed) = sample
-            .values
-            .get("kd")
-            .or_else(|| sample.values.get("kff1001"))
+            if book.last_since_clear != Some(clear) {
+                book.last_since_clear = Some(clear);
+                book_changed = true;
+            }
+        } else if book.last_since_clear.is_none()
+            && let Some(&speed) = sample
+                .values
+                .get("kd")
+                .or_else(|| sample.values.get("kff1001"))
             && (0.0..=250.0).contains(&speed)
         {
             if let Some(before) = live.speed
@@ -1113,6 +1125,13 @@ mod tests {
             gate.upload(&car, "session=7&k31=1002").unwrap();
             settled(&hub, "odometer", &Value::Float(100_002.0)).await;
             settled(&hub, "trip", &Value::Float(2.0)).await;
+            // A trip Moli did not hear (Torque closed), then a new session.
+            gate.upload(&car, "session=8&k31=1010").unwrap();
+            settled(&hub, "odometer", &Value::Float(100_010.0)).await;
+            // Codes cleared: the counter starts again, nothing is lost.
+            gate.upload(&car, "session=8&k31=0").unwrap();
+            gate.upload(&car, "session=8&k31=1").unwrap();
+            settled(&hub, "odometer", &Value::Float(100_011.0)).await;
 
             gate.upload(&car, "session=7&dtc=P0401").unwrap();
             settled(&hub, "mil", &Value::Bool(true)).await;
@@ -1121,7 +1140,7 @@ mod tests {
 
             hub.command(
                 &point("maintenance_done"),
-                Value::Text("oil 100010".into()),
+                Value::Text("oil 100020".into()),
                 Origin::Ui,
                 None,
             )
@@ -1129,7 +1148,7 @@ mod tests {
             .unwrap();
             settled(&hub, "oil_km_left", &Value::Float(15_000.0)).await;
             settled(&hub, "oil_due", &Value::Bool(false)).await;
-            settled(&hub, "odometer", &Value::Float(100_010.0)).await;
+            settled(&hub, "odometer", &Value::Float(100_020.0)).await;
             assert!(
                 hub.command(
                     &point("maintenance_done"),
@@ -1149,7 +1168,7 @@ mod tests {
             // The book survives a restart.
             let list = gate.list();
             assert_eq!(list[0].records.len(), 1);
-            assert_eq!(list[0].odometer, Some(100_010.0));
+            assert_eq!(list[0].odometer, Some(100_020.0));
             cancel.cancel();
             let (again, _) = open(config(), &dir).unwrap();
             assert_eq!(again.list()[0].records.len(), 1);
