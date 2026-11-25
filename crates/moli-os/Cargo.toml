@@ -69,6 +69,7 @@ moli-outdoor.workspace = true
 moli-scenes.workspace = true
 moli-heating.workspace = true
 moli-presence.workspace = true
+moli-pushover.workspace = true
 moli-telegram.workspace = true
 moli-phones.workspace = true
 moli-assistant.workspace = true

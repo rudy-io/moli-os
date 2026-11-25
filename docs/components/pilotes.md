@@ -1711,6 +1711,15 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 `azimuth` dans 0..360, `enter` dans 0..90, `exit` dans 0..=90 et plus grand que `enter`,
 `min_elevation` dans 0..90.
 
+## `pushover` : notifications sur les téléphones par Pushover (`crates/moli-pushover`)
+
+- **Couvre** : les notifications de Moli sur les téléphones (Android, iOS, bureau) par l'appli Pushover, sans appli Moli, sans appairage ni accès entrant : un appel HTTPS sortant vers `api.pushover.net`.
+- **Config** : `kind = "pushover"`, options facultatives `devices` (noms des appareils Pushover, 10 au plus ; tous ceux du compte si vide), `priority` (-2 à 1, 0 par défaut), `sound`, `per_minute` (1 à 30, 5 par défaut), `per_hour` (`per_minute` à 600, 30 par défaut). Secrets `token` (jeton de l'application) et `user` (clé de l'utilisateur ou du groupe), 30 lettres et chiffres chacun.
+- **Points** : `push` (texte, écriture : « Titre\nMessage », ou une seule ligne titrée « Moli »), `remaining` (messages restants du mois).
+- **Identité** : un appareil `pushover` par instance. Le point `push` le range avec les téléphones de l'appli Moli : canal `telephone` des automatismes, rappels de l'assistant.
+- **Pièges** : clés et appareils vérifiés au démarrage (`users/validate.json`) ; un refus arrête le pilote. Plafond d'envois par instance, au-delà le message est refusé et journalisé. Un 4xx pendant les envois les arrête jusqu'au redémarrage (Pushover bloque une adresse qui insiste), un 429 jusqu'à la remise à zéro du quota ; réseau et 5xx ne font échouer que le message. Pas de HTML (`html=0`), d'URL ni de pièce jointe ; titre coupé à 250 caractères, message à 1 024. Les clés ne sont jamais dans une erreur ni dans le `Debug`.
+- **Tests** : `src/api.rs` et `src/lib.rs` sur un faux Pushover scripté : envoi et options, encodage, coupure, plafond, clés refusées, appareils inconnus, quota épuisé puis reprise, pannes.
+
 ## `presence` : qui est à la maison (`crates/moli-presence`)
 
 - **Couvre** : la présence de chaque personne d'après le Wi-Fi de son téléphone, en local
@@ -2040,6 +2049,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say`, interrupteurs | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
+| `pushover` | `moli-pushover` | HTTPS, API Pushover | `push` (notification) | faux serveur ; compte réel à confirmer |
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) ; **pas encore** : TSUN TITAN et GEN4, ZCS Azzurro 1PH TL-V3 et HYD-ZSS-HP |
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |

@@ -1,0 +1,25 @@
+[integration]
+id = "pushover"
+name = "Pushover (notifications sur les téléphones)"
+brands = ["Pushover"]
+models = []
+# Internet, the Pushover API over HTTPS: no relay, no Moli app on the phone.
+transport = "https"
+driver = "pushover"
+crate = "moli-pushover"
+
+[discovery]
+# A cloud service: nothing to find on the home network.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+# The application's API token and the user's (or group's) key, in the vault.
+secrets = ["token", "user"]
+vars = []
+options = ["devices", "priority", "sound", "per_minute", "per_hour"]
+
+[origin]
+reused = "aucun code repris : l'API publique de Pushover (pushover.net/api), avec pour référence l'intégration Pushover de Home Assistant (options d'envoi) et gladys-pushover (texte coupé, vérification au démarrage, quota, arrêt après un refus)"
+author = "agent"

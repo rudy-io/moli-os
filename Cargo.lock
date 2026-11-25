@@ -2326,6 +2326,7 @@ dependencies = [
  "moli-presence",
  "moli-profile",
  "moli-proxmox",
+ "moli-pushover",
  "moli-recycleapp",
  "moli-reolink",
  "moli-rfxcom2mqtt",
@@ -2483,6 +2484,24 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "moli-pushover"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 

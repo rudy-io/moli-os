@@ -117,7 +117,8 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
   `telegram` = une commande (titre, ou nom de l'automatisme, puis le message) sur chaque
   point `notify` inscriptible, c'est-à-dire l'appareil du pilote Telegram
   (`integrations/telegram/`), journalisée au nom de l'automatisme ;
-  `telephone` = la même commande sur chaque point `push` inscriptible (l'appli Moli).
+  `telephone` = la même commande sur chaque point `push` inscriptible (l'appli Moli, et
+  l'appareil du pilote Pushover, `integrations/pushover/`).
   Un canal demandé qui ne joint personne (aucun point `notify`, aucun téléphone appairé,
   aucune enceinte) envoie le message dans la maison, pour ne jamais le perdre ; un message
   arrivé sur le téléphone n'y est pas affiché en plus.
