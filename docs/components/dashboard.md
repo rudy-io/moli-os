@@ -375,7 +375,10 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   Le dessin (`ui/RadiatorTile.svelte`, calcul pur dans `lib/radiator.js`) : ses éléments se remplissent de
   chaleur et des volutes montent quand il chauffe (sonde de la pièce à plus de 0,2 °C sous la
   consigne, ou `running_state` à `heat`), à moitié quand il est à température, gris au repos ou à
-  l'arrêt, bleus et traversés d'un courant d'air pendant une aération (`valve_override`) ; une
+  l'arrêt, bleus et traversés d'un courant d'air pendant une aération (`valve_override`) ou une
+  pièce ouverte (`opening` : « Fenêtre ou porte ouverte · chauffage repris à la fermeture », ou la
+  chute de température, suivi du boost ou du maintien qui court encore et de son échéance, sans
+  **Reprendre le programme** : la fermeture le fait) ; une
   petite molette dit une vanne réglée à la main. En mots : ce qu'il fait, « 18,2° pour 19° », puis
   le prochain changement du programme (« Programme · 17° à 22:00 ») ou la fin du réglage à la main,
   avec **Reprendre le programme**, ou un boost (« Boost +2° · jusqu’à 15:30 ») ou une consigne

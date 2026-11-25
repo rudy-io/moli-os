@@ -1158,6 +1158,8 @@
   "pilotes.chauffage.boost_absent": "Aucun boost en cours : écrire d'abord boost",
   "pilotes.chauffage.duree_refusee": "Durée refusée : de 0 à 720 minutes entières",
   "pilotes.chauffage.maintien_auto": "Une consigne ne se maintient qu'en mode auto",
+  "pilotes.chauffage.ouverture": "Ouverture (fenêtre, porte)",
+  "pilotes.chauffage.ouverture_ignoree": "Ignorer les ouvertures",
   "pilotes.chauffage.jour.monday": "lundi",
   "pilotes.chauffage.jour.tuesday": "mardi",
   "pilotes.chauffage.jour.wednesday": "mercredi",

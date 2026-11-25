@@ -326,6 +326,8 @@
   "commun.radiateur.phase.airing": "Airing",
   "commun.radiateur.temps": "{temp} for {target}",
   "commun.radiateur.aeration": "Heating back at {heure}, or as soon as the valve is turned up",
+  "commun.radiateur.ouverture.contact": "Window or door open · heating back once it closes",
+  "commun.radiateur.ouverture.drop": "Temperature falling fast · heating back as soon as it rises, or after the set time",
   "commun.radiateur.ensuite": "Schedule · {deg} at {heure}",
   "commun.radiateur.ensuite_demain": "Schedule · {deg} tomorrow at {heure}",
   "commun.radiateur.fixe": "Fixed setpoint",

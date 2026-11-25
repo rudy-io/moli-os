@@ -44,9 +44,23 @@ fn stand_ins() -> moli_helpers::Config {
 
 /// A radiator valve: its setpoint in °C (5 to 30), as it was written; in
 /// the « Bureau ». And a shutter whose position says it is in °C (a driver's
-/// mistake): never a valve.
+/// mistake): never a valve. And door contacts: a Zigbee one (`contact`, true:
+/// closed), a Tuya one (`doorcontact_state`, true: open), both read-only and
+/// moved from a remote (`telecommande/porte`, `telecommande/tuya`), and a
+/// writable one.
 #[derive(Debug)]
 struct Valves;
+
+fn binary(key: &str, write: bool, semantic: Semantic) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: key.into(),
+        kind: Kind::Binary,
+        access: Access { read: true, write },
+        unit: None,
+        semantic,
+    }
+}
 
 fn setpoint_point(key: &str, unit: Unit, semantic: Semantic) -> PointSpec {
     PointSpec {
@@ -66,6 +80,49 @@ fn setpoint_point(key: &str, unit: Unit, semantic: Semantic) -> PointSpec {
     }
 }
 
+/// The door contacts and their remote.
+fn contacts(ctx: &DriverCtx) {
+    for (native, points, state) in [
+        (
+            "porte",
+            vec![binary("contact", false, Semantic::Contact)],
+            ("contact", true),
+        ),
+        (
+            "tuya",
+            vec![binary("doorcontact_state", false, Semantic::Other)],
+            ("doorcontact_state", false),
+        ),
+        (
+            "fausse",
+            vec![binary("contact", true, Semantic::Contact)],
+            ("contact", true),
+        ),
+        (
+            "telecommande",
+            vec![
+                binary("porte", true, Semantic::Other),
+                binary("tuya", true, Semantic::Other),
+            ],
+            ("porte", true),
+        ),
+    ] {
+        let id = ctx.device_id(native);
+        ctx.upsert_device(Device {
+            id: id.clone(),
+            instance: ctx.instance().clone(),
+            native_name: native.into(),
+            manufacturer: None,
+            model: None,
+            description: None,
+            native_room: Some("Bureau".into()),
+            members: Vec::new(),
+            points,
+        });
+        ctx.set_state(&id, state.0, Value::Bool(state.1));
+    }
+}
+
 impl Driver for Valves {
     fn kind(&self) -> &'static str {
         "valves"
@@ -73,6 +130,7 @@ impl Driver for Valves {
 
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            contacts(ctx);
             for (native, points) in [
                 (
                     "v",
@@ -130,6 +188,13 @@ impl Driver for Valves {
             while let Some(command) = ctx.next_command().await {
                 if command.device.id == presence {
                     ctx.set_state(&presence, "away", command.value.clone());
+                }
+                if &*command.device.native_name == "telecommande" {
+                    let (native, key) = match command.key.as_ref() {
+                        "porte" => ("porte", "contact"),
+                        _ => ("tuya", "doorcontact_state"),
+                    };
+                    ctx.set_state(&ctx.device_id(native), key, command.value.clone());
                 }
                 // « entiere » keeps whole degrees, cut down, without saying so.
                 let value = match command.value.as_f64() {
@@ -857,10 +922,471 @@ async fn a_boost_and_a_hold_outlive_a_restart() {
     cancel.cancel();
 }
 
+fn parse_rooms(text: &str) -> Vec<Room> {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    toml::from_str::<File>(text).unwrap().heating
+}
+
+async fn set(hub: &Hub, at: &str, value: Value) {
+    hub.command(&point(at), value, Origin::Ui, None)
+        .await
+        .unwrap();
+}
+
+/// Each reading in turn, a few looks apart.
+async fn readings(hub: &Hub, values: &[f64]) {
+    for &value in values {
+        set(hub, "maison:piece/value", Value::Float(value)).await;
+        tokio::time::sleep(Duration::from_millis(70)).await;
+    }
+}
+
+fn valve(hub: &Hub) -> f64 {
+    hub.state(&point("vannes:v/sp"))
+        .and_then(|s| s.value.as_f64())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_open_door_cuts_the_room_until_it_closes() {
+    let rooms = parse_rooms(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        openings = ["vannes:porte/contact", "vannes:tuya/doorcontact_state"]
+        opening_delay = 1
+        "#,
+    );
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+    })
+    .await;
+    let room = |key: &str| format!("chauffage:bureau/{key}");
+    // 20.9 for 22: heat asked for, the valve at 22.
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until_bool(&hub, &room("heat_demand"), true).await;
+    until_text(&hub, &room("opening"), "none").await;
+
+    // The door opens (false: open): nothing for opening_delay, then cut.
+    set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    until_text(&hub, &room("opening"), "none").await;
+    assert_eq!(valve(&hub), 22.0);
+    until_text(&hub, &room("opening"), "contact").await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, &room("heat_demand"), false).await;
+
+    // Closed: the room's setpoint and demand again, at once.
+    set(&hub, "vannes:telecommande/porte", Value::Bool(true)).await;
+    until_text(&hub, &room("opening"), "none").await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until_bool(&hub, &room("heat_demand"), true).await;
+
+    // A Tuya contact says true when open.
+    set(&hub, "vannes:telecommande/tuya", Value::Bool(true)).await;
+    until_text(&hub, &room("opening"), "contact").await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    set(&hub, "vannes:telecommande/tuya", Value::Bool(false)).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+
+    // Bypassed: an open door changes nothing; the bypass lifted, it does.
+    set(&hub, &room("opening_bypass"), Value::Bool(true)).await;
+    set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    until_text(&hub, &room("opening"), "none").await;
+    assert_eq!(valve(&hub), 22.0);
+    until_bool(&hub, &room("heat_demand"), true).await;
+    set(&hub, &room("opening_bypass"), Value::Bool(false)).await;
+    until_text(&hub, &room("opening"), "contact").await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_writable_point_is_never_a_contact() {
+    let rooms = parse_rooms(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        openings = ["vannes:fausse/contact", "vannes:telecommande/porte"]
+        opening_delay = 0
+        "#,
+    );
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+    })
+    .await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    // An agent writing them would cut the room's heating: left out.
+    set(&hub, "vannes:fausse/contact", Value::Bool(false)).await;
+    set(&hub, "vannes:telecommande/porte", Value::Bool(true)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    until_text(&hub, "chauffage:bureau/opening", "none").await;
+    assert_eq!(valve(&hub), 22.0);
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn an_open_door_never_raises_a_valve() {
+    // The opening's 25 °C, over every setpoint the rooms would give.
+    for regulation in ["shift", "force"] {
+        for initial in [20.0, 22.0] {
+            let rooms = parse_rooms(&format!(
+                r#"
+                [[heating]]
+                id = "bureau"
+                name = "Bureau"
+                sensor = "maison:piece/value"
+                valves = ["vannes:v/sp"]
+                initial = {initial:.1}
+                regulation = "{regulation}"
+                openings = ["vannes:porte/contact"]
+                opening_delay = 0
+                opening_action = 25
+                "#
+            ));
+            let (hub, cancel) = house_of(rooms, |h| {
+                h.tick = Duration::from_millis(20);
+            })
+            .await;
+            // 20.9: shift 20 or 22; force 16 (over 20) or 26 (under 22).
+            let normal = match (regulation, initial > 21.0) {
+                ("shift", _) => initial,
+                (_, false) => 16.0,
+                (_, true) => 26.0,
+            };
+            until(&hub, "vannes:v/sp", normal).await;
+            set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+            until_text(&hub, "chauffage:bureau/opening", "contact").await;
+            until_bool(&hub, "chauffage:bureau/heat_demand", false).await;
+            for _ in 0..30 {
+                let sent = valve(&hub);
+                assert!(sent <= normal, "{regulation} {initial}: {sent} > {normal}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            // Force, no heat asked for while open: shut (22 − 4).
+            if regulation == "force" && initial > 21.0 {
+                until(&hub, "vannes:v/sp", 18.0).await;
+            }
+            cancel.cancel();
+        }
+    }
+}
+
+#[test]
+fn the_opening_s_setpoint_is_never_over_the_normal_one() {
+    let bounds = (5.0, 30.0);
+    assert_eq!(
+        opened(Some(OpeningAction::Setpoint(25.0)), 20.0, bounds),
+        20.0
+    );
+    assert_eq!(
+        opened(Some(OpeningAction::Setpoint(12.0)), 20.0, bounds),
+        12.0
+    );
+    assert_eq!(
+        opened(Some(OpeningAction::Setpoint(2.0)), 20.0, bounds),
+        5.0
+    );
+    assert_eq!(opened(Some(OpeningAction::Off), 20.0, (7.0, 30.0)), 7.0);
+    assert_eq!(opened(Some(OpeningAction::Off), 5.0, bounds), 5.0);
+    assert_eq!(opened(None, 20.0, bounds), 20.0);
+}
+
+#[tokio::test]
+async fn a_forced_room_open_is_shut_and_resumes() {
+    let rooms = parse_rooms(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        regulation = "force"
+        openings = ["vannes:porte/contact"]
+        opening_delay = 0
+        "#,
+    );
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+    })
+    .await;
+    until(&hub, "vannes:v/sp", 26.0).await;
+    set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, "chauffage:bureau/heat_demand", false).await;
+    set(&hub, "vannes:telecommande/porte", Value::Bool(true)).await;
+    until(&hub, "vannes:v/sp", 26.0).await;
+    until_bool(&hub, "chauffage:bureau/heat_demand", true).await;
+    cancel.cancel();
+}
+
+/// A room with drop detection, its time shortened: the slope over 2 s, on
+/// 200 ms at least; a minute of `auto_opening_max` is 20 ms (30: 600 ms).
+async fn dropping(regulation: &str, tune: impl FnOnce(&mut Heating)) -> (Hub, CancellationToken) {
+    let rooms = parse_rooms(&format!(
+        r#"
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        regulation = "{regulation}"
+        auto_opening = true
+        "#
+    ));
+    house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+        h.slope_window = Duration::from_secs(2);
+        h.slope_span = Duration::from_millis(200);
+        h.minute = Duration::from_millis(20);
+        tune(h);
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_fast_fall_is_an_open_window_until_the_room_warms_again() {
+    for (regulation, heating) in [("shift", 22.0), ("force", 26.0)] {
+        let (hub, cancel) = dropping(regulation, |_| {}).await;
+        let opening = "chauffage:bureau/opening";
+        until(&hub, "vannes:v/sp", heating).await;
+        until_bool(&hub, "chauffage:bureau/heat_demand", true).await;
+        readings(&hub, &[20.6, 20.3, 20.0, 19.7, 19.4, 19.1]).await;
+        until_text(&hub, opening, "drop").await;
+        until(&hub, "vannes:v/sp", 5.0).await;
+        until_bool(&hub, "chauffage:bureau/heat_demand", false).await;
+        // Warmer again: over.
+        readings(&hub, &[19.5, 19.8, 20.1]).await;
+        until_text(&hub, opening, "none").await;
+        until(&hub, "vannes:v/sp", heating).await;
+        until_bool(&hub, "chauffage:bureau/heat_demand", true).await;
+        cancel.cancel();
+    }
+}
+
+#[tokio::test]
+async fn one_low_reading_or_a_silent_sensor_is_no_open_window() {
+    let (hub, cancel) = dropping("shift", |h| h.fresh = Duration::from_millis(300)).await;
+    let opening = "chauffage:bureau/opening";
+    until(&hub, "vannes:v/sp", 22.0).await;
+    // One reading far down, the others where they were.
+    readings(&hub, &[20.8, 20.9, 15.0, 20.9, 20.8, 20.9, 20.8]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    until_text(&hub, opening, "none").await;
+    // Quiet for longer than the window, back much lower and steady.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    readings(&hub, &[15.0, 15.1, 15.0, 15.1, 15.0]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    until_text(&hub, opening, "none").await;
+    assert_eq!(valve(&hub), 22.0);
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_drop_ends_after_auto_opening_max_and_waits_as_long() {
+    // A minute of 40 ms: 1.2 s at most, then 1.2 s before another.
+    let (hub, cancel) = dropping("shift", |h| h.minute = Duration::from_millis(40)).await;
+    let opening = "chauffage:bureau/opening";
+    until(&hub, "vannes:v/sp", 22.0).await;
+    // Falling on and on, 0.1 °C every 70 ms.
+    let falling = tokio::spawn({
+        let hub = hub.clone();
+        async move {
+            let values: Vec<f64> = (0..90).map(|i| 20.6 - f64::from(i) * 0.1).collect();
+            readings(&hub, &values).await;
+        }
+    });
+    until_text(&hub, opening, "drop").await;
+    until_text(&hub, opening, "none").await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    for _ in 0..70 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        until_text(&hub, opening, "none").await;
+    }
+    until_text(&hub, opening, "drop").await;
+    falling.abort();
+    cancel.cancel();
+}
+
+#[test]
+fn the_opening_action_is_off_or_a_setpoint() {
+    let room = |text: &str| {
+        format!(
+            "[[heating]]\nid = \"a\"\nname = \"A\"\nsensor = \"x:y/t\"\nvalves = [\"x:v/sp\"]\n{text}"
+        )
+    };
+    let action = |text: &str| parse_rooms(&room(text))[0].opening_action;
+    assert_eq!(action(""), OpeningAction::Off);
+    assert_eq!(action("opening_action = \"off\""), OpeningAction::Off);
+    assert_eq!(action("opening_action = 7"), OpeningAction::Setpoint(7.0));
+    assert_eq!(action("opening_action = 7.5"), OpeningAction::Setpoint(7.5));
+    let plain = &parse_rooms(&room(""))[0];
+    assert!(!plain.detects_openings());
+    assert_eq!(
+        (
+            plain.opening_delay,
+            plain.auto_opening_drop,
+            plain.auto_opening_max
+        ),
+        (60, 3.0, 30)
+    );
+    let eco = "id = \"a\"\nname = \"A\"\nsensor = \"x:y/t\"\nvalves = [\"x:v/sp\"]\nopening_action = \"eco\"";
+    assert!(toml::from_str::<Room>(eco).is_err());
+    assert!(toml::from_str::<Room>(&eco.replace("eco", "off")).is_ok());
+}
+
+#[tokio::test]
+async fn an_open_door_never_raises_a_boosted_valve() {
+    // 20 + 3: shift 23; force 27 (20.9 under 23). Open, with 25 °C for the
+    // opening: never over them, and forced shut in `force` (23 − 4).
+    for (regulation, normal, open) in [("shift", 23.0, 23.0), ("force", 27.0, 19.0)] {
+        let rooms = parse_rooms(&format!(
+            r#"
+            [[heating]]
+            id = "bureau"
+            name = "Bureau"
+            sensor = "maison:piece/value"
+            valves = ["vannes:v/sp"]
+            initial = 20.0
+            regulation = "{regulation}"
+            openings = ["vannes:porte/contact"]
+            opening_delay = 0
+            opening_action = 25
+            "#
+        ));
+        let (hub, cancel) = house_of(rooms, |h| {
+            h.tick = Duration::from_millis(20);
+        })
+        .await;
+        until_text(&hub, "chauffage:bureau/opening", "none").await;
+        set(&hub, "chauffage:bureau/boost", Value::Float(3.0)).await;
+        until(&hub, "vannes:v/sp", normal).await;
+        set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+        until_text(&hub, "chauffage:bureau/opening", "contact").await;
+        for _ in 0..30 {
+            let sent = valve(&hub);
+            assert!(sent <= normal, "{regulation}: {sent} > {normal}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        until(&hub, "vannes:v/sp", open).await;
+        until(&hub, "chauffage:bureau/boost", 3.0).await;
+        cancel.cancel();
+    }
+}
+
+#[tokio::test]
+async fn a_boost_and_a_hold_keep_running_while_the_room_is_open() {
+    let rooms = parse_rooms(
+        r#"
+        [[heating]]
+        id = "parents"
+        name = "Chambre"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 20.0
+        openings = ["vannes:porte/contact"]
+        opening_delay = 0
+        "#,
+    );
+    let (hub, cancel) = house_of(rooms, |h| {
+        h.tick = Duration::from_millis(20);
+        h.minute = Duration::from_millis(20);
+    })
+    .await;
+    let order = |key: &str, value: Value| order_to(&hub, key, value);
+    until(&hub, "vannes:v/sp", 20.0).await;
+    order("occupied_heating_setpoint", Value::Float(21.0))
+        .await
+        .unwrap();
+    order("hold_minutes", Value::Int(600)).await.unwrap();
+    order("boost", Value::Float(2.0)).await.unwrap();
+    order("boost_minutes", Value::Int(600)).await.unwrap();
+    until(&hub, "vannes:v/sp", 23.0).await;
+    let (boost_end, hold_end) = (left(&hub, "boost_until"), left(&hub, "hold_until"));
+
+    // Open: cut, the boost and the hold untouched, their ends where they were.
+    set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, "chauffage:parents/heat_demand", false).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    until(&hub, "chauffage:parents/boost", 2.0).await;
+    until(&hub, "chauffage:parents/occupied_heating_setpoint", 21.0).await;
+    let near = |a: Option<Duration>, b: Option<Duration>| {
+        let (a, b) = (a.unwrap(), b.unwrap());
+        a.checked_sub(b)
+            .is_some_and(|d| d < Duration::from_millis(500))
+    };
+    assert!(near(boost_end, left(&hub, "boost_until")));
+    assert!(near(hold_end, left(&hub, "hold_until")));
+
+    // Closed: both again.
+    set(&hub, "vannes:telecommande/porte", Value::Bool(true)).await;
+    until(&hub, "vannes:v/sp", 23.0).await;
+    until_bool(&hub, "chauffage:parents/heat_demand", true).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn nobody_home_an_open_door_changes_nothing_and_is_still_open_on_return() {
+    let rooms = parse_rooms(
+        r#"
+        [[heating]]
+        id = "parents"
+        name = "Chambre"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 22.0
+        openings = ["vannes:porte/contact"]
+        opening_delay = 0
+        opening_action = 12
+        "#,
+    );
+    let (hub, cancel) = stand_ins_running().await;
+    start_away(&hub, rooms, "off", &cancel);
+    let room = |key: &str| format!("chauffage:parents/{key}");
+    until(&hub, "vannes:v/sp", 22.0).await;
+    away(&hub, true).await;
+    until(&hub, "vannes:v/sp", 5.0).await;
+    until_bool(&hub, &room("heat_demand"), false).await;
+
+    // Opened while nobody is home: the frost guard stays, nothing shown.
+    set(&hub, "vannes:telecommande/porte", Value::Bool(false)).await;
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(valve(&hub), 5.0);
+        until_text(&hub, &room("opening"), "none").await;
+    }
+
+    // Back with the door still open: the room stays cut, the opening's 12.
+    away(&hub, false).await;
+    until_bool(&hub, "chauffage:maison/away", false).await;
+    until_text(&hub, &room("opening"), "contact").await;
+    until(&hub, "vannes:v/sp", 12.0).await;
+    until_bool(&hub, &room("heat_demand"), false).await;
+    set(&hub, "vannes:telecommande/porte", Value::Bool(true)).await;
+    until(&hub, "vannes:v/sp", 22.0).await;
+    until_bool(&hub, &room("heat_demand"), true).await;
+    cancel.cancel();
+}
+
 #[test]
 fn bad_rooms_are_refused() {
     assert!(check(&rooms()).is_ok());
-    let cases: [fn(&mut Room); 18] = [
+    let cases: [fn(&mut Room); 27] = [
         |r| r.id = "a:b".into(),
         |r| r.name = " ".into(),
         |r| r.sensor = "piece".into(),
@@ -882,6 +1408,15 @@ fn bad_rooms_are_refused() {
         |r| r.max_boost = 10.5,
         |r| r.boost_default_minutes = 0,
         |r| r.hold_default_minutes = 721,
+        |r| r.openings = vec!["porte".into()],
+        |r| r.openings = vec!["chauffage:autre/opening".into()],
+        |r| r.openings = vec!["vannes:porte/contact".into(); 2],
+        |r| r.openings = vec!["vannes:porte/contact".into(); 9],
+        |r| r.opening_delay = 3601,
+        |r| r.auto_opening_drop = 0.5,
+        |r| r.auto_opening_max = 121,
+        |r| r.opening_action = OpeningAction::Setpoint(4.0),
+        |r| r.opening_action = OpeningAction::Setpoint(7.2),
     ];
     for (i, change) in cases.iter().enumerate() {
         let mut list = rooms();

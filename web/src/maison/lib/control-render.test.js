@@ -787,6 +787,14 @@ test('a radiator is drawn with what it does, the room against its setpoint, and 
   const hand = at({ valve_override: 'manual', valve_override_until: '2026-11-21T13:30:00Z' });
   assert.match(hand, /Réglée sur la vanne · programme repris à \d\d:\d\d/);
   assert.match(hand, /class="hand\b/);
+  // The room open: said, and nothing to resume (closing it does).
+  const opened = show('RadiatorTile', [...points, point('opening', enumeration('none', 'contact', 'drop'), false)], { ...valveValues, valve_override: 'none', opening: 'contact' });
+  assert.match(opened, /class="radiator airing/);
+  assert.match(opened, /Fenêtre ou porte ouverte · chauffage repris à la fermeture/);
+  assert.doesNotMatch(opened, /Reprendre/);
+  // A boost still running while open: said after the opening, with its end.
+  const boosted = show('RadiatorTile', [...points, point('opening', enumeration('none', 'contact', 'drop'), false)], { ...valveValues, valve_override: 'none', opening: 'drop', boost: 2, boost_until: '2999-01-01T10:00:00Z' });
+  assert.match(boosted, /Chute rapide de la température[^<]* · Boost \+2° · jusqu’à \d\d:\d\d/);
   assert.doesNotMatch(heating, /Reprendre/);
   // Opening the valve's card: the whole face is the button.
   assert.match(at({}, { onopen: () => {} }), /<button[^>]*class="face\b[^>]*aria-expanded="false"/);

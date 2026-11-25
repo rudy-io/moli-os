@@ -39,15 +39,17 @@ export function valveOpen({ running = null, temperature, target }) {
   return temperature <= target + OVER;
 }
 
-/** What the radiator is doing: `{phase, hold?}`.
- *  `phase`: `offline`, `off`, `airing` (a valve turned down, window open),
+/** What the radiator is doing: `{phase, hold?, opening?}`.
+ *  `phase`: `offline`, `off`, `airing` (a valve turned down, or the room
+ *  open: `opening` says why, `contact` or `drop`),
  *  `heating`, `holding` (at its setpoint), `idle` (warmer than asked),
  *  `closed` (a valve that has shut), `unknown` (no temperature to tell).
  *  `hold`: `manual` when a valve was turned by hand. `running`: what the
  *  valve says itself (`heat`, `idle`), when it says it. `valve`: a valve read
  *  on its own, open or closed, rather than a room's thermostat. */
-export function radiatorState({ reachable = true, mode = null, temperature = null, target = null, override = null, running = null, valve = false }) {
+export function radiatorState({ reachable = true, mode = null, temperature = null, target = null, override = null, running = null, valve = false, opening = null }) {
   if (!reachable) return { phase: 'offline' };
+  if (opening === 'contact' || opening === 'drop') return { phase: 'airing', opening };
   const hold = override === 'manual' ? 'manual' : null;
   if (override === 'airing') return { phase: 'airing' };
   if (mode === 'off') return { phase: 'off', hold };

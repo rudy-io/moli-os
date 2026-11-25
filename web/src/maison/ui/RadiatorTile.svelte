@@ -23,6 +23,7 @@
   const target = $derived(value(id, keys.target));
   const mode = $derived(value(id, keys.mode));
   const override = $derived(pointOf(d, 'valve_override') ? value(id, 'valve_override') : null);
+  const opening = $derived(pointOf(d, 'opening') ? value(id, 'opening') : null);
   const live = $derived(reachable(id) && hub.connected === true);
 
   /** The valves a room's thermostat drives (its members), as each one stands. */
@@ -41,6 +42,7 @@
     temperature,
     target,
     override,
+    opening,
     running: pointOf(d, 'running_state') ? value(id, 'running_state') : null,
     valve,
   }));
@@ -79,13 +81,19 @@
     if (state.phase === 'off' || state.phase === 'offline') return a;
     return a && b ? t('commun.radiateur.temps', { temp: a, target: b }) : (a ?? b);
   });
-  const detail = $derived.by(() => {
-    if (state.phase === 'airing') return t('commun.radiateur.aeration', { heure: until });
-    if (state.hold === 'manual') return t('commun.vanne.reglage.main', { heure: until });
+  // A boost or a setpoint held, and until when: still running while the room is open.
+  const running = $derived.by(() => {
     if (temporary.boost && mode !== 'off') {
       return t('commun.radiateur.boost', { deg: deg(temporary.boost.by, keys.target), heure: clock(temporary.boost.until) });
     }
     if (temporary.hold && mode === 'auto') return t('commun.radiateur.maintien', { heure: clock(temporary.hold.until) });
+    return null;
+  });
+  const detail = $derived.by(() => {
+    if (state.opening) return [t(`commun.radiateur.ouverture.${state.opening}`), running].filter(Boolean).join(' · ');
+    if (state.phase === 'airing') return t('commun.radiateur.aeration', { heure: until });
+    if (state.hold === 'manual') return t('commun.vanne.reglage.main', { heure: until });
+    if (running) return running;
     if (next && next.days < 2) {
       return t(next.days ? 'commun.radiateur.ensuite_demain' : 'commun.radiateur.ensuite', { deg: deg(next.deg, keys.target), heure: hhmm(next.min) });
     }
@@ -93,7 +101,7 @@
     if (mode === 'heat') return t('commun.radiateur.fixe');
     return null;
   });
-  const held = $derived(state.phase === 'airing' || state.hold === 'manual');
+  const held = $derived((state.phase === 'airing' && !state.opening) || state.hold === 'manual');
   const resume = () =>
     live && act(`${id}/valve_override`, 'none', t('commun.vanne.reglage.action', { name: label }));
   const said = $derived([label, headline, temps, valvesSaid, detail].filter(Boolean).join(' · '));

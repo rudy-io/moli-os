@@ -1158,6 +1158,8 @@
   "pilotes.chauffage.boost_absent": "No boost running: write boost first",
   "pilotes.chauffage.duree_refusee": "Length refused: 0 to 720 whole minutes",
   "pilotes.chauffage.maintien_auto": "A setpoint only holds in auto mode",
+  "pilotes.chauffage.ouverture": "Opening (window, door)",
+  "pilotes.chauffage.ouverture_ignoree": "Ignore openings",
   "pilotes.chauffage.jour.monday": "Monday",
   "pilotes.chauffage.jour.tuesday": "Tuesday",
   "pilotes.chauffage.jour.wednesday": "Wednesday",

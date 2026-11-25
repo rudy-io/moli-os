@@ -316,6 +316,8 @@
   "commun.radiateur.phase.airing": "Aération",
   "commun.radiateur.temps": "{temp} pour {target}",
   "commun.radiateur.aeration": "Chauffage repris à {heure}, ou dès que la vanne est remontée",
+  "commun.radiateur.ouverture.contact": "Fenêtre ou porte ouverte · chauffage repris à la fermeture",
+  "commun.radiateur.ouverture.drop": "Chute rapide de la température · chauffage repris dès qu'elle remonte, ou après le délai réglé",
   "commun.radiateur.ensuite": "Programme · {deg} à {heure}",
   "commun.radiateur.ensuite_demain": "Programme · {deg} demain à {heure}",
   "commun.radiateur.fixe": "Consigne fixe",
