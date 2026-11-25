@@ -54,7 +54,7 @@ base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 bitflags = "2"
 ccm = { version = "0.6", default-features = false, features = ["alloc"] }
 cms = "0.2"
-der = { version = "0.7", default-features = false, features = ["oid", "alloc"] }
+der = { version = "0.8", default-features = false, features = ["oid", "alloc"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh", "ecdsa", "pkcs8"] }
 subtle = { version = "2", default-features = false }
