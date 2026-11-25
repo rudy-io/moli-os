@@ -1917,6 +1917,10 @@ Cloudflare Access (`Via::Vehicle`, `caller.rs`), comme les rapports des téléph
   `<id>_km_left`, `<id>_days_left`, `<id>_due` ; `alert` (sémantique `alert`) + `detail`
   quand le voyant est allumé ou qu'un entretien est dû. `GET /api/vehicles` rend le carnet.
 - **En route** : `driving` vrai à chaque envoi, faux après 2 min sans envoi.
+- **Écran de la voiture** : la voiture est une entité à part. Avec son jeton, elle lit ses propres
+  points et, de la maison, seulement ce que `[[driver.options.vehicle.share]]` liste (`id`, `point`) ;
+  elle ne lance que les ordres de `[[driver.options.vehicle.action]]` (`id`, `name`, `point`,
+  `value`), qui passent par la garde comme le tableau de bord sans code. Routes : `api.md`.
 - **Vie privée** : la position est un point comme un autre, gardée dans l'historique de la
   maison (`history_days`) et nulle part ailleurs.
 

@@ -306,13 +306,24 @@ fn phone_report(path: &str) -> Option<&str> {
 /// `/api/torque/<token>`: a vehicle's upload (the token is checked by the
 /// route).
 fn torque_upload(path: &str) -> bool {
-    path.strip_prefix("/api/torque/").is_some_and(|token| {
-        !token.is_empty()
-            && token.len() <= 128
-            && token
-                .bytes()
+    let token_ok = |t: &str| {
+        !t.is_empty()
+            && t.len() <= 128
+            && t.bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    })
+    };
+    if let Some(token) = path.strip_prefix("/api/torque/") {
+        return token_ok(token);
+    }
+    // The car's own screen: `/api/car/<token>/dashboard`, `/api/car/<token>/action/<id>`.
+    path.strip_prefix("/api/car/")
+        .is_some_and(|rest| match rest.split_once('/') {
+            Some((token, "dashboard")) => token_ok(token),
+            Some((token, tail)) => {
+                token_ok(token) && tail.strip_prefix("action/").is_some_and(token_ok)
+            }
+            None => false,
+        })
 }
 
 /// Middleware: identifies the caller and leaves it in the request.
@@ -546,6 +557,11 @@ mod tests {
         assert!(!torque_upload("/api/torque/a/b"));
         assert!(!torque_upload("/api/torque/../devices"));
         assert!(!torque_upload("/api/torques/abc"));
+        assert!(torque_upload("/api/car/abc/dashboard"));
+        assert!(torque_upload("/api/car/abc/action/warm"));
+        assert!(!torque_upload("/api/car/abc/devices"));
+        assert!(!torque_upload("/api/car/abc/action/../x"));
+        assert!(!torque_upload("/api/car/abc"));
         assert_eq!(phone_report("/api/devices"), None);
     }
 

@@ -233,6 +233,9 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
             get(vehicles::torque).post(vehicles::torque),
         )
         .route("/api/vehicles", get(vehicles::list))
+        // The car's own screen (same token, same Access bypass as Torque).
+        .route("/api/car/{token}/dashboard", get(vehicles::dashboard))
+        .route("/api/car/{token}/action/{id}", post(vehicles::action))
         .route("/api/mobile/phones/{id}", put(phones::assign))
         .route("/api/phones/{id}", axum::routing::delete(phones::remove))
         .route(

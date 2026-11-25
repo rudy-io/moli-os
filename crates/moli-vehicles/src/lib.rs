@@ -75,6 +75,31 @@ pub struct VehicleConfig {
     pub mil_key: Option<String>,
     #[serde(default)]
     pub maintenance: Vec<Item>,
+    /// What the car's own screen may read of the house (presence, a
+    /// temperature, the doors): nothing else is ever shown to it.
+    #[serde(default)]
+    pub share: Vec<Shared>,
+    /// What the car's screen may order, each a fixed point and value.
+    #[serde(default)]
+    pub action: Vec<CarAction>,
+}
+
+/// A point of the house shown on the car's screen, under its own id.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Shared {
+    pub id: String,
+    pub point: String,
+}
+
+/// An order the car's screen may give: one point, one value.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CarAction {
+    pub id: String,
+    pub name: String,
+    pub point: String,
+    pub value: serde_json::Value,
 }
 
 /// Torque keys Moli knows, the point each becomes, its unit.
@@ -125,6 +150,13 @@ fn id_ok(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
+fn point_ok(p: &str) -> bool {
+    p.len() <= 160
+        && p.split_once('/')
+            .is_some_and(|(d, k)| d.contains(':') && !d.is_empty() && !k.is_empty())
+        && !p.chars().any(char::is_control)
+}
+
 impl Config {
     fn check(&self) -> anyhow::Result<()> {
         ensure!(
@@ -159,6 +191,47 @@ impl Config {
                 "vehicle {:?}: {MAX_ITEMS} maintenance items at most",
                 v.id
             );
+            ensure!(
+                v.share.len() <= 40 && v.action.len() <= 20,
+                "vehicle {:?}: 40 shared points and 20 actions at most",
+                v.id
+            );
+            let mut shown = std::collections::HashSet::new();
+            for s in &v.share {
+                ensure!(
+                    id_ok(&s.id) && shown.insert(&s.id),
+                    "share id {:?}: a-z, 0-9, _ or -, once",
+                    s.id
+                );
+                ensure!(
+                    point_ok(&s.point),
+                    "share {:?}: a point <device>/<key>",
+                    s.id
+                );
+            }
+            let mut orders = std::collections::HashSet::new();
+            for a in &v.action {
+                ensure!(
+                    id_ok(&a.id) && orders.insert(&a.id),
+                    "action id {:?}: a-z, 0-9, _ or -, once",
+                    a.id
+                );
+                ensure!(
+                    point_ok(&a.point),
+                    "action {:?}: a point <device>/<key>",
+                    a.id
+                );
+                ensure!(
+                    !a.name.trim().is_empty() && a.name.chars().count() <= 40,
+                    "action {:?}: a name of 1–40 characters",
+                    a.id
+                );
+                ensure!(
+                    !a.value.is_object() && !a.value.is_array() && !a.value.is_null(),
+                    "action {:?}: value is a number, a boolean or a text",
+                    a.id
+                );
+            }
             let mut items = std::collections::HashSet::new();
             for item in &v.maintenance {
                 ensure!(
@@ -298,6 +371,8 @@ enum Event {
 #[derive(Clone, Debug)]
 pub struct Gateway {
     config: Arc<Config>,
+    /// The driver's instance, once it runs (`<instance>:<vehicle>`).
+    instance: Arc<std::sync::OnceLock<String>>,
     store: Arc<Store>,
     tx: mpsc::Sender<Event>,
 }
@@ -360,6 +435,34 @@ impl Gateway {
             .map_err(|_| anyhow::anyhow!(moli_i18n::tr!("pilotes.vehicles.occupe")))
     }
 
+    /// The vehicle's own device id, once the driver runs.
+    #[must_use]
+    pub fn device_id(&self, vehicle: &str) -> Option<String> {
+        self.instance.get().map(|i| format!("{i}:{vehicle}"))
+    }
+
+    /// What the vehicle's screen may read of the house.
+    #[must_use]
+    pub fn shared(&self, vehicle: &str) -> Vec<Shared> {
+        self.config
+            .vehicle
+            .iter()
+            .find(|v| v.id == vehicle)
+            .map(|v| v.share.clone())
+            .unwrap_or_default()
+    }
+
+    /// What the vehicle's screen may order.
+    #[must_use]
+    pub fn actions(&self, vehicle: &str) -> Vec<CarAction> {
+        self.config
+            .vehicle
+            .iter()
+            .find(|v| v.id == vehicle)
+            .map(|v| v.action.clone())
+            .unwrap_or_default()
+    }
+
     /// The vehicles, their books and what is due.
     #[must_use]
     pub fn list(&self) -> Vec<VehicleView> {
@@ -410,6 +513,7 @@ pub fn open(config: Config, data_dir: &Path) -> anyhow::Result<(Gateway, Vehicle
     let (tx, rx) = mpsc::channel(64);
     let gateway = Gateway {
         config: Arc::new(config),
+        instance: Arc::default(),
         store,
         tx,
     };
@@ -932,6 +1036,10 @@ impl State<'_> {
 }
 
 async fn run(this: &Vehicles, ctx: &mut DriverCtx) -> anyhow::Result<()> {
+    let _ = this
+        .gateway
+        .instance
+        .set(ctx.instance().as_str().to_owned());
     let mut state = State {
         this,
         live: HashMap::new(),
@@ -991,6 +1099,16 @@ mod tests {
                     every_km: Some(15_000.0),
                     every_months: Some(12),
                 }],
+                share: vec![Shared {
+                    id: "door".into(),
+                    point: "z2m:door/contact".into(),
+                }],
+                action: vec![CarAction {
+                    id: "warm".into(),
+                    name: "Warm up".into(),
+                    point: "helpers:target/value".into(),
+                    value: serde_json::json!(21),
+                }],
             }],
         }
     }
@@ -1021,6 +1139,12 @@ mod tests {
         assert!(c.check().is_err());
         let mut c = config();
         c.vehicle.push(c.vehicle[0].clone());
+        assert!(c.check().is_err());
+        let mut c = config();
+        c.vehicle[0].share[0].point = "nothing".into();
+        assert!(c.check().is_err());
+        let mut c = config();
+        c.vehicle[0].action[0].value = serde_json::json!({ "a": 1 });
         assert!(c.check().is_err());
         assert!(config().check().is_ok());
     }

@@ -63,6 +63,9 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
         return Some(("session", 10));
     }
     // Torque uploads every second or so while driving.
+    if path.starts_with("/api/car/") {
+        return Some(("car", 20));
+    }
     if path.starts_with("/api/torque/") {
         return Some(("vehicle", 60));
     }
