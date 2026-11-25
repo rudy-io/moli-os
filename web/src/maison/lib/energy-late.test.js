@@ -73,3 +73,20 @@ test('the days a late meter never told, not the days not yet published', () => {
   assert.deepEqual([...g.missing].sort(), [1, 2, 4]);
   assert.equal(gaps({ ...report, step: 'hour' }).meters.length, 0);
 });
+
+test('the gas holes only when the chart draws the gas', () => {
+  const day = (i, ids) => ({ start: i * DAY, meters: Object.fromEntries(ids.map((id) => [id, { kwh: 1 }])) });
+  const report = {
+    step: 'day',
+    meters: [
+      { id: 'linky', name: 'Linky', role: 'grid', history: true },
+      { id: 'gaz', name: 'Gaz', role: 'gas', history: true },
+    ],
+    buckets: [day(0, ['linky', 'gaz']), day(1, ['linky']), day(2, ['linky', 'gaz'])],
+  };
+  assert.deepEqual(gaps(report).meters.map((m) => m.id), ['gaz']);
+  assert.deepEqual([...gaps(report).missing], [1]);
+  const drawn = gaps(report, { gas: false });
+  assert.deepEqual(drawn.meters, []);
+  assert.equal(drawn.missing.size, 0);
+});

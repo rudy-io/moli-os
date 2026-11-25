@@ -42,14 +42,18 @@ export function usualFrac(day) {
 /**
  * The days a late meter never told, in a report by day: each meter with its
  * runs of missing days between its first and last day told (the days after
- * the last one are not missing, only not published yet).
+ * the last one are not missing, only not published yet). `gas: false` when
+ * the chart does not draw the gas (`stackGas` off): its missing days would
+ * outline electricity bars and name a meter the chart does not show.
+ * @param {object} report
+ * @param {{ gas?: boolean }} [drawn]
  * @returns {{ meters: {id: string, name: string, runs: {from: number, to: number, days: number}[]}[], missing: Set<number> }}
  */
-export function gaps(report) {
+export function gaps(report, { gas = true } = {}) {
   const out = { meters: [], missing: new Set() };
   if (report?.step !== 'day') return out;
   const buckets = report.buckets ?? [];
-  for (const m of (report.meters ?? []).filter((m) => m.history && LATE_ROLES.includes(m.role))) {
+  for (const m of (report.meters ?? []).filter((m) => m.history && LATE_ROLES.includes(m.role) && (gas || m.role !== 'gas'))) {
     const told = buckets.map((b) => b.meters?.[m.id] != null);
     const first = told.indexOf(true);
     const last = told.lastIndexOf(true);

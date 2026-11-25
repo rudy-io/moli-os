@@ -138,7 +138,7 @@
 
   // Days a late meter never told (Enedis or GRDF down): marked, and named
   // under the chart, rather than a silent hole.
-  const holes = $derived(gaps(report));
+  const holes = $derived(gaps(report, { gas: stackGas }));
   const HOLE = 0.12;
   const shortDay = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', timeZone: tz });
   const runText = (r) => (r.days === 1 ? shortDay(r.from) : t('energie.chart.du_au', { from: shortDay(r.from), to: shortDay(r.to), n: r.days }));
