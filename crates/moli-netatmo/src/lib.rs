@@ -135,7 +135,7 @@ impl StreamUrls {
         } else {
             self.failures = self.failures.saturating_add(1);
             let wait = RETRY_BASE
-                .saturating_mul(1 << self.failures.min(10))
+                .saturating_mul(1 << self.failures.saturating_sub(1).min(10))
                 .min(RETRY_MAX);
             self.retry_at = Some(Instant::now() + wait);
         }
@@ -157,10 +157,20 @@ impl SnapshotSource for CameraSnapshot {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 (guard.local_url.clone(), guard.vpn_url.clone())
             };
-            if let Some(base) = &local
-                && let Ok(img) = fetch_jpeg(&format!("{base}/live/snapshot_720.jpg")).await
-            {
-                return Ok(img);
+            if let Some(base) = &local {
+                if let Ok(img) = fetch_jpeg(&format!("{base}/live/snapshot_720.jpg")).await {
+                    return Ok(img);
+                }
+                // The camera may have changed address: forget it so the next poll looks it up again.
+                let mut guard = self
+                    .urls
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if guard.local_url.as_deref() == Some(base.as_str()) {
+                    guard.local_url = None;
+                    guard.failures = 0;
+                    guard.retry_at = None;
+                }
             }
             if let Some(base) = &vpn {
                 return fetch_jpeg(&format!("{base}/live/snapshot_720.jpg")).await;
@@ -258,9 +268,8 @@ async fn refresh_access_token(
         || looks_corrupted(client_secret)
         || looks_corrupted(refresh_token)
     {
-        return Ok(TokenOutcome::InvalidCredentials(
-            "secret contains spaces or shell characters".into(),
-        ));
+        // Only an explicit invalid_grant is evidence that the refresh token is dead.
+        bail!("netatmo: a secret is invalid; nothing was erased");
     }
     let body = form_encode(&[
         ("grant_type", "refresh_token"),
@@ -356,9 +365,35 @@ fn is_netatmo_vpn_url(url: &str) -> bool {
 /// A camera local address comes from the cloud too: only `http://` to a private
 /// LAN IPv4 address, never a name, a public address or a loopback.
 fn is_private_lan_url(url: &str) -> bool {
-    url_host(url, "http://")
-        .and_then(|h| h.parse::<std::net::Ipv4Addr>().ok())
-        .is_some_and(|ip| ip.is_private())
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let (authority, path) = rest
+        .split_once('/')
+        .map_or((rest, None), |(a, p)| (a, Some(p)));
+    let (host, port) = authority
+        .split_once(':')
+        .map_or((authority, None), |(host, port)| (host, Some(port)));
+    if !host
+        .parse::<std::net::Ipv4Addr>()
+        .is_ok_and(|ip| ip.is_private())
+    {
+        return false;
+    }
+    if let Some(port) = port
+        && (port.is_empty()
+            || !port.bytes().all(|b| b.is_ascii_digit())
+            || !port.parse::<u16>().is_ok_and(|value| value != 0))
+    {
+        return false;
+    }
+    path.is_none_or(|segment| {
+        !segment.is_empty()
+            && segment.len() <= 128
+            && segment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    })
 }
 
 async fn resolve_local_url(vpn_url: &str) -> Option<String> {
@@ -507,7 +542,7 @@ fn build_device(ctx: &DriverCtx, id: &DeviceId, cam: &CameraInfo) -> Device {
                 write: true,
             },
             unit: None,
-            semantic: Semantic::Config,
+            semantic: Semantic::Control,
         },
         PointSpec {
             key: "person".into(),
@@ -898,21 +933,33 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     };
 
     let mut cached_token: Option<(String, Instant)> = None;
-    let Some(initial_token) =
-        ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await?
-    else {
-        ctx.wait_for(moli_i18n::tr!(
-            "pilotes.netatmo.identifiants_manquants",
-            instance = ctx.instance(),
-            missing = "client_id, client_secret, refresh_token"
-        ));
-        ctx.cancelled().await;
-        return Ok(());
+    let initial_token = match ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await
+    {
+        Ok(Some(token)) => Some(token),
+        Ok(None) => {
+            ctx.wait_for(moli_i18n::tr!(
+                "pilotes.netatmo.identifiants_manquants",
+                instance = ctx.instance(),
+                missing = REFRESH_KEY
+            ));
+            ctx.cancelled().await;
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo initial token refresh failed; will retry");
+            None
+        }
     };
 
     let mut cameras: HashMap<DeviceId, CameraInfo> = HashMap::new();
-    sync_cameras(config, ctx, &initial_token, &mut cameras).await?;
-    poll_all_homes(ctx, &initial_token, &cameras).await?;
+    if let Some(token) = initial_token {
+        if let Err(e) = sync_cameras(config, ctx, &token, &mut cameras).await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo initial camera sync failed");
+        }
+        if let Err(e) = poll_all_homes(ctx, &token, &cameras).await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo initial home poll failed");
+        }
+    }
     ctx.ready();
 
     let mut status_tick = tokio::time::interval(POLL_STATUS);
@@ -926,22 +973,43 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     loop {
         tokio::select! {
             _ = status_tick.tick() => {
-                let Some(token) = ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await? else {
-                    return Ok(());
+                let token = match ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await {
+                    Ok(Some(token)) => token,
+                    Ok(None) => return Ok(()),
+                    Err(e) => {
+                        tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo token refresh failed during status poll");
+                        continue;
+                    }
                 };
-                poll_all_homes(ctx, &token, &cameras).await?;
+                if let Err(e) = poll_all_homes(ctx, &token, &cameras).await {
+                    tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo home poll failed");
+                }
             }
             _ = homes_tick.tick() => {
-                let Some(token) = ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await? else {
-                    return Ok(());
+                let token = match ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await {
+                    Ok(Some(token)) => token,
+                    Ok(None) => return Ok(()),
+                    Err(e) => {
+                        tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo token refresh failed during camera sync");
+                        continue;
+                    }
                 };
-                sync_cameras(config, ctx, &token, &mut cameras).await?;
+                if let Err(e) = sync_cameras(config, ctx, &token, &mut cameras).await {
+                    tracing::warn!(instance = %ctx.instance(), error = %e, "netatmo camera sync failed");
+                }
             }
             cmd = ctx.next_command() => {
                 let Some(cmd) = cmd else { return Ok(()) };
-                let Some(token) = ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await? else {
-                    cmd.reply(Err(moli_i18n::tr!("pilotes.netatmo.identifiants_manquants", instance = ctx.instance(), missing = REFRESH_KEY)));
-                    return Ok(());
+                let token = match ensure_token(ctx, &client_id, &client_secret, &mut cached_token).await {
+                    Ok(Some(token)) => token,
+                    Ok(None) => {
+                        cmd.reply(Err(moli_i18n::tr!("pilotes.netatmo.identifiants_manquants", instance = ctx.instance(), missing = REFRESH_KEY)));
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        cmd.reply(Err(moli_i18n::tr!("pilotes.netatmo.echec", why = format!("{e:#}"))));
+                        continue;
+                    }
                 };
                 handle_command(ctx, &token, &cameras, cmd).await;
             }
@@ -965,6 +1033,18 @@ mod tests {
         assert!(!is_invalid_grant(StatusCode::UNAUTHORIZED, b"not json"));
     }
 
+    /// A secret pasted with a stray space is an error, never `InvalidCredentials`
+    /// (which would erase a valid `refresh_token`). Rejected before any network call.
+    #[tokio::test]
+    async fn a_damaged_secret_does_not_clear_the_refresh_token() {
+        assert!(
+            refresh_access_token("id", "secret ", "refresh")
+                .await
+                .is_err()
+        );
+        assert!(refresh_access_token("id", "secret", "").await.is_err());
+    }
+
     #[test]
     fn relay_and_local_addresses_are_checked() {
         assert!(is_netatmo_vpn_url(
@@ -973,21 +1053,29 @@ mod tests {
         assert!(!is_netatmo_vpn_url("http://prodvpn-eu-1.netatmo.net/x"));
         assert!(!is_netatmo_vpn_url("https://netatmo.net.evil.example/x"));
         assert!(!is_netatmo_vpn_url("https://evil.example/x"));
-        assert!(!is_netatmo_vpn_url(&format!(
-            "https://a.netatmo.net{}evil.example/x",
-            '@'
-        )));
+        assert!(!is_netatmo_vpn_url("https://a.netatmo.net@example.com/x"));
         assert!(is_private_lan_url("http://192.168.1.20"));
         assert!(is_private_lan_url("http://10.0.0.5:80"));
+        assert!(is_private_lan_url("http://192.168.1.20/0123abcdef4567"));
+        assert!(is_private_lan_url("http://192.168.1.20:80/abc-DEF_9"));
         assert!(!is_private_lan_url("https://192.168.1.20"));
         assert!(!is_private_lan_url("http://8.8.8.8"));
         assert!(!is_private_lan_url("http://127.0.0.1"));
         assert!(!is_private_lan_url("http://169.254.169.254"));
         assert!(!is_private_lan_url("http://camera.local"));
-        assert!(!is_private_lan_url(&format!(
-            "http://192.168.1.20{}8.8.8.8",
-            '@'
-        )));
+        assert!(!is_private_lan_url(
+            "http://192.168.1.1:8080/n/importe/quoi?x="
+        ));
+        assert!(!is_private_lan_url("http://192.168.1.20/abc?x=1"));
+        assert!(!is_private_lan_url("http://192.168.1.20/abc#x"));
+        assert!(!is_private_lan_url("http://192.168.1.20/a/b"));
+        assert!(!is_private_lan_url("http://192.168.1.20/.."));
+        assert!(!is_private_lan_url("http://192.168.1.20/%2e%2e"));
+        assert!(!is_private_lan_url("http://192.168.1.20:0"));
+        assert!(!is_private_lan_url("http://192.168.1.20:99999"));
+        assert!(!is_private_lan_url("http://192.168.1.20:8o"));
+        assert!(!is_private_lan_url("http://192.168.1.20?x"));
+        assert!(!is_private_lan_url("http://192.168.1.20@example.com"));
     }
 
     #[test]
@@ -995,7 +1083,11 @@ mod tests {
         let mut urls = StreamUrls::default();
         assert!(urls.lookup_due("https://a.netatmo.net"));
         urls.vpn_url = Some("https://a.netatmo.net".into());
+        let before = Instant::now();
         urls.record_lookup(None);
+        let first_wait = urls.retry_at.unwrap().duration_since(before);
+        assert!(Duration::from_secs(29) <= first_wait);
+        assert!(first_wait <= Duration::from_secs(31));
         assert!(!urls.lookup_due("https://a.netatmo.net"));
         let first = urls.retry_at.unwrap();
         urls.record_lookup(None);
