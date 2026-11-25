@@ -58,7 +58,7 @@ impl Pve {
             "/api2/json/nodes/pve/storage" => {
                 include_str!("../../../integrations/proxmox/fixtures/storage.json")
             }
-            "/api2/json/nodes/pve/tasks?typefilter=vzdump&limit=20" => {
+            "/api2/json/nodes/pve/tasks?typefilter=vzdump&source=all&limit=20" => {
                 include_str!("../../../integrations/proxmox/fixtures/tasks.json")
             }
             "/api2/json/nodes/pve/disks/list" => {
@@ -178,6 +178,7 @@ async fn start(port: u16, node: Option<&str>) -> Fixture {
                 token_id: TOKEN_ID.into(),
                 poll_secs: 5,
                 full_percent: 90.0,
+                vm_full_percent: None,
                 backup_hours: 26.0,
             })
             .unwrap(),
@@ -322,6 +323,7 @@ fn a_bad_configuration_is_refused() {
         token_id: TOKEN_ID.into(),
         poll_secs: 60,
         full_percent: 90.0,
+        vm_full_percent: None,
         backup_hours: 26.0,
     };
     assert!(Proxmox::new(good.clone()).is_ok());
@@ -344,6 +346,10 @@ fn a_bad_configuration_is_refused() {
         },
         Config {
             full_percent: 0.0,
+            ..good.clone()
+        },
+        Config {
+            vm_full_percent: Some(150.0),
             ..good.clone()
         },
     ] {

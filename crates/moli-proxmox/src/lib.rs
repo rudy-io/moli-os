@@ -46,6 +46,11 @@ pub struct Config {
     /// Memory, disk or storage use above this, in percent: a problem.
     #[serde(default = "default_full")]
     pub full_percent: f64,
+    /// A virtual machine's memory above this, in percent: a problem. None by
+    /// default: Proxmox counts the guest's disk cache as used, so a Linux VM
+    /// always looks nearly full.
+    #[serde(default)]
+    pub vm_full_percent: Option<f64>,
     /// No successful backup for this long, in hours: a problem.
     #[serde(default = "default_backup_hours")]
     pub backup_hours: f64,
@@ -102,6 +107,9 @@ impl Proxmox {
             config.port > 0
                 && (5..=3600).contains(&config.poll_secs)
                 && (1.0..=100.0).contains(&config.full_percent)
+                && config
+                    .vm_full_percent
+                    .is_none_or(|p| (1.0..=100.0).contains(&p))
                 && (1.0..=24.0 * 31.0).contains(&config.backup_hours),
             invalid()
         );
@@ -111,6 +119,7 @@ impl Proxmox {
     fn limits(&self) -> Limits {
         Limits {
             full: self.config.full_percent,
+            vm_full: self.config.vm_full_percent,
             backup_hours: self.config.backup_hours,
         }
     }
@@ -287,7 +296,8 @@ impl Proxmox {
         let storage = optional(client, &format!("/nodes/{node}/storage")).await?;
         let tasks = optional(
             client,
-            &format!("/nodes/{node}/tasks?typefilter=vzdump&limit=20"),
+            // `source=all`: the running one too (by default, only those ended).
+            &format!("/nodes/{node}/tasks?typefilter=vzdump&source=all&limit=20"),
         )
         .await?;
         let disks_read = if disks_due {

@@ -5,6 +5,7 @@ mod backup;
 mod catalogue;
 mod config;
 mod managed_airzone;
+mod managed_devices;
 mod timezone;
 
 use std::path::PathBuf;
@@ -463,6 +464,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     };
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
+    let device_setup = managed_devices::Manager::start(hub.clone(), &config, cancel.clone());
     // Where the house is, for `dehors:soleil`: the automations hold it (and
     // follow a position chosen from the conversation); they start below.
     let placed: Arc<std::sync::OnceLock<moli_automation::Automations>> = Arc::default();
@@ -499,6 +501,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     let _ = placed.set(automations.clone());
     let surfaces = moli_api::Options {
         airzone_setup: Some(Arc::new(airzone_setup.clone())),
+        device_setup: Some(Arc::new(device_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
         ui_pin,
         history,
@@ -530,6 +533,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     })
     .await?;
     airzone_setup.shutdown().await;
+    device_setup.shutdown().await;
     for task in tasks {
         let _ = task.await;
     }

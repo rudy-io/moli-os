@@ -19,9 +19,10 @@ use anyhow::{Context as _, bail};
 /// SQLite databases: copied through SQLite itself.
 const DATABASES: [&str; 2] = ["history.db", "energy.db"];
 /// Everything else worth keeping (missing ones are skipped).
-const FILES: [&str; 20] = [
+const FILES: [&str; 21] = [
     "moli.toml",
     crate::managed_airzone::FILE,
+    crate::managed_devices::FILE,
     "plan.json",
     "phones.json",
     "former-emails.json",
@@ -142,6 +143,7 @@ pub fn restore(data_dir: &Path, dir: &Path, force: bool) -> anyhow::Result<()> {
         "state.observations.json",
         "private-state.enc",
         crate::managed_airzone::FILE,
+        crate::managed_devices::FILE,
     ]
     .into_iter()
     .filter(|name| !listed.contains_key(*name) && data_dir.join(name).exists())

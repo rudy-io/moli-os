@@ -87,5 +87,9 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+# The fake Meross plug of the tests checks signatures like a real one.
+md-5.workspace = true
+
 [lints]
 workspace = true

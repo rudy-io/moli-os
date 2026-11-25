@@ -1,0 +1,38 @@
+{
+ "data": [
+  {
+   "id": "",
+   "node": "pve",
+   "pid": 612345,
+   "pstart": 3701234,
+   "starttime": 1795152763,
+   "type": "vzdump",
+   "upid": "UPID:pve:00095819:00387A72:6B000F31:vzdump::root@pam:",
+   "user": "root@pam"
+  },
+  {
+   "endtime": 1795141963,
+   "id": "",
+   "node": "pve",
+   "pid": 538081,
+   "pstart": 3664556,
+   "starttime": 1795141801,
+   "status": "OK",
+   "type": "vzdump",
+   "upid": "UPID:pve:000835E1:0037EAAC:6AFFB0A9:vzdump::root@pam:",
+   "user": "root@pam"
+  },
+  {
+   "endtime": 1795112935,
+   "id": "",
+   "node": "pve",
+   "pid": 72504,
+   "pstart": 771508,
+   "starttime": 1795112871,
+   "status": "OK",
+   "type": "vzdump",
+   "upid": "UPID:pve:00011B38:000BC5B4:6AFF3FA7:vzdump::root@pam:",
+   "user": "root@pam"
+  }
+ ]
+}

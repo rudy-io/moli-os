@@ -1873,7 +1873,7 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Protocole** : l'API REST de Proxmox, HTTPS (8006), certificat **épinglé au premier contact** (`PinnedHttps`,
   empreinte sous `cert`) ; `GET` seulement, en-tête `PVEAPIToken` : ni session ni mot de passe, rien dans une adresse.
 - **Configuration** : `host`, `token_id` (`utilisateur@royaume!nom`), `port` (8006), `node` (défaut : le seul nœud),
-  `poll_secs` (60), `full_percent` (90), `backup_hours` (26). **Secret** : `token_secret` (rôle `PVEAuditor`).
+  `poll_secs` (60), `full_percent` (90), `vm_full_percent` (aucun : pas d'alerte mémoire pour une VM, dont Proxmox compte le cache comme occupé), `backup_hours` (26). **Secret** : `token_secret` (rôle `PVEAuditor`).
   Voir `integrations/proxmox/onboarding.md`.
 - **Lectures** : disques toutes les 10 min, mises à jour toutes les heures, configuration d'un invité seulement s'il est
   arrêté (`onboot`, 32 au plus par lecture). Réponses bornées : 4 Mio (`moli-net`), 256 entrées par liste (invités

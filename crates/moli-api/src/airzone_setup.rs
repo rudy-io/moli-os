@@ -166,6 +166,7 @@ impl IntoResponse for SetupError {
         let status = match self.code {
             "duplicate_instance"
             | "duplicate_gateway"
+            | "duplicate_device"
             | "identity_changed"
             | "gateway_disabled"
             | "mode_conflict"
@@ -173,7 +174,7 @@ impl IntoResponse for SetupError {
             | "revocation_not_persisted" => StatusCode::CONFLICT,
             "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
-            "probe_failed" => StatusCode::BAD_GATEWAY,
+            "probe_failed" | "silent" => StatusCode::BAD_GATEWAY,
             "persistence_failed" => StatusCode::INTERNAL_SERVER_ERROR,
             "unavailable" | "shutting_down" | "identity_unavailable" => {
                 StatusCode::SERVICE_UNAVAILABLE
