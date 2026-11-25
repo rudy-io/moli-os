@@ -1,7 +1,7 @@
 <script>
   import { device, value, reachable, act } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
-  import { scheduleSpec, parseDay, formatDay, sameDay, addStep, moveStep, setStepDeg, removeStep, writeDays, hhmm, minutesOf, suggestMinute, GRID } from '../lib/schedule.js';
+  import { scheduleSpec, parseDay, formatDay, sameDay, addStep, moveStep, setStepDeg, removeStep, writeDays, hhmm, minutesOf, suggestMinute, programmesOf, GRID } from '../lib/schedule.js';
 
   // A valve's weekly schedule, one day at a time. Writing it is an order like any
   // other: it goes through `act`, the hub's normal path and the guard.
@@ -16,8 +16,22 @@
   let copying = $state(false);
   let saving = $state(false);
 
+  // A Moli heating room keeps a week per house programme: the one edited is chosen
+  // here, the one the house plays by default.
+  const HOUSE = 'chauffage:maison';
+  const programmes = $derived(id.startsWith('chauffage:') ? programmesOf(d, device(HOUSE)) : []);
+  const playing = $derived(value(HOUSE, 'programme'));
+  let programme = $state(null);
+  const picked = $derived(programmes.find((p) => p.name === programme) ?? programmes.find((p) => p.name === playing) ?? programmes[0]);
+  const first = $derived(programmes[0]);
+  const pickedKey = $derived(picked?.key);
+  const keyOf = (key) => (picked ? `weekly_schedule_${picked.key}_${key}` : `weekly_schedule_${key}`);
+
   const current = $derived(day && spec?.days.includes(day) ? day : spec?.days[0]);
-  const stored = $derived(current ? value(id, `weekly_schedule_${current}`) : null);
+  const own = $derived(current ? value(id, keyOf(current)) : null);
+  // A programme's day never set plays the first programme's.
+  const inherited = $derived(!!picked && pickedKey !== first.key && (own == null || own === ''));
+  const stored = $derived(inherited ? value(id, `weekly_schedule_${first.key}_${current}`) : own);
   const known = $derived(typeof stored === 'string' && stored.length > 0);
   const steps = $derived(spec ? (edited ?? parseDay(spec, stored)) : []);
   const dirty = $derived(!!spec && edited != null && (!known || !sameDay(spec, edited, parseDay(spec, stored))));
@@ -40,6 +54,7 @@
   // Another day, chosen here or beside: what was being edited belonged to the other one.
   $effect(() => {
     void day;
+    void pickedKey;
     edited = null;
     applyTo = [];
     copying = false;
@@ -69,10 +84,18 @@
     saving = true;
     const { stopped } = await writeDays(
       targets.filter((key) => spec.days.includes(key)),
-      (key) => act(`${id}/weekly_schedule_${key}`, text, t('commun.vanne.prog.label', { name })),
+      (key) => act(`${id}/${keyOf(key)}`, text, t('commun.vanne.prog.label', { name })),
     );
     saving = false;
     if (!stopped) cancel();
+  }
+
+  // Back to the first programme's day.
+  async function inherit() {
+    if (!current || inherited || saving || !reachable(id)) return;
+    saving = true;
+    await act(`${id}/${keyOf(current)}`, '', t('commun.vanne.prog.label', { name }));
+    saving = false;
   }
 
   // A field the table did not take back shows what the table holds again.
@@ -92,6 +115,16 @@
 
 {#if spec}
   <div class="schedule" class:unreachable={!reachable(id)}>
+    {#if programmes.length > 1}
+      <div class="days" role="group" aria-label={t('commun.vanne.prog.programme')}>
+        {#each programmes as p (p.key)}
+          <button class:active={p.key === pickedKey} onclick={() => (programme = p.name)} aria-pressed={p.key === pickedKey}>{p.name}</button>
+        {/each}
+      </div>
+      {#if picked && picked.name !== playing && playing != null}
+        <p class="note">{t('commun.vanne.prog.joue', { programme: playing })}</p>
+      {/if}
+    {/if}
     <div class="days" role="group" aria-label={t('commun.vanne.prog.jour')}>
       {#each spec.days as key (key)}
         <button class:active={key === current} onclick={() => pick(key)} aria-pressed={key === current}>{dayName(key)}</button>
@@ -102,6 +135,11 @@
     {/if}
     {#if !known}
       <p class="note">{t('commun.vanne.prog.inconnu')}</p>
+    {/if}
+    {#if inherited}
+      <p class="note">{t('commun.vanne.prog.repris', { programme: first.name })}</p>
+    {:else if picked && pickedKey !== first.key && !dirty}
+      <button class="add" disabled={saving || !reachable(id)} onclick={inherit}>{t('commun.vanne.prog.reprendre', { programme: first.name })}</button>
     {/if}
     <ul>
       {#each steps as step, i (step.min)}

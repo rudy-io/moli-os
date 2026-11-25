@@ -157,3 +157,30 @@ export function removeStep(spec, steps, index) {
 
 /** True when two days make the same text. */
 export const sameDay = (spec, a, b) => formatDay(spec, a) === formatDay(spec, b);
+
+const FOLD = [
+  ['àáâãäå', 'a'], ['ç', 'c'], ['èéêë', 'e'], ['ìíîï', 'i'], ['ñ', 'n'], ['òóôõöø', 'o'],
+  ['ùúûü', 'u'], ['ýÿ', 'y'], ['œ', 'oe'], ['æ', 'ae'], ['ß', 'ss'],
+];
+
+/** A house programme's key in a room's points (`weekly_schedule_<key>_<day>`), as
+ *  Moli computes it (crates/moli-heating/src/house.rs): lowercase ASCII letters and
+ *  digits, accents dropped, anything else one `_`. */
+export function programmeKey(name) {
+  let out = '';
+  for (const c of String(name ?? '').toLowerCase()) {
+    const folded = /[a-z0-9]/.test(c) ? c : FOLD.find(([from]) => from.includes(c))?.[1] ?? '_';
+    if (folded === '_' && (!out || out.endsWith('_'))) continue;
+    out += folded;
+  }
+  return out.replace(/_+$/, '');
+}
+
+/** The house's programmes a heating room keeps a week of, in order (the first one is
+ *  the default, whose days the others fall back on): `[{ name, key }]`. Empty when
+ *  the house has none or the room does not keep them. */
+export function programmesOf(room, house) {
+  const names = pointOf(house, 'programme')?.kind?.values ?? [];
+  const list = names.map((name) => ({ name, key: programmeKey(name) }));
+  return list.length && list.every((p) => pointOf(room, `weekly_schedule_${p.key}_monday`)) ? list : [];
+}
