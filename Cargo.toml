@@ -99,7 +99,7 @@ hyper = { version = "1", default-features = false, features = ["client", "http1"
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 md-5 = "0.11"
 libc = "0.2"
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "1.0", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
 # Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
 num-bigint = "0.5"
