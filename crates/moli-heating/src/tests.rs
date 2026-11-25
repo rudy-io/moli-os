@@ -1696,3 +1696,443 @@ fn a_bad_house_is_refused() {
     assert!(house::check(&good(), &taken).is_err());
     assert!(house::check(&good(), &[]).is_err());
 }
+
+/// Two boiler relays, `a` and `b`, each a writable `on`. Every order is
+/// counted; with `refuse`, refused.
+#[derive(Clone, Debug, Default)]
+struct Relays {
+    orders: Arc<std::sync::atomic::AtomicUsize>,
+    refuse: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Relays {
+    fn orders(&self) -> usize {
+        self.orders.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Driver for Relays {
+    fn kind(&self) -> &'static str {
+        "relays"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            for native in ["a", "b"] {
+                let id = ctx.device_id(native);
+                ctx.upsert_device(Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: native.into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: Some("Chaufferie".into()),
+                    members: Vec::new(),
+                    points: vec![PointSpec {
+                        key: "on".into(),
+                        label: "on".into(),
+                        kind: Kind::Binary,
+                        access: Access {
+                            read: true,
+                            write: true,
+                        },
+                        unit: None,
+                        semantic: Semantic::OnOff,
+                    }],
+                });
+                ctx.set_state(&id, "on", Value::Bool(false));
+            }
+            ctx.ready();
+            while let Some(command) = ctx.next_command().await {
+                self.orders
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                    command.reply_refused("asleep".into());
+                    continue;
+                }
+                ctx.set_state(&command.device.id, &command.key, command.value.clone());
+                command.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+fn two_rooms() -> Vec<Room> {
+    #[derive(Deserialize)]
+    struct File {
+        heating: Vec<Room>,
+    }
+    toml::from_str::<File>(
+        r#"
+        [[heating]]
+        id = "parents"
+        name = "Chambre"
+        sensor = "maison:piece/value"
+        valves = ["vannes:v/sp"]
+        initial = 20.0
+        [[heating]]
+        id = "bureau"
+        name = "Bureau"
+        sensor = "maison:vanne_t/value"
+        valves = ["vannes:entiere/sp"]
+        initial = 20.0
+        "#,
+    )
+    .unwrap()
+    .heating
+}
+
+fn sources(text: &str) -> Vec<Source> {
+    #[derive(Deserialize)]
+    struct File {
+        heating_source: Vec<Source>,
+    }
+    toml::from_str::<File>(text).unwrap().heating_source
+}
+
+/// The relays, beside the stand-ins.
+async fn relays_on(hub: &Hub, cancel: &CancellationToken) -> Relays {
+    let relays = Relays::default();
+    spawn_driver(
+        hub,
+        InstanceId::from("relais"),
+        Arc::new(relays.clone()),
+        cancel.clone(),
+    );
+    until_bool(hub, "relais:b/on", false).await;
+    relays
+}
+
+/// Looked at every 20 ms, a minute of 100 ms.
+fn quick(h: &mut Heating, sources: Vec<Source>) {
+    h.tick = Duration::from_millis(20);
+    h.minute = Duration::from_millis(100);
+    h.sources = sources;
+}
+
+/// The house with its relays and its sources.
+async fn boiler_house(
+    rooms: Vec<Room>,
+    sources: Vec<Source>,
+    tune: impl FnOnce(&mut Heating),
+) -> (Hub, CancellationToken, Relays) {
+    let (hub, cancel) = stand_ins_running().await;
+    let relays = relays_on(&hub, &cancel).await;
+    start(
+        &hub,
+        rooms,
+        None,
+        |h| {
+            quick(h, sources);
+            tune(h);
+        },
+        &cancel,
+    );
+    (hub, cancel, relays)
+}
+
+async fn sensor(hub: &Hub, at: &str, value: f64) {
+    hub.command(&point(at), Value::Float(value), Origin::Ui, None)
+        .await
+        .unwrap();
+}
+
+fn number(hub: &Hub, at: &str) -> f64 {
+    hub.state(&point(at))
+        .and_then(|s| s.value.as_f64())
+        .unwrap_or(f64::NAN)
+}
+
+const BOILER: &str = r#"
+    [[heating_source]]
+    id = "chaudiere"
+    name = "Chaudière"
+    switch = "relais:a/on"
+"#;
+
+#[tokio::test]
+async fn the_source_starts_when_a_room_asks_and_stops_when_none_does() {
+    let (hub, cancel, relays) = boiler_house(
+        rooms(),
+        sources(&format!("{BOILER}min_on = 0\nmin_off = 0\nkeepalive = 0\n")),
+        |_| {},
+    )
+    .await;
+    let source = |key: &str| format!("chauffage:chaudiere/{key}");
+    // 20.9 for 20: nobody asks, the relay is told so once.
+    until_bool(&hub, &source("demand"), false).await;
+    until_text(&hub, &source("demanding"), "").await;
+    until_bool(&hub, &source("on"), false).await;
+    for _ in 0..50 {
+        if relays.orders() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(relays.orders(), 1);
+    assert_eq!(
+        hub.device(&DeviceId::from("chauffage:chaudiere"))
+            .unwrap()
+            .device
+            .members,
+        [DeviceId::from("relais:a")]
+    );
+
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    until_bool(&hub, &source("on"), true).await;
+    until_bool(&hub, &source("demand"), true).await;
+    until_text(&hub, &source("demanding"), "Chambre").await;
+    until(&hub, &source("starts_today"), 1.0).await;
+
+    sensor(&hub, "maison:piece/value", 21.0).await;
+    until_bool(&hub, "relais:a/on", false).await;
+    until_text(&hub, &source("demanding"), "").await;
+
+    // A room switched off asks for nothing, whatever its sensor.
+    sensor(&hub, "maison:piece/value", 19.0).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    until(&hub, &source("starts_today"), 2.0).await;
+    hub.command(
+        &point("chauffage:parents/system_mode"),
+        Value::from("off"),
+        Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    until_bool(&hub, "relais:a/on", false).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn the_source_waits_its_delay_and_never_short_cycles() {
+    // A minute of 100 ms: 60 s of delay is 100 ms, 4 minutes 400 ms.
+    let (hub, cancel, _) = boiler_house(
+        rooms(),
+        sources(&format!(
+            "{BOILER}delay = 60\nmin_on = 4\nmin_off = 4\nkeepalive = 0\n"
+        )),
+        |_| {},
+    )
+    .await;
+    until_bool(&hub, "relais:a/on", false).await;
+    let asked = std::time::Instant::now();
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    assert!(asked.elapsed() >= Duration::from_millis(100), "delay");
+
+    let on = std::time::Instant::now();
+    sensor(&hub, "maison:piece/value", 21.0).await;
+    until_bool(&hub, "relais:a/on", false).await;
+    assert!(
+        on.elapsed() >= Duration::from_millis(330),
+        "min_on: {:?}",
+        on.elapsed()
+    );
+
+    let off = std::time::Instant::now();
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    assert!(
+        off.elapsed() >= Duration::from_millis(330),
+        "min_off: {:?}",
+        off.elapsed()
+    );
+    until(&hub, "chauffage:chaudiere/starts_today", 2.0).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn the_state_is_sent_again_at_the_keepalive_pace_and_retried_when_refused() {
+    // Every minute (100 ms), unchanged: not at every look (20 ms).
+    let (hub, cancel, relays) = boiler_house(
+        rooms(),
+        sources(&format!("{BOILER}keepalive = 1\n")),
+        |_| {},
+    )
+    .await;
+    until_bool(&hub, "chauffage:chaudiere/on", false).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let before = relays.orders();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let sent = relays.orders() - before;
+    assert!((3..=12).contains(&sent), "{sent} orders in 600 ms");
+
+    // Refused: tried again at the same pace, not at every look.
+    relays
+        .refuse
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let before = relays.orders();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let tried = relays.orders() - before;
+    assert!((3..=12).contains(&tried), "{tried} tries in 600 ms");
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn without_keepalive_the_state_is_sent_once_after_the_start_quiet_period() {
+    let (hub, cancel, relays) =
+        boiler_house(rooms(), sources(&format!("{BOILER}keepalive = 0\n")), |h| {
+            h.settle = Duration::from_millis(300);
+        })
+        .await;
+    until_bool(&hub, "chauffage:chaudiere/on", false).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(relays.orders(), 0, "nothing while Moli starts");
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(relays.orders(), 1, "then once");
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn each_source_heeds_its_own_rooms() {
+    let (hub, cancel, _) = boiler_house(
+        two_rooms(),
+        sources(
+            r#"
+            [[heating_source]]
+            id = "chaudiere"
+            name = "Chaudière"
+            switch = "relais:a/on"
+            rooms = ["parents"]
+            min_on = 0
+            min_off = 0
+            [[heating_source]]
+            id = "pac"
+            name = "PAC"
+            switch = "relais:b/on"
+            rooms = ["bureau"]
+            min_on = 0
+            min_off = 0
+            "#,
+        ),
+        |_| {},
+    )
+    .await;
+    until_bool(&hub, "chauffage:pac/on", false).await;
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    until_bool(&hub, "chauffage:pac/demand", false).await;
+    until_bool(&hub, "relais:b/on", false).await;
+
+    sensor(&hub, "maison:vanne_t/value", 18.0).await;
+    until_bool(&hub, "relais:b/on", true).await;
+    until_text(&hub, "chauffage:pac/demanding", "Bureau").await;
+    until_text(&hub, "chauffage:chaudiere/demanding", "Chambre").await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn the_source_starts_only_when_enough_rooms_ask() {
+    let (hub, cancel, _) = boiler_house(
+        two_rooms(),
+        sources(&format!("{BOILER}min_rooms = 2\nmin_on = 0\nmin_off = 0\n")),
+        |_| {},
+    )
+    .await;
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_text(&hub, "chauffage:chaudiere/demanding", "Chambre").await;
+    until_bool(&hub, "chauffage:chaudiere/demand", false).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    until_bool(&hub, "relais:a/on", false).await;
+
+    sensor(&hub, "maison:vanne_t/value", 18.0).await;
+    until_text(&hub, "chauffage:chaudiere/demanding", "Chambre, Bureau").await;
+    until_bool(&hub, "chauffage:chaudiere/demand", true).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn the_day_counts_are_kept_across_a_restart() {
+    let (hub, cancel) = stand_ins_running().await;
+    relays_on(&hub, &cancel).await;
+    let boiler = || sources(&format!("{BOILER}min_on = 0\nmin_off = 0\n"));
+    let heating = CancellationToken::new();
+    start(&hub, two_rooms(), None, |h| quick(h, boiler()), &heating);
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let runtime = number(&hub, "chauffage:chaudiere/runtime_today");
+    let heated = number(&hub, "chauffage:parents/heating_minutes_today");
+    assert!(runtime >= 5.0, "{runtime} minutes on");
+    assert!(heated >= 5.0, "{heated} minutes of demand");
+    assert_eq!(number(&hub, "chauffage:bureau/heating_minutes_today"), 0.0);
+    until(&hub, "chauffage:chaudiere/starts_today", 1.0).await;
+
+    let heating = restart(heating, |c| {
+        start(&hub, two_rooms(), None, |h| quick(h, boiler()), c);
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(number(&hub, "chauffage:chaudiere/runtime_today") >= runtime);
+    assert!(number(&hub, "chauffage:parents/heating_minutes_today") >= heated);
+    // Still on, as before: not a new start.
+    until_bool(&hub, "chauffage:chaudiere/on", true).await;
+    until(&hub, "chauffage:chaudiere/starts_today", 1.0).await;
+    heating.cancel();
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn nobody_home_the_boiler_stops_and_a_room_taken_out_starts_it_again() {
+    let (hub, cancel) = stand_ins_running().await;
+    relays_on(&hub, &cancel).await;
+    let house = table(
+        r#"
+        [heating_house]
+        programmes = ["Normal"]
+        away = "vannes:presence/away"
+        away_delay = 2
+        away_mode = "off"
+        "#,
+    );
+    start(
+        &hub,
+        rooms(),
+        Some(house),
+        |h| quick(h, sources(&format!("{BOILER}min_on = 0\nmin_off = 0\n"))),
+        &cancel,
+    );
+    sensor(&hub, "maison:piece/value", 19.5).await;
+    until_bool(&hub, "relais:a/on", true).await;
+
+    // Frost guard while nobody is home: the room asks for nothing.
+    away(&hub, true).await;
+    until_bool(&hub, "chauffage:parents/heat_demand", false).await;
+    until_bool(&hub, "relais:a/on", false).await;
+
+    // A person takes the room out of the absence: it asks again.
+    order_as(
+        &hub,
+        "chauffage:parents/occupied_heating_setpoint",
+        Value::Float(21.0),
+        Origin::Ui,
+    )
+    .await;
+    until_bool(&hub, "chauffage:parents/away_lifted", true).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    until_text(&hub, "chauffage:chaudiere/demanding", "Chambre").await;
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_boost_over_the_room_starts_the_boiler() {
+    let (hub, cancel, _) = boiler_house(
+        rooms(),
+        sources(&format!("{BOILER}min_on = 0\nmin_off = 0\n")),
+        |_| {},
+    )
+    .await;
+    // 20.9 for 20: nothing asked. +2: 22, the room asks.
+    until_bool(&hub, "chauffage:chaudiere/demand", false).await;
+    order_to(&hub, "boost", Value::Float(2.0)).await.unwrap();
+    until_bool(&hub, "chauffage:parents/heat_demand", true).await;
+    until_bool(&hub, "relais:a/on", true).await;
+    order_to(&hub, "boost", Value::Float(0.0)).await.unwrap();
+    until_bool(&hub, "relais:a/on", false).await;
+    cancel.cancel();
+}

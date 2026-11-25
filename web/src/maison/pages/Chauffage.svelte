@@ -14,6 +14,11 @@
   const heaters = $derived(Object.values(hub.devices).filter((d) => deviceKind(d) === 'heating'));
   const pacs = $derived(heaters.filter((d) => d.points.some((p) => p.key === 'compressor_active')));
   const circuits = $derived(heaters.filter((d) => !pacs.includes(d)).sort((a, b) => a.id.localeCompare(b.id)));
+  const sources = $derived(
+    Object.values(hub.devices)
+      .filter((d) => deviceKind(d) === 'source')
+      .sort((a, b) => nameOf(a.id).localeCompare(nameOf(b.id))),
+  );
   // Every thermostat with a weekly schedule: Moli's room thermostats, Zigbee valves.
   const rooms = $derived(
     Object.values(hub.devices)
@@ -84,8 +89,35 @@
     <p class="page-sub">{t('maison.chauffage.sous_titre')}</p>
   </header>
 
-  {#if !heaters.length && !rooms.length}
+  {#if !heaters.length && !rooms.length && !sources.length}
     <p class="muted">{t('maison.chauffage.aucun')}</p>
+  {/if}
+
+  {#if sources.length}
+    <h2 class="section">{t('maison.chauffage.chaleur.titre')}</h2>
+    <div class="grid">
+      {#each sources as s (s.id)}
+        {@const id = s.id}
+        {@const on = value(id, 'on') === true}
+        {@const asking = value(id, 'demanding')}
+        {@const relay = s.members?.[0]}
+        <section class="card" class:unreachable={!reachable(id)}>
+          <div class="card-head">
+            <h2><Icon name="fire" size={18} />{nameOf(id)}</h2>
+            <span class="state" class:on>{on ? t('maison.chauffage.chaleur.marche') : t('maison.chauffage.chaleur.arret')}</span>
+          </div>
+          <div class="facts">
+            {@render fact(t('maison.chauffage.chaleur.demandent'), asking ? asking : t('maison.chauffage.chaleur.aucune'))}
+            {@render fact(t('maison.chauffage.chaleur.marche_jour'), typeof value(id, 'runtime_today') === 'number' ? t('maison.chauffage.chaleur.minutes', { n: num(value(id, 'runtime_today'), 0) }) : '—')}
+            {@render fact(t('maison.chauffage.chaleur.demarrages_jour'), num(value(id, 'starts_today'), 0))}
+            {#if relay}
+              {@render fact(t('maison.chauffage.chaleur.relais'), reachable(relay) ? t('maison.chauffage.chaleur.joignable') : t('maison.chauffage.chaleur.injoignable'))}
+            {/if}
+          </div>
+          <p class="muted">{t('maison.chauffage.chaleur.aide')}</p>
+        </section>
+      {/each}
+    </div>
   {/if}
 
   {#if rooms.length}
@@ -258,6 +290,10 @@
     padding: 16px 18px;
     border-radius: var(--r-md);
     background: var(--surface-2);
+  }
+  .section {
+    font-size: 15px;
+    font-weight: 650;
   }
   .unreachable {
     opacity: 0.5;

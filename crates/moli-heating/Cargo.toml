@@ -1,6 +1,6 @@
 [package]
 name = "moli-heating"
-description = "Moli OS heating: a room's own thermostat, kept by Moli, that reads the room's sensor and corrects its valves' setpoints, with a weekly schedule."
+description = "Moli OS heating: a room's own thermostat, kept by Moli, that reads the room's sensor and corrects its valves' setpoints, with a weekly schedule, and starts the heat source while the rooms ask for heat."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

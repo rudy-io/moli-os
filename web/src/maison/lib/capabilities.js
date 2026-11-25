@@ -2,6 +2,11 @@
 export const pointOf = (device, key) => device?.points?.find((point) => point.key === key) ?? null;
 export const canWrite = (device, key) => device?.online !== false && pointOf(device, key)?.access?.write === true;
 
+/** Moli's heat source (`[[heating_source]]`, `chauffage:<id>`): the relay of a
+ *  boiler or a heat pump it starts while the rooms ask for heat. Recognised by
+ *  its points, its model being translated. Its `on` is read-only: never a plug. */
+export const isHeatSource = (device) => ['demand', 'demanding', 'runtime_today', 'starts_today'].every((key) => pointOf(device, key));
+
 /** Controls may opt into their legacy limits, but never replace invalid metadata. */
 export function numericRange(device, key, defaultStep = 0.5, fallback = null) {
   const kind = pointOf(device, key)?.kind;

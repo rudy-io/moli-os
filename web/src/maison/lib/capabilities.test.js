@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice, isValve, climateKeys, alarmPoint, weakensAlarm } from './capabilities.js';
+import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice, isValve, climateKeys, alarmPoint, weakensAlarm, isHeatSource } from './capabilities.js';
 
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const device = (...points) => ({ online: true, points });
@@ -170,4 +170,19 @@ test('a setting that weakens the alarm asks the same confirmation as arming', ()
   assert.equal(weakensAlarm('arm_delay', 0), false);
   assert.equal(weakensAlarm('alarm_sound_duration', 0), false);
   assert.equal(weakensAlarm('keyboard_tone_en', false), false);
+});
+
+test('a heat source is known by its points, not by its translated model', () => {
+  const read = (key, kind) => point(key, kind, false);
+  const source = device(
+    read('on', { type: 'binary' }),
+    read('demand', { type: 'binary' }),
+    read('demanding', { type: 'text' }),
+    read('runtime_today', numeric(0, null, 1)),
+    read('starts_today', numeric(0, null, 1)),
+  );
+  assert.equal(isHeatSource(source), true);
+  assert.equal(isHeatSource(device(point('on', { type: 'binary' }))), false);
+  assert.equal(isHeatSource(device(read('heat_demand', { type: 'binary' }), read('runtime_today', numeric(0, null, 1)))), false);
+  assert.equal(isHeatSource(null), false);
 });

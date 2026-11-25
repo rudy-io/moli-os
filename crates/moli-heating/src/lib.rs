@@ -31,6 +31,7 @@
 //! - `hold_minutes` (writable): in `auto`, how long the setpoint holds before
 //!   the schedule takes over again (0: until the next step), until
 //!   `hold_until` (RFC 3339). See [`temporary`].
+//! - `heating_minutes_today`: minutes of `heat_demand` since local midnight.
 //!
 //! With `[heating_house]`, the house's programmes and `chauffage:maison`
 //! ([`house`]): each room keeps a week per programme, and its
@@ -66,12 +67,18 @@
 //! change of half a degree, at most every [`regulation::MIN_INTERVAL`] unless
 //! the room changed, and never in the first minutes after a start, while
 //! the drivers come back.
+//!
+//! A boiler, a heat pump or a circulation pump started while the rooms ask
+//! for heat: [`source`].
 
 pub mod hand;
 pub mod house;
 pub mod regulation;
 pub mod schedule;
+pub mod source;
 pub mod temporary;
+
+pub use source::Source;
 
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
@@ -302,7 +309,8 @@ pub struct Heating {
     settle: Duration,
     /// [`regulation::URGENT_FLOOR`], [`regulation::MIN_INTERVAL`],
     /// [`TICK`], [`hand::HAND_HOLD`], [`hand::AIRING_HOLD`], [`FRESH`], and a
-    /// minute of a boost or a hold: shorter in the tests.
+    /// minute (a boost, a hold, a source's durations, the counts of the
+    /// day): shorter in the tests.
     floor: Duration,
     interval: Duration,
     tick: Duration,
@@ -312,6 +320,7 @@ pub struct Heating {
     minute: Duration,
     /// The absence point said once to be writable.
     away_refused: AtomicBool,
+    sources: Vec<Source>,
 }
 
 impl Heating {
@@ -332,7 +341,15 @@ impl Heating {
             fresh: FRESH,
             minute: Duration::from_secs(60),
             away_refused: AtomicBool::new(false),
+            sources: Vec::new(),
         }
+    }
+
+    /// The heat sources the rooms start (`[[heating_source]]`).
+    #[must_use]
+    pub fn with_sources(mut self, sources: Vec<Source>) -> Self {
+        self.sources = sources;
+        self
     }
 }
 
@@ -402,6 +419,8 @@ struct RoomRun {
     setpoint_hold: Option<Timed>,
     /// A person ordered the room during the absence: out of it until it ends.
     outside: bool,
+    /// How long it asked today.
+    heated: Duration,
 }
 
 impl RoomRun {
@@ -720,6 +739,10 @@ fn device(ctx: &DriverCtx, room: &Room, house: Option<&House>) -> Device {
         None,
         Semantic::Other,
     ));
+    points.push(source::minutes(
+        "heating_minutes_today",
+        moli_i18n::tr!("pilotes.chauffage.demande_jour"),
+    ));
     Device {
         id: ctx.device_id(&room.id),
         instance: ctx.instance().clone(),
@@ -863,6 +886,7 @@ fn restore(
         shift,
         read: None,
         demand: None,
+        heated: Duration::ZERO,
         boost,
         setpoint_hold,
         outside,
@@ -1623,21 +1647,25 @@ impl Driver for Heating {
                         .collect::<Vec<_>>()
                 });
                 ctx.upsert_device(device(ctx, room, house));
-                runs.push(restore(
-                    ctx,
-                    room,
-                    house,
-                    (play(&hrun).programme, left.as_deref()),
-                ));
+                let mut run = restore(ctx, room, house, (play(&hrun).programme, left.as_deref()));
+                self.restore_heated(ctx, &mut run);
+                runs.push(run);
             }
+            let mut sources: Vec<_> = self
+                .sources
+                .iter()
+                .map(|s| self.restore_source(ctx, s))
+                .collect();
             ctx.ready();
             let started = Instant::now();
+            let mut clock = self.clock();
             let mut tick = tokio::time::interval(self.tick);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     command = ctx.next_command() => {
                         let Some(command) = command else { return Ok(()) };
+                        self.account(ctx, &mut clock, &mut runs, &mut sources);
                         let settled = started.elapsed() >= self.settle;
                         if let (Some(house), Some(h)) = (house, hrun.as_mut())
                             && h.id == command.device.id
@@ -1646,6 +1674,9 @@ impl Driver for Heating {
                             let play = h.playing();
                             for (room, run) in self.rooms.iter().zip(&mut runs) {
                                 self.look(ctx, room, run, (settled, play)).await;
+                            }
+                            for (source, srun) in self.sources.iter().zip(&mut sources) {
+                                self.drive(ctx, source, srun, &runs, settled).await;
                             }
                             continue;
                         }
@@ -1656,8 +1687,12 @@ impl Driver for Heating {
                         let (room, run) = (&self.rooms[index], &mut runs[index]);
                         self.command(ctx, room, run, play(&hrun), command);
                         self.look(ctx, room, run, (settled, play(&hrun))).await;
+                        for (source, srun) in self.sources.iter().zip(&mut sources) {
+                            self.drive(ctx, source, srun, &runs, settled).await;
+                        }
                     }
                     _ = tick.tick() => {
+                        self.account(ctx, &mut clock, &mut runs, &mut sources);
                         let settled = started.elapsed() >= self.settle;
                         if let (Some(house), Some(h)) = (house, hrun.as_mut()) {
                             self.house_tick(ctx, house, (h, &mut runs));
@@ -1666,6 +1701,9 @@ impl Driver for Heating {
                         for (room, run) in self.rooms.iter().zip(&mut runs) {
                             self.follow(ctx, run, play);
                             self.look(ctx, room, run, (settled, play)).await;
+                        }
+                        for (source, srun) in self.sources.iter().zip(&mut sources) {
+                            self.drive(ctx, source, srun, &runs, settled).await;
                         }
                     }
                 }

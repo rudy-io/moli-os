@@ -1539,12 +1539,15 @@ fn spawn_house_drivers(
         tasks.push(spawn_driver(
             hub,
             InstanceId::from(moli_heating::INSTANCE),
-            Arc::new(moli_heating::Heating::new(
-                hub.clone(),
-                config.heating.clone(),
-                config.heating_house.clone(),
-                zone,
-            )),
+            Arc::new(
+                moli_heating::Heating::new(
+                    hub.clone(),
+                    config.heating.clone(),
+                    config.heating_house.clone(),
+                    zone,
+                )
+                .with_sources(config.heating_sources.clone()),
+            ),
             cancel.clone(),
         ));
     }
