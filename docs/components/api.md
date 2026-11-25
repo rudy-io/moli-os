@@ -859,8 +859,11 @@ est un résultat `isError: true` avec un message texte (pas une erreur JSON-RPC)
 exception : `camera_snapshot` renvoie un bloc image (base64 + type MIME).
 
 Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/mcp`
-(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent ; `…/mcp/readonly`
-pour un agent qui ne doit que lire.
+(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent. **Par défaut, un agent
+qui n'a qu'à regarder se branche sur `…/mcp/readonly`** (`claude mcp add --transport http moli
+http://<hôte>:8790/mcp/readonly`) : les écritures n'y sont ni listées ni appelables, refusées par
+le serveur et pas seulement par la bonne volonté du client. `/mcp` seulement pour un agent qui
+doit agir.
 
 **Annotations** (MCP `ToolAnnotations`, dans `tools/list`) : `readOnlyHint: true` sur les
 11 lectures ; `readOnlyHint: false, destructiveHint: false` sur `set_label` et

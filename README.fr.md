@@ -59,7 +59,8 @@ intégration). Guide : [`docs/components/installation.md`](docs/components/insta
 **Avec un agent** : ouvrir ce dépôt dans Claude Code et lui demander d'installer Moli : le skill
 `installer-moli` (`.claude/skills/`) vous accompagne, vos codes et secrets toujours tapés par
 vous. Les autres agents lisent [`AGENTS.md`](AGENTS.md). Une fois lancé, un agent se branche
-sur `http://<adresse>:8790/mcp`.
+sur `http://<adresse>:8790/mcp`, ou sur `…/mcp/readonly` s'il n'a qu'à regarder (conseillé : les
+écritures y sont refusées par le serveur).
 
 ## Développer
 

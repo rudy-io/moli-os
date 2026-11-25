@@ -27,6 +27,7 @@ Construire, lancer, sauvegarder, revenir en arrière : `docs/components/exploita
 ## Piloter une instance
 
 - MCP : `http://<hôte>:8790/mcp` (streamable HTTP). Liste des outils et règles : `docs/components/api.md`.
+  Un agent qui n'a qu'à regarder se branche sur `…/mcp/readonly` : les lectures seulement, les écritures y sont refusées par le serveur. `/mcp` seulement s'il doit agir.
 - REST + SSE : `http://<hôte>:8790/api/…` (même doc).
 - Un agent est soumis à la **garde** : dans une pièce protégée ou aux heures calmes, sa commande devient une demande qu'un humain valide (202). Un automatisme écrit par un agent reste un brouillon jusqu'à la validation d'un humain.
 
