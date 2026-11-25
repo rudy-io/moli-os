@@ -1993,6 +1993,41 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
 
+## `vehicles` : voitures, boîtier OBD-II et Torque Pro (`crates/moli-vehicles`)
+
+Torque Pro (Android : téléphone ou autoradio) lit la voiture par un boîtier ELM327 et envoie ses
+relevés par « Upload to web server » : une requête par intervalle,
+`/api/torque/<jeton>?session=…&kd=52&kc=1850&kff1006=…`, à laquelle Moli répond `OK!` (sinon
+Torque garde les données et recommence). Le jeton est celui du véhicule ; la configuration
+n'en garde que le SHA-256. C'est la seule route qu'un appelant de dehors atteint sans
+Cloudflare Access (`Via::Vehicle`, `caller.rs`), comme les rapports des téléphones.
+
+- **Clés** : `k` + le PID OBD-II du mode 01 en hexadécimal sans zéro de tête (`kd` vitesse,
+  `kc` régime, `k5` liquide), `kff…` pour ce que Torque calcule (GPS `kff1006`/`kff1005`,
+  tension du boîtier `kff1238`). Les clés connues deviennent des points nommés (`speed`,
+  `latitude`…), les autres `pid_<clé>`, avec le nom et l'unité que Torque envoie au début de
+  chaque session (`userFullName…`, `userUnit…`), 60 au plus.
+- **Compteur** : `odometer` = relevé d'une personne (`odometer_set`, ou les km d'un entretien)
+  + distance comptée depuis : PID 01 31 (distance depuis l'effacement des codes, du
+  calculateur) s'il est journalisé, sinon vitesse × temps (trous de plus de 15 s ignorés).
+  PID 01 A6 (compteur du calculateur, voitures récentes) l'emporte s'il existe.
+- **Voyant et codes** : `mil` vient d'un PID perso `0101` (`mil_key`, octet A : bit 7 =
+  voyant, bits 0-6 = nombre de codes) ou des codes reçus. Torque n'envoie jamais les codes
+  défaut : une appli compagnon peut les ajouter au même envoi (`dtc=P0401,P2002`, vide =
+  effacés).
+- **Carnet** : `[[driver.options.vehicle.maintenance]]` (`id`, `name`, `every_km`,
+  `every_months`) ; `maintenance_done` (texte : `vidange`, `vidange 123456` ou JSON avec
+  `item`, `km`, `date`, `note`) ajoute une ligne à `data/vehicles.json` (sauvegardé). Points
+  `<id>_km_left`, `<id>_days_left`, `<id>_due` ; `alert` (sémantique `alert`) + `detail`
+  quand le voyant est allumé ou qu'un entretien est dû. `GET /api/vehicles` rend le carnet.
+- **En route** : `driving` vrai à chaque envoi, faux après 2 min sans envoi.
+- **Écran de la voiture** : la voiture est une entité à part. Avec son jeton, elle lit ses propres
+  points et, de la maison, seulement ce que `[[driver.options.vehicle.share]]` liste (`id`, `point`) ;
+  elle ne lance que les ordres de `[[driver.options.vehicle.action]]` (`id`, `name`, `point`,
+  `value`), qui passent par la garde comme le tableau de bord sans code. Routes : `api.md`.
+- **Vie privée** : la position est un point comme un autre, gardée dans l'historique de la
+  maison (`history_days`) et nulle part ailleurs.
+
 ## Tests : où et comment
 
 - Tout passe par `.\scripts\dev.ps1 sh scripts/check.sh` (fmt, clippy `-D warnings`, `cargo test --workspace`, dans Docker ; voir [exploitation.md](exploitation.md)). Une crate seule : `.\scripts\dev.ps1 cargo test -p moli-tuya`.
@@ -2048,6 +2083,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `presence` | `moli-presence` | UDP + table ARP de l'hôte | non | téléphones sur le Wi-Fi |
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say`, interrupteurs | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
+| `vehicles` | `moli-vehicles` | envoi web de Torque Pro (jeton dans l'adresse) | compteur, carnet d'entretien | Torque Pro sur Android + ELM327 : envois simulés dans les tests, essai réel à faire |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
 | `pushover` | `moli-pushover` | HTTPS, API Pushover | `push` (notification) | faux serveur ; compte réel à confirmer |
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) ; **pas encore** : TSUN TITAN et GEN4, ZCS Azzurro 1PH TL-V3 et HYD-ZSS-HP |

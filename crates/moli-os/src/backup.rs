@@ -25,6 +25,7 @@ const FILES: [&str; 21] = [
     crate::managed_devices::FILE,
     "plan.json",
     "phones.json",
+    "vehicles.json",
     "former-emails.json",
     "secrets.enc",
     "private-state.enc",

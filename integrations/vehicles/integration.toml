@@ -1,0 +1,24 @@
+[integration]
+id = "vehicles"
+name = "Voitures (boîtier OBD-II + Torque Pro)"
+brands = ["Torque Pro", "ELM327"]
+models = []
+# Torque Pro (Android) uploads to Moli over HTTPS (the tunnel) or the home
+# network; nothing to discover.
+transport = "https"
+driver = "vehicles"
+crate = "moli-vehicles"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["vehicle"]
+
+[origin]
+reused = "même rôle que l'intégration torque de HA (envoi web de Torque Pro), plus un carnet d'entretien"
+author = "agent"
