@@ -154,11 +154,46 @@ fn alert_points() -> [PointSpec; 2] {
     ]
 }
 
-fn alert(reasons: &[String]) -> States {
+/// `problem` and `detail`: what is wrong, or, when nothing is, a short
+/// phrase of how the part is doing (`fine`), so that the « Parc » page reads
+/// at a glance. The phrase keeps to values that move slowly (no processor
+/// load, memory to 5 %), not to fill the history with a new line a minute.
+fn alert(reasons: &[String], fine: &[String]) -> States {
+    let detail = if reasons.is_empty() {
+        fine.join(" · ")
+    } else {
+        reasons.join(", ")
+    };
     vec![
         ("problem", Value::Bool(!reasons.is_empty())),
-        ("detail", Value::Text(reasons.join(", ").into())),
+        ("detail", Value::Text(detail.into())),
     ]
+}
+
+/// A whole number for a phrase.
+fn whole(n: f64) -> String {
+    format!("{:.0}", n.max(0.0))
+}
+
+/// A share to the nearest 5 %: memory moves all the time.
+fn by_five(n: f64) -> String {
+    whole((n / 5.0).round() * 5.0)
+}
+
+/// A length of time for a phrase: minutes under an hour, hours under two
+/// days, days beyond.
+pub(crate) fn span(hours: f64) -> String {
+    let hours = hours.max(0.0);
+    if hours < 1.0 {
+        moli_i18n::tr!(
+            "pilotes.proxmox.duree_min",
+            n = whole((hours * 60.0).max(1.0))
+        )
+    } else if hours < 48.0 {
+        moli_i18n::tr!("pilotes.proxmox.duree_h", n = whole(hours.floor()))
+    } else {
+        moli_i18n::tr!("pilotes.proxmox.duree_j", n = whole((hours / 24.0).floor()))
+    }
 }
 
 /// A use above the threshold, said in words.
@@ -261,6 +296,31 @@ pub(crate) fn node_states(status: &Json, updates: Option<usize>, limits: Limits)
         root,
         limits,
     ));
+    let mut fine = Vec::new();
+    if let Some(hours) = num(&status["uptime"]).map(|s| s / 3600.0) {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_depuis",
+            depuis = span(hours)
+        ));
+    }
+    if let Some(memory) = memory {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_memoire",
+            pct = by_five(memory)
+        ));
+    }
+    if let Some(root) = root {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_systeme",
+            pct = whole(root)
+        ));
+    }
+    if let Some(n) = updates.filter(|n| *n > 0) {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_mises_a_jour",
+            count = n
+        ));
+    }
     let mut values: States = vec![
         ("up", Value::Bool(true)),
         (
@@ -286,7 +346,7 @@ pub(crate) fn node_states(status: &Json, updates: Option<usize>, limits: Limits)
         ),
         ("version", word(version(status))),
     ];
-    values.extend(alert(&reasons));
+    values.extend(alert(&reasons, &fine));
     values
 }
 
@@ -408,7 +468,8 @@ pub(crate) fn guest(
     if kind == "lxc" {
         values.push(("disk", float(disk)));
     }
-    values.extend(alert(&reasons));
+    let fine = guest_phrase(kind, guest, running, memory, disk);
+    values.extend(alert(&reasons, &fine));
     let model = if kind == "lxc" {
         moli_i18n::tr!("pilotes.proxmox.conteneur", vmid = vmid)
     } else {
@@ -424,6 +485,52 @@ pub(crate) fn guest(
         ),
         states: values,
     })
+}
+
+/// How a guest is doing, when nothing is wrong (see [`alert`]).
+fn guest_phrase(
+    kind: &str,
+    guest: &Json,
+    running: Option<bool>,
+    memory: Option<f64>,
+    disk: Option<f64>,
+) -> Vec<String> {
+    let mut fine = Vec::new();
+    match running {
+        Some(true) => {
+            if let Some(hours) = num(&guest["uptime"]).map(|s| s / 3600.0) {
+                fine.push(moli_i18n::tr!(
+                    "pilotes.proxmox.phrase_depuis",
+                    depuis = span(hours)
+                ));
+            } else {
+                fine.push(moli_i18n::tr!("pilotes.proxmox.en_marche").to_lowercase());
+            }
+            if kind == "lxc" {
+                if let Some(memory) = memory {
+                    fine.push(moli_i18n::tr!(
+                        "pilotes.proxmox.phrase_memoire",
+                        pct = by_five(memory)
+                    ));
+                }
+                if let Some(disk) = disk {
+                    fine.push(moli_i18n::tr!(
+                        "pilotes.proxmox.phrase_disque",
+                        pct = whole(disk)
+                    ));
+                }
+            } else if let Some(total) = num(&guest["maxmem"]).map(|b| b / GIB) {
+                // A virtual machine's share counts its cache: its size only.
+                fine.push(moli_i18n::tr!(
+                    "pilotes.proxmox.phrase_memoire_vm",
+                    gio = whole(total)
+                ));
+            }
+        }
+        Some(false) => fine.push(moli_i18n::tr!("pilotes.proxmox.phrase_arrete")),
+        None => {}
+    }
+    fine
 }
 
 /// The guests' ids that are stopped: their configuration says whether they
@@ -469,7 +576,16 @@ pub(crate) fn storages(instance: &InstanceId, list: &Json, limits: Limits) -> Ve
                 ("total", float(num(&s["total"]).map(|b| b / GIB))),
                 ("content", word(text(&s["content"]))),
             ];
-            values.extend(alert(&reasons));
+            let fine: Vec<String> = match (used, num(&s["total"]), num(&s["avail"])) {
+                (Some(used), Some(total), Some(free)) => vec![moli_i18n::tr!(
+                    "pilotes.proxmox.phrase_stockage",
+                    pct = whole(used),
+                    total = whole(total / GIB),
+                    libre = whole(free / GIB)
+                )],
+                _ => Vec::new(),
+            };
+            values.extend(alert(&reasons, &fine));
             Some(Entity {
                 device: device(
                     instance,
@@ -493,9 +609,10 @@ pub(crate) fn backup(instance: &InstanceId, tasks: &Json, now: f64, limits: Limi
         .collect();
     // A backup still running has no status yet: the one before tells.
     let latest = list.iter().find(|t| text(&t["status"]).is_some());
-    let running = list
+    let active = list
         .iter()
-        .any(|t| text(&t["status"]).is_none() && num(&t["endtime"]).is_none());
+        .find(|t| text(&t["status"]).is_none() && num(&t["endtime"]).is_none());
+    let running = active.is_some();
     let success = list.iter().find(|t| text(&t["status"]) == Some("OK"));
     let result = latest.and_then(|t| text(&t["status"]));
     let started = latest.and_then(|t| num(&t["starttime"]));
@@ -554,7 +671,24 @@ pub(crate) fn backup(instance: &InstanceId, tasks: &Json, now: f64, limits: Limi
         ("age", float(ok_age)),
         ("running", Value::Bool(running)),
     ];
-    values.extend(alert(&reasons));
+    let mut fine = Vec::new();
+    if let Some(start) = active.and_then(|t| num(&t["starttime"])) {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_sauvegarde_en_cours",
+            depuis = span((now - start) / 3600.0)
+        ));
+    } else if let (Some(age), Some("OK")) = (ok_age, result) {
+        fine.push(moli_i18n::tr!(
+            "pilotes.proxmox.phrase_sauvegarde",
+            depuis = span(age)
+        ));
+        if let (Some(s), Some(e)) = (started, ended)
+            && e >= s
+        {
+            fine.push(span((e - s) / 3600.0));
+        }
+    }
+    values.extend(alert(&reasons, &fine));
     Entity {
         device: device(
             instance,
@@ -626,7 +760,20 @@ pub(crate) fn disks(instance: &InstanceId, list: &Json) -> Vec<Entity> {
                 ("size", float(num(&d["size"]).map(|b| b / GIB))),
                 ("type", word(text(&d["type"]))),
             ];
-            values.extend(alert(&reasons));
+            let mut fine = Vec::new();
+            if let Some(health) = health {
+                fine.push(moli_i18n::tr!(
+                    "pilotes.proxmox.phrase_smart",
+                    health = health
+                ));
+            }
+            if let Some(life) = wearout {
+                fine.push(moli_i18n::tr!(
+                    "pilotes.proxmox.phrase_vie",
+                    pct = whole(life)
+                ));
+            }
+            values.extend(alert(&reasons, &fine));
             // The disk's place in the list: its serial number stays out of
             // identifiers and names (it is personal enough to be left out).
             Entity {
@@ -885,6 +1032,110 @@ mod tests {
             )),
         );
         assert_eq!(value(&bad[0].states, "problem"), &Value::Bool(true));
+    }
+
+    fn detail(states: &States) -> String {
+        match value(states, "detail") {
+            Value::Text(t) => t.to_string(),
+            other => panic!("detail: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spans_read_as_minutes_hours_or_days() {
+        assert_eq!(span(0.0), "1 min");
+        assert_eq!(span(0.2), "12 min");
+        assert_eq!(span(5.7), "5 h");
+        assert_eq!(span(47.9), "47 h");
+        assert_eq!(span(72.0), "3 j");
+    }
+
+    #[test]
+    fn a_part_that_is_fine_says_how_it_is_doing() {
+        // The node: how long it has been up, memory, system disk, updates.
+        let status = fixture(include_str!(
+            "../../../integrations/proxmox/fixtures/status.json"
+        ));
+        let node = node_states(&status, Some(2), LIMITS);
+        assert_eq!(value(&node, "problem"), &Value::Bool(false));
+        let said = detail(&node);
+        assert!(said.starts_with("en marche depuis "), "{said}");
+        assert!(
+            said.contains("mémoire ") && said.contains("disque système "),
+            "{said}"
+        );
+        assert!(said.ends_with("2 mises à jour en attente"), "{said}");
+        assert!(
+            detail(&node_states(&status, Some(1), LIMITS)).ends_with("1 mise à jour en attente")
+        );
+        assert!(!detail(&node_states(&status, Some(0), LIMITS)).contains("mise à jour"));
+
+        // A container: up, memory to 5 %, disk.
+        let ct = serde_json::json!({"vmid": 101, "name": "ct", "status": "running", "uptime": 3 * 86_400 + 5,
+            "mem": 33, "maxmem": 100, "disk": 41, "maxdisk": 100});
+        let ct = guest(&instance(), "lxc", &ct, None, LIMITS).unwrap();
+        assert_eq!(
+            detail(&ct.states),
+            "en marche depuis 3 j · mémoire 35 % · disque 41 %"
+        );
+
+        // A virtual machine: its size, never its share (the guest's cache).
+        let vm = serde_json::json!({"vmid": 201, "name": "ha", "status": "running", "uptime": 7200,
+            "mem": 4_041_060_352_u64, "maxmem": 4_294_967_296_u64});
+        let vm = guest(&instance(), "qemu", &vm, None, LIMITS).unwrap();
+        assert_eq!(
+            detail(&vm.states),
+            "en marche depuis 2 h · 4 Gio de mémoire"
+        );
+
+        // Stopped on purpose.
+        let resting = serde_json::json!({"vmid": 102, "name": "off", "status": "stopped"});
+        let resting = guest(&instance(), "lxc", &resting, Some(false), LIMITS).unwrap();
+        assert_eq!(detail(&resting.states), "arrêté");
+
+        // A storage.
+        let gib = 1024_u64 * 1024 * 1024;
+        let list = serde_json::json!([{"storage": "nas", "type": "nfs", "active": 1, "enabled": 1,
+            "used": 7 * gib, "total": 68 * gib, "avail": 61 * gib}]);
+        let nas = &storages(&instance(), &list, LIMITS)[0];
+        assert_eq!(detail(&nas.states), "10 % de 68 Gio, 61 Gio libres");
+
+        // A disk.
+        let list = serde_json::json!([{"health": "PASSED", "wearout": 97}]);
+        assert_eq!(
+            detail(&disks(&instance(), &list)[0].states),
+            "SMART PASSED · 97 % de vie"
+        );
+    }
+
+    #[test]
+    fn the_backup_says_when_it_succeeded_or_since_when_it_runs() {
+        let tasks = fixture(include_str!(
+            "../../../integrations/proxmox/fixtures/tasks.json"
+        ));
+        let start = num(&tasks[0]["starttime"]).unwrap();
+        let end = num(&tasks[0]["endtime"]).unwrap();
+        let fresh = backup(&instance(), &tasks, end + 3.0 * 3600.0, LIMITS);
+        let said = detail(&fresh.states);
+        assert!(said.starts_with("réussie il y a 3 h · "), "{said}");
+        assert!(said.ends_with(&span((end - start) / 3600.0)), "{said}");
+
+        let running = fixture(include_str!(
+            "../../../integrations/proxmox/fixtures/tasks-running.json"
+        ));
+        let began = num(&running[0]["starttime"]).unwrap();
+        let busy = backup(&instance(), &running, began + 240.0, LIMITS);
+        assert_eq!(detail(&busy.states), "en cours depuis 4 min");
+    }
+
+    #[test]
+    fn a_problem_keeps_its_own_words() {
+        let ct = serde_json::json!({"vmid": 101, "name": "ct", "status": "running", "uptime": 60,
+            "mem": 98, "maxmem": 100, "disk": 1, "maxdisk": 10});
+        let full = guest(&instance(), "lxc", &ct, None, LIMITS).unwrap();
+        assert_eq!(value(&full.states, "problem"), &Value::Bool(true));
+        assert_eq!(detail(&full.states), "Mémoire à 98 %");
+        assert_eq!(detail(&node_states_down()), "Proxmox ne répond pas");
     }
 
     #[test]

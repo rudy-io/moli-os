@@ -40,6 +40,14 @@ virtuelles, ses stockages, la dernière sauvegarde et ses disques.
   une VM Linux paraît toujours pleine) ; dernière sauvegarde en échec, ou aucune réussie depuis
   `backup_hours` (26) ; SMART en échec ou moins de 10 % de vie. La page « Parc » les liste, un
   automatisme peut s'y accrocher.
+- **Une phrase même quand tout va bien** : sans problème, `detail` dit comment va la partie, pour que
+  chaque carte de « Parc » se lise d'un coup d'œil (#289) : nœud « en marche depuis 12 j · mémoire 30 % ·
+  disque système 8 % · 2 mises à jour en attente », conteneur « en marche depuis 3 j · mémoire 35 % ·
+  disque 41 % », machine virtuelle « en marche depuis 2 h · 4 Gio de mémoire » (sa taille, pas sa part, qui
+  compte le cache), invité « arrêté », stockage « 10 % de 68 Gio, 61 Gio libres », sauvegarde « réussie il
+  y a 3 h · 10 min » ou « en cours depuis 4 min », disque « SMART PASSED · 97 % de vie ». Un problème garde
+  ses propres mots. La phrase s'en tient aux valeurs qui bougent lentement (pas le processeur, la mémoire
+  à 5 % près) pour ne pas remplir l'historique d'une ligne par minute.
 - **Un nœud injoignable n'arrête pas le pilote** : l'appareil `node` reste, `up` faux, `problem` vrai ;
   les autres appareils passent hors ligne sans leur ancien verdict.
 - **Jeton refusé** (401, 403) : avertissement visible, nouvel essai dans 15 min seulement.
