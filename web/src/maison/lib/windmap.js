@@ -112,6 +112,7 @@ export class WindMap {
     this.drawnHour = null;
     this.particles = [];
     this.running = false;
+    this.raf = null;
     this.frame = this.frame.bind(this);
   }
 
@@ -149,11 +150,16 @@ export class WindMap {
   start() {
     if (this.running || this.still) return;
     this.running = true;
-    requestAnimationFrame(this.frame);
+    this.raf = requestAnimationFrame(this.frame);
   }
 
+  /** The frame already asked for is taken back: a hidden page keeps it
+   *  waiting, and the next `start` would run a second loop beside it (one
+   *  more at each wake of a wall tablet's screen). */
   stop() {
     this.running = false;
+    if (this.raf != null) cancelAnimationFrame(this.raf);
+    this.raf = null;
   }
 
   // Box pixel → area fraction.
@@ -347,7 +353,7 @@ export class WindMap {
 
   frame() {
     if (!this.running) return;
-    requestAnimationFrame(this.frame);
+    this.raf = requestAnimationFrame(this.frame);
     if (!this.w || !this.data?.weather?.hours?.length) return;
     const ctx = this.airCanvas.getContext('2d');
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
