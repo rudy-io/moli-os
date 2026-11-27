@@ -1,32 +1,36 @@
-# Calendrier (week-end, jours fériés, vacances scolaires)
+# Calendrier (jours fériés, calendriers .ics)
 
-Le genre du jour, pour les automatismes qui ne tournent pas pareil un jour calme : les annonces
-plus tard le matin, un autre programme de chauffage, un réveil qui ne sonne pas…
+Le genre du jour et les calendriers de la maison, pour les automatismes qui ne tournent pas
+pareil un jour calme : les annonces plus tard le matin, un autre programme de chauffage, un
+réveil qui ne sonne pas… **Rien ne sort de la maison.**
 
-Un appareil, « Calendrier », en lecture seule :
+**« Jours »**, toujours là :
 
 - `weekend` : samedi ou dimanche ;
-- `holiday` et `holiday_name` : un jour férié français (« Noël », ou vide), calculé sur place,
-  sans réseau : les dates fixes, le lundi de Pâques, l'Ascension et le lundi de Pentecôte ; avec
+- `holiday` et `holiday_name` : un jour férié français (« Noël », ou vide), calculé sur place :
+  les dates fixes, le lundi de Pâques, l'Ascension et le lundi de Pentecôte ; avec
   `alsace_moselle = true`, le Vendredi saint et la Saint-Étienne en plus ;
 - `workday` : ni week-end ni férié ;
-- avec `school_zone` : `school_holidays` et `school_holidays_name` (« Vacances de Noël », ou
-  vide), du premier jour sans école au dernier (le jour de la rentrée n'en est pas) ; le pont de
-  l'Ascension en fait partie ; l'été est celui des élèves ;
-- `quiet_day` : week-end, férié ou vacances scolaires.
+- `quiet_day` : week-end, férié, ou un événement aujourd'hui dans un calendrier `quiet = true`.
+  Tant qu'un calendrier `quiet` n'a jamais pu être lu, un jour ouvré est inconnu (`null`).
 
-Les points changent à minuit dans `timezone` (`Europe/Paris` par défaut) : ils sont recalculés
-chaque minute.
+**Un appareil par calendrier** (`[[driver.options.calendar]]`), lu dans un fichier iCalendar
+(`.ics`) du dossier `data`, déposé à la main : un export d'agenda, le calendrier scolaire d'une
+zone (l'Éducation nationale publie un `.ics` par zone)… Le fichier est relu dès qu'il change ;
+pour ajouter un événement à la main, on l'ajoute au fichier.
 
-**Vacances scolaires** : lues une fois par jour dans les données ouvertes de l'Éducation nationale
-(`data.education.gouv.fr`, jeu `fr-en-calendrier-scolaire`), pour les 400 jours à venir.
-`school_zone` : `A`, `B`, `C`, ou une autre zone du jeu de données (`Corse`, `Réunion`,
-`Martinique`…). Tant que le calendrier n'a jamais pu être lu, `school_holidays` est inconnu, et
-`quiet_day` aussi un jour ouvré ; le pilote le signale et réessaie toutes les heures. Une fois lu,
-il reste valable même si une lecture suivante échoue (le calendrier est publié des années à
-l'avance).
+- `on` : un événement aujourd'hui ; `event` : son nom (plusieurs : séparés par des virgules) ;
+- `next`, `next_event`, `next_days` : le prochain événement qui commence après aujourd'hui (date
+  `AAAA-MM-JJ`, nom, jours d'ici là).
 
-**Vie privée** : seule la zone scolaire quitte la maison, vers `data.education.gouv.fr`, une fois
-par jour. Sans `school_zone`, rien ne sort.
+Ce qui est lu : les `VEVENT` (`SUMMARY`, `DTSTART` en date ou en heure, avec `TZID` ou en UTC,
+`DTEND` ou `DURATION`, `STATUS:CANCELLED` écarté), à la journée : un événement compte pour
+chaque jour qu'il touche, la fin d'un événement à la journée étant exclue (comme le veut le
+format). Un événement dont la fin égale le début compte pour ce jour-là. Répétition :
+`RRULE:FREQ=YEARLY` (avec `INTERVAL`, `COUNT`, `UNTIL`), pour un anniversaire ; une autre règle
+n'est pas suivie (l'événement compte une fois, le journal le dit).
 
-Fixture : une vraie réponse du jeu de données (zone A, deux académies), données publiques.
+Un fichier absent ou illisible est signalé par le pilote ; les événements déjà lus restent
+valables tant que le fichier n'est pas relu avec succès.
+
+Fixture : un extrait du calendrier scolaire de la zone A tel que publié (données publiques ; les `UID` en `@example.com`).

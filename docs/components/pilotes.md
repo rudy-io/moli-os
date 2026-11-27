@@ -1874,35 +1874,38 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Tests** : `src/model.rs` (adresse, prochaine collecte par type, collecte remplacée, type
   inconnu, nom manquant dans la langue), `src/lib.rs` (adresse vérifiée, requêtes encodées).
 
-## `calendar` : le genre du jour (`crates/moli-calendar`)
+## `calendar` : les jours et les calendriers de la maison (`crates/moli-calendar`)
 
-- **Couvre** : week-end, jours fériés français, vacances scolaires, pour les automatismes qui ne
-  tournent pas pareil un jour calme (annonces plus tard le matin, programme de chauffage…).
-- **Jours fériés** (`src/holidays.rs`) : calculés sur place, sans réseau. Les 11 jours fériés
-  nationaux, dont le lundi de Pâques, l'Ascension et le lundi de Pentecôte (Pâques par
-  l'algorithme anonyme grégorien de Meeus) ; avec `alsace_moselle`, le Vendredi saint et la
-  Saint-Étienne.
-- **Vacances scolaires** (`src/school.rs`) : le jeu de données ouvert `fr-en-calendrier-scolaire`
-  de `data.education.gouv.fr` (API Explore v2.1, sans compte), filtré sur la zone, regroupé
-  (`group_by`) pour n'avoir chaque période qu'une fois (l'API en donne une par académie). Les
-  dates, minuit en France écrit en UTC, sont lues dans `timezone` : du premier jour sans école
-  (compris) au jour de la rentrée (exclu). L'été des enseignants (`population` = « Enseignants »)
-  est écarté ; une période dont le début égale la fin (pont de l'Ascension 2027) compte pour ce
-  jour-là.
-- **Configuration** : `school_zone` (`A`, `B`, `C`, ou une zone du jeu de données : `Corse`,
-  `Réunion`…, facultatif : sans elle, rien ne sort de la maison), `alsace_moselle` (`false`),
-  `timezone` (`Europe/Paris`).
-- **Points** (lecture seule) : `weekend`, `holiday`, `holiday_name` (traduit, vide sinon),
-  `workday` (ni week-end ni férié) ; avec une zone, `school_holidays` et `school_holidays_name`
-  (nom donné par le ministère) ; `quiet_day` (l'un des trois). Tant que le calendrier scolaire
-  n'a jamais été lu : `school_holidays` vaut `null`, `quiet_day` aussi un jour ouvré, et le
-  pilote le signale (`warn`).
-- **Rythme** : points recalculés chaque minute (ils changent à minuit) ; vacances lues une fois
-  par jour, 400 jours à l'avance, nouvel essai toutes les heures après un échec. Une lecture
-  réussie reste valable si les suivantes échouent.
-- **Tests** : `src/holidays.rs` (Pâques, jours de l'année, Alsace-Moselle), `src/school.rs`
-  (zones, périodes uniques en jours locaux, été des élèves, période d'un jour, réponse
-  étrange, fixture réelle), `src/lib.rs` (options, genre du jour, requête).
+- **Couvre** : le genre du jour (week-end, jours fériés français) et des calendriers iCalendar
+  déposés dans le dossier `data`, pour les automatismes qui ne tournent pas pareil un jour calme
+  (annonces plus tard le matin, programme de chauffage…). Rien ne sort de la maison.
+- **Jours fériés** (`src/holidays.rs`) : calculés sur place. Les 11 jours fériés nationaux, dont
+  le lundi de Pâques, l'Ascension et le lundi de Pentecôte (Pâques par l'algorithme anonyme
+  grégorien de Meeus) ; avec `alsace_moselle`, le Vendredi saint et la Saint-Étienne.
+- **Calendriers** (`src/ics.rs`) : un fichier `.ics` par calendrier (RFC 5545), lu à la journée.
+  `VEVENT` seulement (`VTIMEZONE`, `VALARM`… sautés) ; `SUMMARY`, `DTSTART` (date, heure UTC,
+  `TZID` ou flottante, lue dans `timezone`), `DTEND` ou `DURATION`, `STATUS:CANCELLED` écarté ;
+  lignes repliées recollées, texte déséchappé. Un événement compte pour chaque jour local qu'il
+  touche (fin exclue ; un événement qui finit à minuit ne déborde pas sur le lendemain ; une fin
+  égale au début compte pour ce jour, comme le pont de l'Ascension 2027 du calendrier scolaire).
+  Répétition : `RRULE:FREQ=YEARLY` (`INTERVAL`, `COUNT`, `UNTIL`) ; toute autre règle n'est pas
+  suivie (l'événement compte une fois, compté dans le journal `calendar read … unrepeated`).
+- **Configuration** : `alsace_moselle` (`false`), `timezone` (`Europe/Paris`), et des
+  `[[driver.options.calendar]]` : `id` (minuscules, chiffres, `_`, `-` ; pas `days`), `name`,
+  `file` (chemin relatif au dossier `data`, sans `..` : un fichier hors du dossier est refusé
+  avec les options), `quiet` (`false`).
+- **Points** (lecture seule). Appareil `<instance>:days` (« Jours ») : `weekend`, `holiday`,
+  `holiday_name` (traduit, vide sinon), `workday` (ni week-end ni férié), `quiet_day` (week-end,
+  férié, ou un événement aujourd'hui dans un calendrier `quiet` ; `null` un jour ouvré tant
+  qu'un calendrier `quiet` n'a jamais été lu). Un appareil `<instance>:<id>` par calendrier :
+  `on`, `event` (noms du jour), `next` (`AAAA-MM-JJ`), `next_event`, `next_days`.
+- **Rythme** : points recalculés chaque minute (ils changent à minuit) ; chaque fichier relu
+  quand sa date ou sa taille change. Absent ou illisible : avertissement du pilote ; un
+  calendrier jamais lu est hors ligne, un calendrier déjà lu garde ses événements.
+- **Tests** : `src/holidays.rs` (Pâques, jours de l'année, Alsace-Moselle), `src/ics.rs`
+  (calendrier scolaire réel, heures et fuseaux, durées, répétition annuelle, règle non suivie,
+  événement annulé, alarme imbriquée, ligne repliée, fichier quelconque), `src/lib.rs` (options,
+  chemins hors du dossier `data`, genre du jour, jour calme).
 
 ## `engie` : compte ENGIE Belgique (`crates/moli-engie`)
 
