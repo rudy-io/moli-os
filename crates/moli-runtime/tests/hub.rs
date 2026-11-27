@@ -80,6 +80,7 @@ impl Driver for FakePlug {
                         true,
                         Semantic::Control,
                     ),
+                    spec("action", Kind::Binary, true, Semantic::Action),
                 ],
             });
             ctx.set_state(&id, "state", Value::Bool(false));
@@ -684,6 +685,15 @@ async fn stopping_a_machine_is_a_humans_call_in_any_room() {
             .await
             .unwrap();
     }
+    // A one-shot action (a scene) is held just as firmly for an agent.
+    let held = hub
+        .command(&point("action"), Value::Bool(true), Origin::Assistant, None)
+        .await;
+    assert!(matches!(held, Err(CommandError::NeedsApproval { .. })));
+    assert!(hub.state(&point("action")).is_none(), "nothing ran");
+    hub.command(&point("action"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
     // Other points of the same device stay free.
     hub.command(&point("state"), Value::Bool(true), Origin::Mcp, None)
         .await

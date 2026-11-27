@@ -958,7 +958,8 @@ impl Hub {
         opening(self.opener_of(point), semantic, value)
     }
 
-    /// Whether the point is an order to a machine at work.
+    /// Whether the point is an order to a machine at work or a one-shot
+    /// action (a scene): both need a person when an agent asks.
     fn is_control(&self, point: &PointId) -> bool {
         let Some((device, key)) = point.split() else {
             return false;
@@ -967,7 +968,12 @@ impl Hub {
             .devices
             .get(&device)
             .and_then(|d| d.point(key))
-            .is_some_and(|p| p.semantic == moli_core::Semantic::Control)
+            .is_some_and(|p| {
+                matches!(
+                    p.semantic,
+                    moli_core::Semantic::Control | moli_core::Semantic::Action
+                )
+            })
     }
 
     /// Every room an order on this device reaches: its own (user label and

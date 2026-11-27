@@ -115,7 +115,8 @@
   projet ; `--home` reste un alias. `moli-os tuya import --cloud` range les scènes activées dans
   `tuya.json` sous `scenes`, avec leur `space` (un fichier écrit avec `home` se lit encore).
   Chaque scène devient un appareil du pilote avec un seul point `trigger` (binaire, écriture
-  seule) : l'ordre passe par le hub, donc par la garde et le journal, et un automatisme écrit
+  seule, sens `Action`, affiché en bouton dans l'Atelier) : l'ordre passe par le hub, donc par la
+  garde et le journal, et un automatisme écrit
   par un agent reste un brouillon jusqu'à validation humaine. Seul `trigger = true` est accepté,
   et aucune autre URL n'est essayée après un premier envoi (une routine qui aurait démarré alors
   que la réponse est perdue ne doit pas jouer deux fois). Le `room` attribué à la main est

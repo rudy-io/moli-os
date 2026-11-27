@@ -60,6 +60,11 @@ La page Installation présente d’abord les passerelles et leurs actions couran
 Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
 Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 
+Dans l'Atelier, un point d'**action** (une routine Tap-to-Run, par exemple) s'affiche en bouton
+sur la face de la carte : un appui envoie une seule fois l'ordre au hub, sans interrupteur ni
+état à lire. Le sens `action` est déclaré par le pilote ; il passe par la garde et le journal
+comme n'importe quel ordre.
+
 ## La mise en page de la maison : `data/home.json`
 
 Servie telle quelle par `/api/home` depuis le dossier de données (`data/home.json`, écrite à

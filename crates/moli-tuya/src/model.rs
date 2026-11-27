@@ -64,7 +64,7 @@ impl Scene {
                     write: true,
                 },
                 unit: None,
-                semantic: Semantic::Control,
+                semantic: Semantic::Action,
             }],
         }
     }
@@ -962,6 +962,6 @@ mod tests {
         assert_eq!(&*point.key, "trigger");
         assert!(!point.access.read && point.access.write);
         assert_eq!(point.kind, Kind::Binary);
-        assert_eq!(point.semantic, Semantic::Control);
+        assert_eq!(point.semantic, Semantic::Action);
     }
 }

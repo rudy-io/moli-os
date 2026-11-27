@@ -31,7 +31,7 @@ const PRIMARY = new Set([
   'on_off', 'brightness', 'power', 'apparent_power', 'energy', 'temperature',
   'humidity', 'pressure', 'illuminance', 'contact', 'occupancy', 'water_leak',
   'soil_moisture', 'soil_dry',
-  'smoke', 'current', 'alert',
+  'smoke', 'current', 'alert', 'action',
 ]);
 
 export function isPrimary(point) {
