@@ -105,6 +105,18 @@ enum TuyaCommand {
         #[arg(long)]
         summary: bool,
     },
+    /// List the Smart Life routines (Tap-to-Run scenes) the Tuya project
+    /// sees, with their ids to file them. No key, address or space name is
+    /// printed. IoT Core (Scene Linkage Rules) must be authorized in the
+    /// Tuya project; `--home` is kept as an alias for `--space`.
+    Scenes {
+        /// The tuya driver instance whose cloud keys are used.
+        #[arg(long, default_value = "tuya")]
+        instance: String,
+        /// A space's numeric id; otherwise the project's spaces are listed.
+        #[arg(long, alias = "home")]
+        space: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -273,6 +285,9 @@ fn main() -> anyhow::Result<()> {
             cloud,
             summary,
         }) => tuya_import(&config, &instance, devices_file, cloud, summary),
+        Command::Tuya(TuyaCommand::Scenes { instance, space }) => {
+            tuya_scenes(&config, &instance, space)
+        }
         Command::Zigbee(command) => zigbee_command(&config, command),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
@@ -731,6 +746,30 @@ fn tuya_import(
         devices_file.display(),
         keys.len()
     );
+    Ok(())
+}
+
+/// `moli-os tuya scenes`: the ids and names of the Tap-to-Run routines.
+/// Keys stay in the vault; the space's name and address are never printed.
+fn tuya_scenes(config: &Config, instance: &str, space: Option<String>) -> anyhow::Result<()> {
+    let key = master_key(&config.server.data_dir, false)?
+        .context("no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)")?;
+    let (keys, region) = tuya_cloud_access(
+        config,
+        instance,
+        &config.server.data_dir.join("secrets.enc"),
+        &key,
+    )?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let scenes = runtime.block_on(moli_tuya::cloud::scenes(keys, region, space))?;
+    if scenes.is_empty() {
+        eprintln!("no enabled scene in this Tuya project");
+    }
+    for scene in scenes {
+        println!("{}\t{}", scene.id, scene.name);
+    }
     Ok(())
 }
 

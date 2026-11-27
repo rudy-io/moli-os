@@ -1,14 +1,15 @@
 //! The Tuya cloud, for what never listens on the LAN: Wi-Fi battery sensors
 //! (doors, leaks) that wake, tell the cloud and sleep again, and devices
-//! behind a Tuya gateway. Read-only.
+//! behind a Tuya gateway. Read-only, except the Tap-to-Run scenes a person
+//! asks to trigger.
 //!
 //! The household's own cloud project (Access ID and Secret, from the vault
 //! through `/run/secrets/tuya-cloud`): states from the signed OpenAPI at
 //! start and every half hour, changes as they happen from the project's
-//! message service (Pulsar over a websocket). Nothing is sent to the cloud
-//! but these reads.
+//! message service (Pulsar over a websocket). The only write is a scene
+//! trigger, through the Scene Linkage Rules API.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,11 +22,11 @@ use moli_core::Value;
 use moli_net::ws::WebSocket;
 use ring::digest::{SHA256, digest};
 use serde_json::Value as Json;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::device::Up;
-use crate::model::TuyaDevice;
+use crate::model::{Scene, TuyaDevice};
 use crate::protocol::{ecb_decrypt, gcm_open, hmac_sha256, random};
 
 /// Categories that sleep on battery: the cloud is their only voice.
@@ -163,9 +164,22 @@ struct Api {
 }
 
 impl Api {
+    fn new(keys: Keys, region: Region) -> Self {
+        Self {
+            keys,
+            region,
+            token: None,
+        }
+    }
+
     async fn call(&mut self, path: &str) -> anyhow::Result<Json> {
         let token = self.token().await?;
-        self.request(path, Some(&token)).await
+        self.request(Method::GET, path, b"", Some(&token)).await
+    }
+
+    async fn post(&mut self, path: &str) -> anyhow::Result<Json> {
+        let token = self.token().await?;
+        self.request(Method::POST, path, b"", Some(&token)).await
     }
 
     async fn token(&mut self) -> anyhow::Result<String> {
@@ -174,7 +188,9 @@ impl Api {
         {
             return Ok(token.clone());
         }
-        let result = self.request("/v1.0/token?grant_type=1", None).await?;
+        let result = self
+            .request(Method::GET, "/v1.0/token?grant_type=1", b"", None)
+            .await?;
         let token = result["access_token"]
             .as_str()
             .context("no access token")?
@@ -188,7 +204,13 @@ impl Api {
         Ok(token)
     }
 
-    async fn request(&self, path: &str, token: Option<&str>) -> anyhow::Result<Json> {
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: &[u8],
+        token: Option<&str>,
+    ) -> anyhow::Result<Json> {
         let t = u64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -200,20 +222,21 @@ impl Api {
             token,
             t,
             &nonce,
-            &string_to_sign("GET", b"", path),
+            &string_to_sign(method.as_str(), body, path),
         );
         let mut builder = Request::builder()
-            .method(Method::GET)
+            .method(method)
             .uri(path)
             .header("client_id", &self.keys.id)
             .header("sign", signature)
             .header("t", t.to_string())
             .header("nonce", nonce)
-            .header("sign_method", "HMAC-SHA256");
+            .header("sign_method", "HMAC-SHA256")
+            .header("content-type", "application/json");
         if let Some(token) = token {
             builder = builder.header("access_token", token);
         }
-        let request = builder.body(Full::new(moli_net::Body::new()))?;
+        let request = builder.body(Full::new(moli_net::Body::copy_from_slice(body)))?;
         let (_, body) = moli_net::web(
             self.region.api,
             443,
@@ -233,6 +256,195 @@ impl Api {
         }
         Ok(answer["result"].clone())
     }
+}
+
+/// An order waiting for the cloud to trigger one Tap-to-Run scene.
+pub(crate) struct Trigger {
+    pub scene: Scene,
+    pub done: oneshot::Sender<Result<(), String>>,
+    /// When the caller stopped waiting: a forgotten cloud order must never
+    /// start a scene later (a TV turning on hours after a refused order).
+    pub deadline: Instant,
+}
+
+/// The Tap-to-Run rules of the cloud project, without any secret. `space`
+/// comes from `moli-os tuya scenes`; when absent, the spaces of the project
+/// are found from the space list. Every space is visited, so a project with
+/// several homes does not silently leave one out.
+pub async fn scenes(
+    keys: Keys,
+    region: Region,
+    space: Option<String>,
+) -> anyhow::Result<Vec<Scene>> {
+    let mut api = Api::new(keys, region);
+    let spaces = match space {
+        Some(space) => {
+            valid_space(&space)?;
+            vec![space]
+        }
+        None => space_ids(&mut api).await?,
+    };
+    let mut scenes = Vec::new();
+    let mut seen = HashSet::new();
+    for space in spaces {
+        // The rules are paged; a project cannot hold more than 100 scenes
+        // per space, but a page may be smaller than that.
+        for page in 1..=100 {
+            let path = scene_path(&space, page);
+            let answer = api
+                .call(&path)
+                .await
+                .with_context(|| format!("Tuya: scene rules, page {page}, space {space}"))?;
+            scenes.extend(
+                scene_page(&answer, &space)
+                    .into_iter()
+                    .filter(|scene| seen.insert(scene.id.clone())),
+            );
+            if !answer["result"]["has_more"].as_bool().unwrap_or(false) {
+                break;
+            }
+        }
+    }
+    Ok(scenes)
+}
+
+/// A space id goes in a URL: numbers only, as Tuya documents them.
+fn valid_space(space: &str) -> anyhow::Result<()> {
+    ensure!(
+        !space.is_empty() && space.bytes().all(|b| b.is_ascii_digit()),
+        "Tuya: a space id is numeric"
+    );
+    Ok(())
+}
+
+/// One page of rules, with the query sorted as Tuya signs it.
+fn scene_path(space: &str, page: u32) -> String {
+    format!("/v2.0/cloud/scene/rule?page_no={page}&page_size=100&space_id={space}&type=scene")
+}
+
+/// The root spaces of the project. Tuya's example uses camelCase query keys
+/// while its table names them in snake_case: try the documented form first,
+/// then the example's, without ever guessing a home id.
+async fn space_ids(api: &mut Api) -> anyhow::Result<Vec<String>> {
+    let mut problem = None;
+    for path in [
+        "/v2.0/cloud/space/child?page_size=100",
+        "/v2.0/cloud/space/child?pageSize=100",
+    ] {
+        match api.call(path).await {
+            Ok(answer) => {
+                let ids = space_ids_in(&answer);
+                if !ids.is_empty() {
+                    return Ok(ids);
+                }
+                problem = Some(anyhow::anyhow!("Tuya: no space in the project"));
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, path, "tuya cloud: no space list");
+                problem = Some(e.context(format!("Tuya: space list ({path})")));
+            }
+        }
+    }
+    Err(problem.unwrap_or_else(|| anyhow::anyhow!("Tuya: no space in the project")))
+}
+
+/// The ids in either shape the space list takes (`data` or `list`, numbers
+/// or strings), in the order Tuya gave them and without duplicates.
+fn space_ids_in(answer: &Json) -> Vec<String> {
+    let result = &answer["result"];
+    let list = result["data"]
+        .as_array()
+        .or_else(|| result["list"].as_array())
+        .or_else(|| answer["data"].as_array());
+    let mut out = Vec::new();
+    for item in list.into_iter().flatten() {
+        let id = item
+            .as_i64()
+            .map(|n| n.to_string())
+            .or_else(|| item.as_u64().map(|n| n.to_string()))
+            .or_else(|| item.as_str().map(str::to_owned))
+            .or_else(|| item["id"].as_i64().map(|n| n.to_string()))
+            .or_else(|| item["id"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if !id.is_empty() && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// The Tap-to-Run rules one page lists: only enabled scenes, with an id and
+/// a name. Automations are not triggers a person taps.
+fn scene_page(answer: &Json, space: &str) -> Vec<Scene> {
+    answer["result"]["list"]
+        .as_array()
+        .or_else(|| answer["list"].as_array())
+        .or_else(|| answer.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            if s["type"].as_str().is_some_and(|kind| kind != "scene") {
+                return None;
+            }
+            if s["status"]
+                .as_str()
+                .is_some_and(|status| status != "enable")
+            {
+                return None;
+            }
+            let id = s["id"].as_str().or_else(|| s["rule_id"].as_str())?.trim();
+            let name = s["name"].as_str().unwrap_or(id).trim();
+            if id.is_empty() || name.is_empty() {
+                return None;
+            }
+            let owner = s["space_id"].as_str().unwrap_or(space);
+            Some(Scene {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                space: owner.to_owned(),
+                room: None,
+            })
+        })
+        .collect()
+}
+
+/// Triggers one scene, through an `Api` that keeps its token between orders.
+pub(crate) async fn serve_triggers(
+    keys: Keys,
+    region: Region,
+    mut orders: mpsc::Receiver<Trigger>,
+) {
+    let mut api = Api::new(keys, region);
+    while let Some(order) = orders.recv().await {
+        let result = if Instant::now() >= order.deadline {
+            Err(moli_i18n::tr!("pilotes.tuya.scene_trop_tard"))
+        } else {
+            trigger_with(&mut api, &order.scene)
+                .await
+                .map_err(|e| e.to_string())
+        };
+        let _ = order.done.send(result);
+    }
+}
+
+/// One cloud call for one order (the dashboard's, an agent's, an
+/// automation's): the token is asked for again, scenes are rare.
+pub async fn trigger(keys: Keys, region: Region, scene: &Scene) -> anyhow::Result<()> {
+    let mut api = Api::new(keys, region);
+    trigger_with(&mut api, scene).await
+}
+
+async fn trigger_with(api: &mut Api, scene: &Scene) -> anyhow::Result<()> {
+    // Never try another path: a scene that really started but whose answer
+    // was lost must not be started twice (a TV routine may toggle).
+    let answer = api
+        .post(&format!(
+            "/v2.0/cloud/scene/rule/{}/actions/trigger",
+            scene.id
+        ))
+        .await?;
+    ensure!(answer == Json::Bool(true), "Tuya: the scene did not start");
+    Ok(())
 }
 
 /// One device's readings as Moli values (unknown codes skipped). Never a
@@ -342,11 +554,7 @@ const PAGE: usize = 50;
 /// local key and data points, as `moli-os tuya import` takes them: no Home
 /// Assistant needed. One list, then one data model per device.
 pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportFile> {
-    let mut api = Api {
-        keys,
-        region,
-        token: None,
-    };
+    let mut api = Api::new(keys.clone(), region);
     let mut raws: Vec<Json> = Vec::new();
     let mut last = String::new();
     loop {
@@ -387,16 +595,23 @@ pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportF
         };
         models.push(model);
     }
-    Ok(crate::import::from_cloud(&raws, &models))
+    let scenes = match scenes(keys, region, None).await {
+        Ok(scenes) => scenes,
+        Err(e) => {
+            // A project can read devices but not Tap-to-Run scenes: the
+            // device import still works, and filed scenes stay untouched.
+            tracing::warn!(error = %e, "tuya cloud: no scenes listed (authorize the scene APIs in the project)");
+            Vec::new()
+        }
+    };
+    let mut import = crate::import::from_cloud(&raws, &models);
+    import.scenes = scenes;
+    Ok(import)
 }
 
 /// Reads the states, then follows the changes, for ever (reconnecting).
 pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
-    let mut api = Api {
-        keys,
-        region,
-        token: None,
-    };
+    let mut api = Api::new(keys, region);
     let mut pause = Duration::from_secs(30);
     loop {
         match follow(&mut api, &devices, &up).await {
@@ -645,6 +860,56 @@ mod tests {
                 .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
         );
         assert_ne!(a, b, "the token is part of a business request's signature");
+    }
+
+    #[test]
+    fn a_scene_trigger_is_signed_as_a_post() {
+        let path = "/v2.0/cloud/scene/rule/scene-1/actions/trigger";
+        let to_sign = string_to_sign("POST", b"", path);
+        assert!(to_sign.starts_with("POST\n"));
+        assert!(to_sign.ends_with(&format!("\n\n{path}")));
+        assert_ne!(to_sign, string_to_sign("GET", b"", path));
+    }
+
+    #[test]
+    fn a_scene_query_is_sorted_as_tuya_signs_it() {
+        assert_eq!(
+            scene_path("15000001", 2),
+            "/v2.0/cloud/scene/rule?page_no=2&page_size=100&space_id=15000001&type=scene"
+        );
+        assert!(valid_space("15000001").is_ok());
+        assert!(valid_space("?type=automation").is_err());
+    }
+
+    #[test]
+    fn scene_page_reads_tuya_rules() {
+        let answer = serde_json::json!({
+            "result": {
+                "list": [
+                    { "type": "scene", "id": "scene-1", "name": "TV", "status": "enable", "space_id": "15000001" },
+                    { "type": "automation", "id": "rule-1", "name": "At home", "status": "enable" },
+                    { "type": "scene", "id": "scene-2", "name": "Off", "status": "disable" },
+                    { "type": "scene", "name": "No id" }
+                ],
+                "has_more": false
+            }
+        });
+        let scenes = scene_page(&answer, "15000001");
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].id, "scene-1");
+        assert_eq!(scenes[0].name, "TV");
+        assert_eq!(scenes[0].space, "15000001");
+    }
+
+    #[test]
+    fn space_ids_read_the_numeric_ids() {
+        let answer = serde_json::json!({
+            "result": { "data": [15_000_002, 15_000_003], "last_row_key": 15_000_003, "page_size": 100 }
+        });
+        assert_eq!(space_ids_in(&answer), ["15000002", "15000003"]);
+        let answer = serde_json::json!({ "result": { "list": [{ "id": "15000004" }] } });
+        assert_eq!(space_ids_in(&answer), ["15000004"]);
+        assert!(space_ids_in(&serde_json::json!({ "result": {} })).is_empty());
     }
 
     #[test]

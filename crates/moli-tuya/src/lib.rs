@@ -26,13 +26,14 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use moli_core::DeviceId;
+use moli_core::{DeviceId, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use serde::Deserialize;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use device::{Link, Order, Up};
+use model::Scene;
 pub use model::{DeviceFile, Dp, DpKind, TuyaDevice};
 use protocol::Version;
 
@@ -116,6 +117,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut registry = Registry::new(keys.is_some(), up_tx);
     let (children, rest) = split_children(ctx, file.devices, &mut registry.devices);
     let scan = registry.register(ctx, rest, children);
+    registry.register_scenes(ctx, file.scenes);
     let Registry {
         orders,
         addresses,
@@ -125,10 +127,31 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         mut fallback,
         mut tasks,
         up_tx,
+        scenes: scene_by_id,
+        scene_ids,
         ..
     } = registry;
-    // Keys given later in the dashboard: a restart takes them.
-    let await_keys = keys.is_none() && scan.silent_seen;
+    // Keys given later in the dashboard: a restart takes them, for the
+    // sensors and for the scenes alike.
+    let await_keys = keys.is_none() && (scan.silent_seen || !scene_ids.is_empty());
+    // Tap-to-Run scenes live in the cloud only: one task keeps the token
+    // between orders, and every order still passes through the hub's guard.
+    let scene_region = cloud::Region::named(&config.cloud_region);
+    let scene_tx = if scene_ids.is_empty() {
+        None
+    } else {
+        match (keys.clone(), scene_region) {
+            (Some(keys), Some(region)) => {
+                let (tx, orders) = mpsc::channel(8);
+                tasks.spawn(cloud::serve_triggers(keys, region, orders));
+                Some(tx)
+            }
+            _ => None,
+        }
+    };
+    for id in &scene_ids {
+        ctx.set_availability(id, scene_tx.is_some());
+    }
     // Apart from the links: what the cloud says of a sub-device is used
     // only while its gateway is out of reach.
     let (cloud_tx, mut cloud_up) = mpsc::channel::<Up>(256);
@@ -148,6 +171,13 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     drop(up_tx);
     scan.warn_missing_keys(ctx);
     locate(config, &devices, addresses, wanted, &mut tasks);
+    let scene_problem = (!scene_ids.is_empty() && scene_region.is_none()).then(|| {
+        moli_i18n::tr!(
+            "pilotes.tuya.region_inconnue",
+            region = config.cloud_region,
+            known = cloud::Region::names()
+        )
+    });
     let refused = if let Cloud::Refused(why) = cloud {
         // No cloud: what it alone reads is offline (before `ready`, which
         // would bring back what a previous run showed), and a gateway out of
@@ -156,10 +186,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         fallback = Fallback::default();
         Some(why)
     } else {
-        None
+        scene_problem
     };
     ctx.ready();
-    tracing::info!(instance = %ctx.instance(), devices = devices.len(), "tuya devices loaded");
+    tracing::info!(
+        instance = %ctx.instance(),
+        devices = devices.len(),
+        scenes = scene_ids.len(),
+        "tuya devices loaded"
+    );
     if let Some(why) = refused {
         // The local devices go on; the house is told what to fix.
         ctx.wait_for(why);
@@ -170,7 +205,16 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         cloud: &mut cloud_up,
         fallback,
     };
-    let keys_came = serve(ctx, &mut sources, &orders, &devices, await_keys).await;
+    let keys_came = serve(
+        ctx,
+        &mut sources,
+        &orders,
+        &devices,
+        &scene_by_id,
+        scene_tx.as_ref(),
+        await_keys,
+    )
+    .await;
     drop(idle_cloud);
     tasks.abort_all();
     if keys_came {
@@ -238,6 +282,9 @@ struct Registry {
     up_tx: mpsc::Sender<Up>,
     /// Whether the cloud keys are there.
     has_cloud_keys: bool,
+    /// Tap-to-Run scenes, as devices of the house, by their Moli id.
+    scenes: HashMap<DeviceId, Scene>,
+    scene_ids: Vec<DeviceId>,
 }
 
 impl Registry {
@@ -253,6 +300,20 @@ impl Registry {
             connections: Arc::new(connections::Connections::default()),
             up_tx,
             has_cloud_keys,
+            scenes: HashMap::new(),
+            scene_ids: Vec::new(),
+        }
+    }
+
+    /// A cloud scene is an order-only device: no local link, no state to
+    /// poll, but a hub command all the same (guard and journal included).
+    fn register_scenes(&mut self, ctx: &DriverCtx, scenes: Vec<Scene>) {
+        for scene in scenes {
+            let device = scene.device(ctx.instance());
+            let id = device.id.clone();
+            ctx.upsert_device(device);
+            self.scenes.insert(id.clone(), scene);
+            self.scene_ids.push(id);
         }
     }
 
@@ -518,6 +579,8 @@ async fn serve(
     sources: &mut Sources<'_>,
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
+    scenes: &HashMap<DeviceId, Scene>,
+    scene_tx: Option<&mpsc::Sender<cloud::Trigger>>,
     await_keys: bool,
 ) -> bool {
     let mut look = tokio::time::interval(std::time::Duration::from_secs(20));
@@ -536,7 +599,7 @@ async fn serve(
             // `None` once the driver is cancelled.
             command = ctx.next_command() => {
                 let Some(command) = command else { break };
-                dispatch(ctx, command, orders, devices);
+                dispatch(ctx, command, orders, devices, scenes, scene_tx);
             }
             message = sources.links.recv(), if links_open => {
                 let Some(up) = message else {
@@ -679,13 +742,49 @@ fn locate(
     }
 }
 
-/// Hands a command to its device's link; the reply comes from the link.
+/// The only order a scene accepts: a point named `trigger`, the value
+/// `true` (a scene has no state to set to `false`).
+fn scene_order(key: &str, value: &Value) -> bool {
+    key == "trigger" && *value == Value::Bool(true)
+}
+
+/// Hands a command to its device's link, or to the cloud for a scene; the
+/// reply comes from the link or from the cloud task.
 fn dispatch(
     ctx: &DriverCtx,
     command: moli_runtime::CommandRequest,
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
+    scenes: &HashMap<DeviceId, Scene>,
+    scene_tx: Option<&mpsc::Sender<cloud::Trigger>>,
 ) {
+    if let Some(scene) = scenes.get(&command.device.id) {
+        if !scene_order(&command.key, &command.value) {
+            command.reply(Err(moli_i18n::tr!("pilotes.tuya.scene_ordre")));
+            return;
+        }
+        let Some(tx) = scene_tx else {
+            command.reply(Err(moli_i18n::tr!("pilotes.tuya.scene_sans_cloud")));
+            return;
+        };
+        let (done, outcome) = oneshot::channel();
+        let trigger = cloud::Trigger {
+            scene: scene.clone(),
+            done,
+            deadline: command.deadline.into(),
+        };
+        if tx.try_send(trigger).is_err() {
+            command.reply(Err(moli_i18n::tr!("pilotes.tuya.occupe")));
+            return;
+        }
+        tokio::spawn(async move {
+            let result = outcome
+                .await
+                .unwrap_or_else(|_| Err(moli_i18n::tr!("pilotes.tuya.connexion_perdue")));
+            command.reply(result);
+        });
+        return;
+    }
     let Some((index, sender)) = orders.get(&command.device.id) else {
         let known = devices.iter().any(|(id, _)| *id == command.device.id);
         command.reply(Err(if known {
@@ -840,10 +939,13 @@ fn broadcast_socket(port: u16) -> std::io::Result<UdpSocket> {
 
 // ---- import ------------------------------------------------------------------
 
-/// What the import script sends: devices with their local key.
-#[derive(Debug, Deserialize)]
+/// What the import script sends: devices with their local key, and the
+/// scenes the cloud knows (empty when imported from a file).
+#[derive(Debug, Default, Deserialize)]
 pub struct ImportFile {
     pub devices: Vec<ImportDevice>,
+    #[serde(default)]
+    pub scenes: Vec<model::Scene>,
 }
 
 #[derive(Deserialize)]
@@ -870,9 +972,37 @@ pub fn merge_import(
     import: ImportFile,
     existing: Option<DeviceFile>,
 ) -> (DeviceFile, Vec<(String, String)>) {
-    let previous: HashMap<String, TuyaDevice> = existing
-        .map(|f| f.devices.into_iter().map(|d| (d.id.clone(), d)).collect())
-        .unwrap_or_default();
+    let (previous, old_scenes): (HashMap<String, TuyaDevice>, Vec<model::Scene>) = existing
+        .map_or_else(
+            || (HashMap::new(), Vec::new()),
+            |f| {
+                (
+                    f.devices.into_iter().map(|d| (d.id.clone(), d)).collect(),
+                    f.scenes,
+                )
+            },
+        );
+    // A scene already filed keeps the room a person gave it; a cloud that
+    // cannot list scenes (no permission) leaves the filed ones alone.
+    let old_scenes: HashMap<String, model::Scene> =
+        old_scenes.into_iter().map(|s| (s.id.clone(), s)).collect();
+    let scenes = if import.scenes.is_empty() {
+        old_scenes.into_values().collect()
+    } else {
+        import
+            .scenes
+            .into_iter()
+            .map(|mut scene| {
+                if let Some(old) = old_scenes.get(&scene.id) {
+                    scene.room = old.room.clone();
+                    if scene.space.is_empty() {
+                        scene.space.clone_from(&old.space);
+                    }
+                }
+                scene
+            })
+            .collect()
+    };
     let mut keys = Vec::new();
     let devices = import
         .devices
@@ -896,7 +1026,7 @@ pub fn merge_import(
             },
         )
         .collect();
-    (DeviceFile { devices }, keys)
+    (DeviceFile { devices, scenes }, keys)
 }
 
 #[cfg(test)]
@@ -1161,6 +1291,7 @@ mod tests {
                 "id": "b", "name": "Volet", "room": "Chambre à coucher", "ip": "192.168.0.13"
             }))
             .unwrap()],
+                scenes: Vec::new(),
             };
         let (file, keys) = merge_import(import, Some(existing));
         assert_eq!(
@@ -1174,5 +1305,58 @@ mod tests {
             !text.contains("0123456789abcdef"),
             "no key in the device file"
         );
+    }
+
+    #[test]
+    fn only_true_can_trigger_a_scene() {
+        assert!(scene_order("trigger", &Value::Bool(true)));
+        assert!(!scene_order("trigger", &Value::Bool(false)));
+        assert!(!scene_order("trigger", &Value::Int(1)));
+        assert!(!scene_order("allumer", &Value::Bool(true)));
+    }
+
+    #[test]
+    fn imports_keep_filed_scenes_when_the_cloud_cannot_list_them() {
+        let import: ImportFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": []
+        }))
+        .unwrap();
+        let existing: DeviceFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [{ "id": "scene-1", "name": "TV", "space": "42", "room": "Salon" }]
+        }))
+        .unwrap();
+        let (file, keys) = merge_import(import, Some(existing));
+        assert!(keys.is_empty());
+        assert_eq!(file.scenes.len(), 1);
+        assert_eq!(file.scenes[0].space, "42");
+        assert_eq!(file.scenes[0].room.as_deref(), Some("Salon"));
+    }
+
+    #[test]
+    fn a_scene_refiled_by_the_cloud_keeps_its_room() {
+        let import: ImportFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [{ "id": "scene-1", "name": "TV", "space": "42" }]
+        }))
+        .unwrap();
+        let existing: DeviceFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [{ "id": "scene-1", "name": "TV", "space": "42", "room": "Salon" }]
+        }))
+        .unwrap();
+        let (file, _) = merge_import(import, Some(existing));
+        assert_eq!(file.scenes[0].room.as_deref(), Some("Salon"));
+    }
+
+    #[test]
+    fn a_scene_filed_before_v2_still_loads_its_home_as_a_space() {
+        let file: DeviceFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [{ "id": "scene-1", "name": "TV", "home": "42" }]
+        }))
+        .unwrap();
+        assert_eq!(file.scenes[0].space, "42");
     }
 }

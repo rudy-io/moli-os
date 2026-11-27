@@ -33,6 +33,9 @@ pub fn from_cloud(raws: &[Json], models: &[Json]) -> ImportFile {
             .into_iter()
             .filter_map(|d| serde_json::from_value::<ImportDevice>(Json::Object(d)).ok())
             .collect(),
+        // Scenes come from a separate cloud call (in `cloud::import`), never
+        // from a device export.
+        scenes: Vec::new(),
     }
 }
 
