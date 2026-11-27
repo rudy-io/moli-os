@@ -773,8 +773,13 @@ fn dispatch(
             done,
             deadline: command.deadline.into(),
         };
-        if tx.try_send(trigger).is_err() {
-            command.reply(Err(moli_i18n::tr!("pilotes.tuya.occupe")));
+        if let Err(e) = tx.try_send(trigger) {
+            let reason = if matches!(e, mpsc::error::TrySendError::Closed(_)) {
+                moli_i18n::tr!("pilotes.tuya.connexion_perdue")
+            } else {
+                moli_i18n::tr!("pilotes.tuya.occupe")
+            };
+            command.reply(Err(reason));
             return;
         }
         tokio::spawn(async move {
@@ -946,6 +951,10 @@ pub struct ImportFile {
     pub devices: Vec<ImportDevice>,
     #[serde(default)]
     pub scenes: Vec<model::Scene>,
+    /// Why the cloud could not list scenes, when that happened. The device
+    /// import still works and the scenes already filed stay untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -982,27 +991,21 @@ pub fn merge_import(
                 )
             },
         );
-    // A scene already filed keeps the room a person gave it; a cloud that
-    // cannot list scenes (no permission) leaves the filed ones alone.
-    let old_scenes: HashMap<String, model::Scene> =
+    // A scene already filed keeps the room a person gave it. A partial list
+    // from the cloud must never delete scenes: better an old routine remains
+    // than a labelled one disappears because one page was missing.
+    let mut scenes: HashMap<String, model::Scene> =
         old_scenes.into_iter().map(|s| (s.id.clone(), s)).collect();
-    let scenes = if import.scenes.is_empty() {
-        old_scenes.into_values().collect()
-    } else {
-        import
-            .scenes
-            .into_iter()
-            .map(|mut scene| {
-                if let Some(old) = old_scenes.get(&scene.id) {
-                    scene.room = old.room.clone();
-                    if scene.space.is_empty() {
-                        scene.space.clone_from(&old.space);
-                    }
-                }
-                scene
-            })
-            .collect()
-    };
+    for mut scene in import.scenes {
+        if let Some(old) = scenes.get(&scene.id) {
+            scene.room.clone_from(&old.room);
+            if scene.space.is_empty() {
+                scene.space.clone_from(&old.space);
+            }
+        }
+        scenes.insert(scene.id.clone(), scene);
+    }
+    let scenes = scenes.into_values().collect();
     let mut keys = Vec::new();
     let devices = import
         .devices
@@ -1348,6 +1351,27 @@ mod tests {
         .unwrap();
         let (file, _) = merge_import(import, Some(existing));
         assert_eq!(file.scenes[0].room.as_deref(), Some("Salon"));
+    }
+
+    #[test]
+    fn a_partial_cloud_listing_does_not_delete_filed_scenes() {
+        let import: ImportFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [{ "id": "scene-2", "name": "Other", "space": "42" }]
+        }))
+        .unwrap();
+        let existing: DeviceFile = serde_json::from_value(serde_json::json!({
+            "devices": [],
+            "scenes": [
+                { "id": "scene-1", "name": "TV", "space": "42", "room": "Salon" },
+                { "id": "scene-2", "name": "Other", "space": "42" }
+            ]
+        }))
+        .unwrap();
+        let (file, _) = merge_import(import, Some(existing));
+        assert_eq!(file.scenes.len(), 2);
+        let tv = file.scenes.iter().find(|s| s.id == "scene-1").unwrap();
+        assert_eq!(tv.room.as_deref(), Some("Salon"));
     }
 
     #[test]

@@ -720,6 +720,11 @@ fn tuya_import(
         for line in moli_tuya::import::summary(&import) {
             println!("{line}");
         }
+        if let Some(reason) = &import.scene_error {
+            println!("scenes unavailable ({reason}); filed scenes kept");
+        } else {
+            println!("{} scenes from the cloud", import.scenes.len());
+        }
         println!(
             "{} devices, nothing written (--summary); the import would write {}",
             import.devices.len(),
@@ -727,6 +732,7 @@ fn tuya_import(
         );
         return Ok(());
     }
+    let scene_error = import.scene_error.clone();
     let (file, keys) = moli_tuya::merge_import(import, existing);
     for (name, value) in &keys {
         runtime.block_on(moli_runtime::set_secret(
@@ -746,6 +752,11 @@ fn tuya_import(
         devices_file.display(),
         keys.len()
     );
+    if let Some(reason) = &scene_error {
+        eprintln!("scenes unavailable ({reason}); filed scenes kept");
+    } else {
+        println!("{} scenes filed", file.scenes.len());
+    }
     Ok(())
 }
 
@@ -768,7 +779,11 @@ fn tuya_scenes(config: &Config, instance: &str, space: Option<String>) -> anyhow
         eprintln!("no enabled scene in this Tuya project");
     }
     for scene in scenes {
-        println!("{}\t{}", scene.id, scene.name);
+        println!(
+            "{}\t{}",
+            moli_tuya::cloud::label(&scene.id),
+            moli_tuya::cloud::label(&scene.name)
+        );
     }
     Ok(())
 }

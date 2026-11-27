@@ -36,6 +36,7 @@ pub fn from_cloud(raws: &[Json], models: &[Json]) -> ImportFile {
         // Scenes come from a separate cloud call (in `cloud::import`), never
         // from a device export.
         scenes: Vec::new(),
+        scene_error: None,
     }
 }
 
