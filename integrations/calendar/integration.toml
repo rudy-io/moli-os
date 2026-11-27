@@ -1,0 +1,28 @@
+[integration]
+id = "calendar"
+name = "Calendrier (week-end, jours fériés, vacances scolaires)"
+# The public holidays are worked out locally; the school holidays come from
+# the French education ministry's open data (no account, only the zone).
+brands = ["Éducation nationale"]
+models = ["Calendrier scolaire"]
+transport = "https"
+driver = "calendar"
+crate = "moli-calendar"
+
+[discovery]
+# Nothing on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["school_zone", "alsace_moselle", "timezone"]
+
+[origin]
+reused = "aucun code repris : jours fériés calculés (algorithme de Pâques de Meeus), vacances lues dans le jeu de données ouvert fr-en-calendrier-scolaire de data.education.gouv.fr, vérifié sur l'API réelle"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/records.json"

@@ -1,0 +1,149 @@
+{
+ "total_count": 16,
+ "results": [
+  {
+   "description": "Vacances de Noël",
+   "population": "-",
+   "start_date": "2025-12-19T23:00:00+00:00",
+   "end_date": "2026-01-04T23:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances de Noël",
+   "population": "-",
+   "start_date": "2025-12-19T23:00:00+00:00",
+   "end_date": "2026-01-04T23:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Hiver",
+   "population": "-",
+   "start_date": "2026-02-06T23:00:00+00:00",
+   "end_date": "2026-02-22T23:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Hiver",
+   "population": "-",
+   "start_date": "2026-02-06T23:00:00+00:00",
+   "end_date": "2026-02-22T23:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances de Printemps",
+   "population": "-",
+   "start_date": "2026-04-03T22:00:00+00:00",
+   "end_date": "2026-04-19T22:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances de Printemps",
+   "population": "-",
+   "start_date": "2026-04-03T22:00:00+00:00",
+   "end_date": "2026-04-19T22:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Pont de l'Ascension",
+   "population": "-",
+   "start_date": "2026-05-13T22:00:00+00:00",
+   "end_date": "2026-05-17T22:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Pont de l'Ascension",
+   "population": "-",
+   "start_date": "2026-05-13T22:00:00+00:00",
+   "end_date": "2026-05-17T22:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Été",
+   "population": "Élèves",
+   "start_date": "2026-07-03T22:00:00+00:00",
+   "end_date": "2026-08-31T22:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Été",
+   "population": "Élèves",
+   "start_date": "2026-07-03T22:00:00+00:00",
+   "end_date": "2026-08-31T22:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Été",
+   "population": "Enseignants",
+   "start_date": "2026-07-03T22:00:00+00:00",
+   "end_date": "2026-08-30T22:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances d'Été",
+   "population": "Enseignants",
+   "start_date": "2026-07-03T22:00:00+00:00",
+   "end_date": "2026-08-30T22:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "description": "Vacances de la Toussaint",
+   "population": "-",
+   "start_date": "2026-10-16T22:00:00+00:00",
+   "end_date": "2026-11-01T23:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "description": "Vacances de la Toussaint",
+   "population": "-",
+   "start_date": "2026-10-16T22:00:00+00:00",
+   "end_date": "2026-11-01T23:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "description": "Vacances de Noël",
+   "population": "-",
+   "start_date": "2026-12-18T23:00:00+00:00",
+   "end_date": "2027-01-03T23:00:00+00:00",
+   "location": "Bordeaux",
+   "zones": "Zone A",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "description": "Vacances de Noël",
+   "population": "-",
+   "start_date": "2026-12-18T23:00:00+00:00",
+   "end_date": "2027-01-03T23:00:00+00:00",
+   "location": "Lyon",
+   "zones": "Zone A",
+   "annee_scolaire": "2026-2027"
+  }
+ ]
+}

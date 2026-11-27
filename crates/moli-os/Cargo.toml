@@ -46,6 +46,7 @@ moli-appletv.workspace = true
 moli-melcloud.workspace = true
 moli-kasa.workspace = true
 moli-recycleapp.workspace = true
+moli-calendar.workspace = true
 moli-engie.workspace = true
 moli-tapo.workspace = true
 moli-lifx.workspace = true

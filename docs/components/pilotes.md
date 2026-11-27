@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, proxmox, helpers, profile
+kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, proxmox, helpers, calendar, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -1873,6 +1873,36 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Rythme** : calendrier toutes les 6 h, jours recomptés toutes les 15 min.
 - **Tests** : `src/model.rs` (adresse, prochaine collecte par type, collecte remplacée, type
   inconnu, nom manquant dans la langue), `src/lib.rs` (adresse vérifiée, requêtes encodées).
+
+## `calendar` : le genre du jour (`crates/moli-calendar`)
+
+- **Couvre** : week-end, jours fériés français, vacances scolaires, pour les automatismes qui ne
+  tournent pas pareil un jour calme (annonces plus tard le matin, programme de chauffage…).
+- **Jours fériés** (`src/holidays.rs`) : calculés sur place, sans réseau. Les 11 jours fériés
+  nationaux, dont le lundi de Pâques, l'Ascension et le lundi de Pentecôte (Pâques par
+  l'algorithme anonyme grégorien de Meeus) ; avec `alsace_moselle`, le Vendredi saint et la
+  Saint-Étienne.
+- **Vacances scolaires** (`src/school.rs`) : le jeu de données ouvert `fr-en-calendrier-scolaire`
+  de `data.education.gouv.fr` (API Explore v2.1, sans compte), filtré sur la zone, regroupé
+  (`group_by`) pour n'avoir chaque période qu'une fois (l'API en donne une par académie). Les
+  dates, minuit en France écrit en UTC, sont lues dans `timezone` : du premier jour sans école
+  (compris) au jour de la rentrée (exclu). L'été des enseignants (`population` = « Enseignants »)
+  est écarté ; une période dont le début égale la fin (pont de l'Ascension 2027) compte pour ce
+  jour-là.
+- **Configuration** : `school_zone` (`A`, `B`, `C`, ou une zone du jeu de données : `Corse`,
+  `Réunion`…, facultatif : sans elle, rien ne sort de la maison), `alsace_moselle` (`false`),
+  `timezone` (`Europe/Paris`).
+- **Points** (lecture seule) : `weekend`, `holiday`, `holiday_name` (traduit, vide sinon),
+  `workday` (ni week-end ni férié) ; avec une zone, `school_holidays` et `school_holidays_name`
+  (nom donné par le ministère) ; `quiet_day` (l'un des trois). Tant que le calendrier scolaire
+  n'a jamais été lu : `school_holidays` vaut `null`, `quiet_day` aussi un jour ouvré, et le
+  pilote le signale (`warn`).
+- **Rythme** : points recalculés chaque minute (ils changent à minuit) ; vacances lues une fois
+  par jour, 400 jours à l'avance, nouvel essai toutes les heures après un échec. Une lecture
+  réussie reste valable si les suivantes échouent.
+- **Tests** : `src/holidays.rs` (Pâques, jours de l'année, Alsace-Moselle), `src/school.rs`
+  (zones, périodes uniques en jours locaux, été des élèves, période d'un jour, réponse
+  étrange, fixture réelle), `src/lib.rs` (options, genre du jour, requête).
 
 ## `engie` : compte ENGIE Belgique (`crates/moli-engie`)
 

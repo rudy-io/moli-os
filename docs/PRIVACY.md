@@ -33,7 +33,9 @@ notifications d'Expo et d'Apple. Le jeton de notification n'est envoyé qu'à vo
 **Services en ligne que votre maison peut contacter.** Certaines intégrations de Moli OS, si vous
 les activez, envoient des données depuis votre serveur Moli vers un service tiers. Les
 **collectes de déchets (RecycleApp)** : votre code postal, votre rue et votre numéro partent vers
-Fost Plus (recycleapp.be) toutes les 6 heures, pour lire le calendrier de votre adresse.
+Fost Plus (recycleapp.be) toutes les 6 heures, pour lire le calendrier de votre adresse. Le
+**calendrier** (vacances scolaires) : votre zone scolaire (A, B, C…) part vers l'Éducation nationale
+(data.education.gouv.fr) une fois par jour, pour lire les dates des vacances.
 
 **Compte.** Aucun compte chez nous. Votre identifiant et votre mot de passe sont ceux de votre propre
 maison Moli. Aucune publicité, aucun traceur, aucune mesure d'audience.
@@ -72,7 +74,8 @@ Apple's notification services. The notification token is only sent to your Moli 
 **Online services your house may contact.** Some Moli OS integrations, if you turn them on,
 send data from your Moli server to a third-party service. **Waste collections (RecycleApp)**:
 your postal code, street and house number go to Fost Plus (recycleapp.be) every 6 hours, to read
-your address's calendar.
+your address's calendar. The **calendar** (school holidays): your school zone (A, B, C…) goes to the French
+education ministry (data.education.gouv.fr) once a day, to read the school holiday dates.
 
 **Account.** No account with us. Your name and password are those of your own Moli house. No ads,
 no trackers, no analytics.
