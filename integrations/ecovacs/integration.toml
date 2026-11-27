@@ -1,0 +1,22 @@
+[integration]
+id = "ecovacs"
+name = "Ecovacs Deebot"
+brands = ["Ecovacs"]
+models = ["DEEBOT X8 PRO OMNI"]
+transport = "https"
+driver = "ecovacs"
+crate = "moli-ecovacs"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["session"]
+vars = []
+options = ["writable", "poll_seconds"]
+
+[origin]
+reused = "Protocol reference: DeebotUniverse/client.py and Home Assistant issue #194725. Independent Rust implementation."
+author = "agent"

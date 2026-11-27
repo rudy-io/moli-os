@@ -1,0 +1,22 @@
+{
+  "ecovacs.invalid_poll": "Réglez la fréquence de lecture Ecovacs entre 15 et 300 secondes.",
+  "ecovacs.pair_required": "Associez le compte Ecovacs avec la commande ecovacs-pair, puis redémarrez Moli.",
+  "ecovacs.invalid_input": "Saisissez une adresse Ecovacs, un mot de passe et, si demandé, un code de vérification valides.",
+  "ecovacs.enter_code": "Saisissez le code de vérification envoyé par Ecovacs à votre adresse e-mail.",
+  "ecovacs.no_robot": "Aucun X8 PRO OMNI pris en charge trouvé sur ce compte Ecovacs Italie.",
+  "ecovacs.battery": "Batterie",
+  "ecovacs.state": "État du robot",
+  "ecovacs.clean": "Nettoyage",
+  "ecovacs.pause": "Pause",
+  "ecovacs.dock": "Retour à la base",
+  "ecovacs.unavailable": "Robot indisponible ou commandes désactivées.",
+  "ecovacs.command_refused": "La commande Ecovacs a été refusée.",
+  "ecovacs.response": "Ecovacs a renvoyé une réponse inattendue.",
+  "ecovacs.network": "Impossible de joindre le cloud Ecovacs.",
+  "ecovacs.auth_rejected": "Le cloud Ecovacs a refusé l’authentification.",
+  "ecovacs.encryption": "Impossible de chiffrer les identifiants Ecovacs.",
+  "ecovacs.pipe_input": "Transmettez les identifiants avec le script local d’association.",
+  "ecovacs.invalid_instance": "Configurez l’instance Ecovacs avant l’association.",
+  "ecovacs.no_vault": "Démarrez une fois Moli pour initialiser son coffre chiffré.",
+  "ecovacs.paired": "Session Ecovacs enregistrée. Redémarrez Moli pour découvrir le robot."
+}

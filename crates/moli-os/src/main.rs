@@ -4,6 +4,7 @@ mod airzone;
 mod backup;
 mod catalogue;
 mod config;
+mod ecovacs;
 mod managed_airzone;
 mod managed_devices;
 mod timezone;
@@ -49,6 +50,8 @@ enum Command {
     CheckConfig,
     /// Read-only Airzone diagnostics; demo data is never imported as devices.
     AirzoneInspect(airzone::Inspect),
+    /// Pair a Deebot with the Ecovacs Italy cloud using piped input.
+    EcovacsPair(ecovacs::Pair),
     /// Operator tools for the encrypted secret store (values are never shown).
     #[command(subcommand)]
     Secrets(SecretsCommand),
@@ -293,6 +296,7 @@ fn main() -> anyhow::Result<()> {
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
         Command::AirzoneInspect(args) => airzone::run(&config, &args),
+        Command::EcovacsPair(args) => ecovacs::run(&config, &args),
         Command::Secrets(SecretsCommand::Forget { instance, name }) => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
@@ -1421,6 +1425,7 @@ const KINDS: &[&str] = &[
     "solcast",
     "linky-tic",
     "homeassistant",
+    "ecovacs",
     "igd",
     "freebox",
     "melcloud",
@@ -1678,6 +1683,7 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
+        "ecovacs" => configured_driver(config, moli_ecovacs::Ecovacs::new)?,
         "overkiz" => configured_driver(config, moli_overkiz::Overkiz::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
             config.options.clone().try_into().with_context(context)?,

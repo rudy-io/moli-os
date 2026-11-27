@@ -1,0 +1,22 @@
+{
+  "ecovacs.invalid_poll": "Set the Ecovacs polling interval between 15 and 300 seconds.",
+  "ecovacs.pair_required": "Pair the Ecovacs account with the ecovacs-pair command, then restart Moli.",
+  "ecovacs.invalid_input": "Enter a valid Ecovacs email address, password and, if requested, verification code.",
+  "ecovacs.enter_code": "Enter the verification code sent by Ecovacs to your email.",
+  "ecovacs.no_robot": "No supported X8 PRO OMNI was found in this Ecovacs Italy account.",
+  "ecovacs.battery": "Battery",
+  "ecovacs.state": "Robot status",
+  "ecovacs.clean": "Cleaning",
+  "ecovacs.pause": "Pause",
+  "ecovacs.dock": "Return to dock",
+  "ecovacs.unavailable": "Robot unavailable or controls disabled.",
+  "ecovacs.command_refused": "The Ecovacs command was refused.",
+  "ecovacs.response": "Ecovacs returned an unexpected response.",
+  "ecovacs.network": "Could not contact the Ecovacs cloud.",
+  "ecovacs.auth_rejected": "The Ecovacs cloud refused authentication.",
+  "ecovacs.encryption": "Could not encrypt the Ecovacs credentials.",
+  "ecovacs.pipe_input": "Pipe the credentials from the local pairing script.",
+  "ecovacs.invalid_instance": "Configure the Ecovacs driver instance before pairing.",
+  "ecovacs.no_vault": "Start Moli once to initialize its encrypted vault.",
+  "ecovacs.paired": "Ecovacs session stored. Restart Moli to discover the robot."
+}
