@@ -739,14 +739,16 @@ test('a robot with Ecovacs settings shows the current mode and water alarms', ()
   const points = [
     ...robot(),
     point('water_level', number(0, 50, 1)),
-    point('work_mode', enumeration('vacuum', 'mop', 'vacuum_and_mop')),
+    point('work_mode', enumeration('vacuum', 'mop', 'vacuum_and_mop', 'mop_after_vacuum')),
   ];
   const values = {
     water_level: 29, work_mode: 'vacuum_and_mop', mop_attached: true,
     clean_water_empty: true, dirty_water_full: true,
   };
   const html = show('VacuumCard', points, values);
-  assert.match(html, /<select[\s>]/);
+  assert.match(html, /<select class="mode-select\b/);
+  assert.equal((html.match(/<option[\s>]/g) ?? []).length, 4);
+  assert.match(html, /<option(?=[^>]*value="vacuum_and_mop")(?=[^>]*selected)[^>]*>/);
   assert.match(inputs(html)[0], /min="0" max="50" step="1" value="29"/);
   assert.match(html, /Réservoir d’eau propre vide|Clean water tank empty/);
   assert.match(html, /Réservoir d’eau sale plein|Dirty water tank full/);

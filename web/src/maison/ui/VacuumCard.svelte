@@ -1,5 +1,5 @@
 <script>
-  import { value, act, num, nameOf, device } from '../lib/home.svelte.js';
+  import { value, act, num, nameOf, device, hub } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import { canWrite, numericRange, quantize, writableChoices } from '../lib/capabilities.js';
@@ -50,6 +50,8 @@
   const speedName = (speed) => (SUCTION.includes(speed) ? t(`maison.robot.aspiration.${speed}`) : speed);
   const workMode = $derived(value(id, 'work_mode'));
   const workModes = $derived(writableChoices(d, 'work_mode').filter((mode) => WORK_MODES.includes(mode)));
+  const workModePoint = $derived(`${id}/work_mode`);
+  const shownMode = $derived(workModes.includes(hub.pending[workModePoint]) ? hub.pending[workModePoint] : workMode);
   const modeName = (mode) => t(`ecovacs.work_mode.${mode}`);
   const water = $derived(value(id, 'water_level'));
   const waterRange = $derived(canWrite(d, 'water_level') ? numericRange(d, 'water_level', 1) : null);
@@ -106,13 +108,19 @@
   {/if}
   {#if WORK_MODES.includes(workMode)}
     {#if workModes.includes(workMode)}
-      <label class="setting">
+      <label class="mode-setting">
         <span>{t('ecovacs.work_mode')}</span>
-        <select value={workMode} onchange={(e) => act(`${id}/work_mode`, e.currentTarget.value, t('ecovacs.work_mode'))}>
-          {#each workModes as mode (mode)}
-            <option value={mode}>{modeName(mode)}</option>
-          {/each}
-        </select>
+        <span class="mode-picker">
+          <select class="mode-select" value={shownMode} onchange={(e) => {
+            const next = e.currentTarget.value;
+            if (workModes.includes(next) && next !== shownMode) act(workModePoint, next, t('ecovacs.work_mode'));
+          }}>
+            {#each workModes as mode (mode)}
+              <option value={mode}>{modeName(mode)}</option>
+            {/each}
+          </select>
+          <span class="mode-chevron" aria-hidden="true"><Icon name="chevron-down" size={18} /></span>
+        </span>
       </label>
     {:else}
       <p class="setting">{t('ecovacs.work_mode')} <span>{modeName(workMode)}</span></p>
@@ -214,8 +222,90 @@
     margin: 10px 0 0;
   }
 
-  .setting :is(select, input) {
+  .setting input {
     max-width: 100%;
     font: inherit;
+  }
+
+  .mode-setting {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .mode-picker {
+    position: relative;
+    display: block;
+  }
+
+  .mode-select {
+    appearance: none;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 38px 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    font: inherit;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  .mode-select:focus-visible {
+    outline: 2px solid var(--cool);
+    outline-offset: 2px;
+  }
+
+  .mode-chevron {
+    position: absolute;
+    inset: 0 12px 0 auto;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  @media (hover: hover) {
+    .mode-select:hover { background: var(--surface-3); }
+  }
+
+  @media (pointer: fine) {
+    @supports (appearance: base-select) and selector(::picker(select)) {
+      .mode-select,
+      .mode-select::picker(select) {
+        appearance: base-select;
+      }
+
+      .mode-select::picker-icon { display: none; }
+
+      .mode-select::picker(select) {
+        margin-top: 4px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .mode-select option {
+        min-height: 36px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        color: var(--ink);
+      }
+
+      .mode-select option:checked {
+        background: var(--warm-soft);
+        color: var(--warm-ink);
+      }
+
+      .mode-select option:is(:hover, :focus-visible):not(:checked) {
+        background: var(--surface-2);
+      }
+    }
   }
 </style>
