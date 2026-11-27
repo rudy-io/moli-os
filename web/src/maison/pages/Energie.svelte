@@ -13,6 +13,7 @@
   import DayEnergy from '../ui/DayEnergy.svelte';
   import { batteryNow } from '../lib/battery.js';
   import { yearOverYear, trendTone } from '../lib/year-compare.js';
+  import { offPeakShare } from '../lib/off-peak.js';
 
   onMount(useEnergy);
 
@@ -142,14 +143,8 @@
   });
   const partsMax = $derived(Math.max(0.01, ...parts.map((p) => p.kwh)));
   const partsTotal = $derived(parts.reduce((t, p) => t + p.kwh, 0));
-  // This month, the share billed off-peak.
-  const offShare = $derived.by(() => {
-    const grid = (s?.meters ?? []).filter((m) => m.role === 'grid');
-    const of = (re) => grid.filter((m) => re.test(m.id + m.name)).reduce((t, m) => t + (s.month.meters[m.id]?.kwh ?? 0), 0);
-    const off = of(/hc|creuse/i);
-    const all = grid.reduce((t, m) => t + (s.month.meters[m.id]?.kwh ?? 0), 0);
-    return all > 1 ? Math.round((off / all) * 100) : null;
-  });
+  // This month, the share billed off-peak (none with a single price).
+  const offShare = $derived(offPeakShare(s));
 
   // Learned from the last week: off-peak hours, typical day, night floor.
   let tariff = $state(null);
