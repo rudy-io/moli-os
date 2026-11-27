@@ -20,6 +20,54 @@ use crate::vacuum;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DeviceFile {
     pub devices: Vec<TuyaDevice>,
+    /// Tap-to-Run scenes from the cloud project, shown as order-only
+    /// devices. No local key, no data point: they are triggered through
+    /// Tuya's cloud, like the app does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenes: Vec<Scene>,
+}
+
+/// A scene the cloud triggers on Moli's behalf (a Smart Life routine).
+/// `space` is the cloud's space id (a home in the app); only the id and the
+/// name are filed in `tuya.json` (they are not credentials). `home` is kept
+/// as an alias so a file written before the v2.0 API still loads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Scene {
+    pub id: String,
+    pub name: String,
+    #[serde(alias = "home")]
+    pub space: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+}
+
+impl Scene {
+    /// A scene as a device of the house: one point to trigger it, no state
+    /// to read (a scene has no on/off), and no local key to store.
+    #[must_use]
+    pub fn device(&self, instance: &InstanceId) -> Device {
+        Device {
+            id: DeviceId::new(instance, &format!("scene-{}", self.id)),
+            instance: instance.clone(),
+            native_name: self.name.trim().into(),
+            manufacturer: Some("Tuya".into()),
+            model: Some("Tap-to-Run".into()),
+            description: None,
+            native_room: self.room.as_deref().map(Into::into),
+            members: Vec::new(),
+            points: vec![PointSpec {
+                key: "trigger".into(),
+                label: moli_i18n::tr!("pilotes.tuya.declenchement").into(),
+                kind: Kind::Binary,
+                access: Access {
+                    read: false,
+                    write: true,
+                },
+                unit: None,
+                semantic: Semantic::Action,
+            }],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -897,5 +945,23 @@ mod tests {
                 .encode(false, &Value::Int(1)),
             None
         );
+    }
+
+    #[test]
+    fn a_scene_is_an_order_only_device() {
+        let scene = Scene {
+            id: "scene-1".into(),
+            name: "TV".into(),
+            space: "42".into(),
+            room: Some("Salon".into()),
+        };
+        let device = scene.device(&InstanceId::from("tuya"));
+        assert_eq!(device.native_room.as_deref(), Some("Salon"));
+        assert_eq!(device.points.len(), 1);
+        let point = &device.points[0];
+        assert_eq!(&*point.key, "trigger");
+        assert!(!point.access.read && point.access.write);
+        assert_eq!(point.kind, Kind::Binary);
+        assert_eq!(point.semantic, Semantic::Action);
     }
 }

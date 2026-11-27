@@ -5,6 +5,16 @@
 2. **Avec un projet cloud** (sans HA) : ses clés (Access ID, Access Secret) données sur la page
    Système (code demandé), `cloud_region` dans les options du pilote. Contrôle sans secret :
    `moli-os tuya import --cloud --summary`, puis l'import : `moli-os tuya import --cloud`.
+   Pour les routines Smart Life (télécommande infrarouge de la télé, par exemple), autoriser
+   aussi **IoT Core** dans le projet Tuya (produit qui contient `Scene Linkage Rules` :
+   `GET /v2.0/cloud/scene/rule` et `POST /v2.0/cloud/scene/rule/{rule_id}/actions/trigger`).
+   Dans la liste des produits de la console, chercher « IoT Core » et non « scene » : les
+   produits dont le nom contient « Scene Linkage » sont les anciennes API dépréciées, et
+   `General Scene Template` est un autre produit. Sans IoT Core, l'import des appareils marche mais
+   aucune scène n'est listée (code Tuya `28841105`). Vérifier alors `moli-os tuya scenes`
+   (identifiants et noms seulement, tous les espaces du projet ; `--space ID` pour un seul,
+   `--home` restant un alias), relancer l'import, redémarrer Moli, puis déclencher une scène
+   de test avec une personne présente.
 3. **Par Home Assistant** : contrôle sans secret
    `docker exec -i homeassistant python3 - --summary < tuya-export.py`, puis l'import (clés
    jamais affichées) : `… python3 - < tuya-export.py | docker exec -i moli-os /moli-os tuya import`.

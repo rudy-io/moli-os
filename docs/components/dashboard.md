@@ -79,6 +79,11 @@ flottant : une carte détachée du bord) et **l'ordre** des onglets (flèches mo
 place d'origine après ceux qu'on a rangés. Retenu par écran (`maison-menu` dans le navigateur) ;
 sans choix, l'écran prend le `menu` de `home.json`, sinon le menu classique à gauche.
 
+Dans l'Atelier, un point d'**action** (une routine Tap-to-Run, par exemple) s'affiche en bouton
+sur la face de la carte : un appui envoie une seule fois l'ordre au hub, sans interrupteur ni
+état à lire. Le sens `action` est déclaré par le pilote ; il passe par la garde et le journal
+comme n'importe quel ordre.
+
 ## La mise en page de la maison : `data/home.json`
 
 Servie telle quelle par `/api/home` depuis le dossier de données (`data/home.json`, écrite à

@@ -13,6 +13,7 @@
   const flash = $derived(hub.changed[id]);
   const writable = $derived(pointCanWrite(device, point));
   const kind = $derived(point.kind.type);
+  const action = $derived(writable && kind === 'binary' && point.semantic === 'action');
   let draft = $state(null);
   const textRequest = $derived(textPointCommand(device, point, draft, pending));
 
@@ -43,85 +44,89 @@
 </script>
 
 <div class="point" class:big class:pending>
-  <span class="label">{point.label}</span>
-
-  {#if writable && kind === 'binary'}
-    <button
-      class="switch"
-      role="switch"
-      aria-checked={value === true}
-      aria-label={point.label}
-      disabled={pending}
-      onclick={() => submit(!(value === true))}
-    >
-      <span class="knob"></span>
-    </button>
-  {:else if writable && kind === 'enum'}
-    <select
-      value={value ?? ''}
-      disabled={pending}
-      aria-label={point.label}
-      onchange={(e) => submit(e.currentTarget.value)}
-    >
-      {#if value == null}<option value="" disabled>—</option>{/if}
-      {#each point.kind.values as v (v)}
-        <option value={v}>{v}</option>
-      {/each}
-    </select>
-  {:else if writable && kind === 'numeric' && point.semantic === 'brightness'}
-    <span class="numeric">
-      <input
-        type="range"
-        class="slider"
-        min={point.kind.min ?? 0}
-        max={point.kind.max ?? 100}
-        step="any"
-        value={value ?? 0}
-        disabled={pending}
-        aria-label={point.label}
-        onchange={submitNumber}
-      />
-      <span class="unit num">{value == null ? '—' : Math.round(value)}%</span>
-    </span>
-  {:else if writable && kind === 'numeric'}
-    <span class="numeric">
-      <input
-        type="number"
-        class="num"
-        value={value ?? ''}
-        min={point.kind.min}
-        max={point.kind.max}
-        step={point.kind.step ?? 'any'}
-        disabled={pending}
-        aria-label={point.label}
-        onchange={submitNumber}
-      />
-      <span class="unit">{unitOf(point)}</span>
-    </span>
-  {:else if writable && kind === 'text'}
-    <form class="text-editor" data-unsaved={draft !== null ? '' : undefined} onsubmit={submitText}>
-      <input
-        type="text"
-        value={draft ?? value ?? ''}
-        maxlength="8000"
-        aria-label={point.label}
-        disabled={pending}
-        oninput={(e) => (draft = e.currentTarget.value)}
-      />
-      <button type="submit" disabled={!textRequest}>{t('systeme.appareil.enregistrer')}</button>
-    </form>
+  {#if action}
+    <button class="action-button" disabled={pending} onclick={() => submit(true)}>{point.label}</button>
   {:else}
-    {#key flash}
+    <span class="label">{point.label}</span>
+
+    {#if writable && kind === 'binary'}
       <button
-        class="value num"
-        class:alarm={isAlarm(point, value)}
-        class:flash
-        onclick={() => (hub.chart = id)}
-        title={sample ? t('systeme.point.releve', { date: new Date(sample.ts).toLocaleString(locale()) }) : t('systeme.point.pas_de_releve')}
+        class="switch"
+        role="switch"
+        aria-checked={value === true}
+        aria-label={point.label}
+        disabled={pending}
+        onclick={() => submit(!(value === true))}
       >
-        {formatValue(point, value)}{#if unitOf(point) && value != null}<span class="unit">{unitOf(point)}</span>{/if}
+        <span class="knob"></span>
       </button>
-    {/key}
+    {:else if writable && kind === 'enum'}
+      <select
+        value={value ?? ''}
+        disabled={pending}
+        aria-label={point.label}
+        onchange={(e) => submit(e.currentTarget.value)}
+      >
+        {#if value == null}<option value="" disabled>—</option>{/if}
+        {#each point.kind.values as v (v)}
+          <option value={v}>{v}</option>
+        {/each}
+      </select>
+    {:else if writable && kind === 'numeric' && point.semantic === 'brightness'}
+      <span class="numeric">
+        <input
+          type="range"
+          class="slider"
+          min={point.kind.min ?? 0}
+          max={point.kind.max ?? 100}
+          step="any"
+          value={value ?? 0}
+          disabled={pending}
+          aria-label={point.label}
+          onchange={submitNumber}
+        />
+        <span class="unit num">{value == null ? '—' : Math.round(value)}%</span>
+      </span>
+    {:else if writable && kind === 'numeric'}
+      <span class="numeric">
+        <input
+          type="number"
+          class="num"
+          value={value ?? ''}
+          min={point.kind.min}
+          max={point.kind.max}
+          step={point.kind.step ?? 'any'}
+          disabled={pending}
+          aria-label={point.label}
+          onchange={submitNumber}
+        />
+        <span class="unit">{unitOf(point)}</span>
+      </span>
+    {:else if writable && kind === 'text'}
+      <form class="text-editor" data-unsaved={draft !== null ? '' : undefined} onsubmit={submitText}>
+        <input
+          type="text"
+          value={draft ?? value ?? ''}
+          maxlength="8000"
+          aria-label={point.label}
+          disabled={pending}
+          oninput={(e) => (draft = e.currentTarget.value)}
+        />
+        <button type="submit" disabled={!textRequest}>{t('systeme.appareil.enregistrer')}</button>
+      </form>
+    {:else}
+      {#key flash}
+        <button
+          class="value num"
+          class:alarm={isAlarm(point, value)}
+          class:flash
+          onclick={() => (hub.chart = id)}
+          title={sample ? t('systeme.point.releve', { date: new Date(sample.ts).toLocaleString(locale()) }) : t('systeme.point.pas_de_releve')}
+        >
+          {formatValue(point, value)}{#if unitOf(point) && value != null}<span class="unit">{unitOf(point)}</span>{/if}
+        </button>
+      {/key}
+    {/if}
   {/if}
 </div>
 
@@ -180,6 +185,21 @@
   .pending {
     opacity: 0.6;
   }
+  .action-button {
+    width: 100%;
+    min-height: 32px;
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius);
+    background: var(--sun);
+    color: #161512;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .action-button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .switch {
     position: relative;
     width: 42px;
@@ -208,6 +228,7 @@
   .switch[aria-checked='true'] .knob {
     transform: translateX(18px);
   }
+  .action-button:focus-visible,
   .switch:focus-visible,
   select:focus-visible,
   input:focus-visible {

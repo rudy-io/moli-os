@@ -106,6 +106,26 @@
   ses noms d'appareil ; Moli redémarré charge les 43. Puis une prise neuve (LSC avec mesure),
   ajoutée dans l'application Smart Life et récupérée par `--cloud` : en ligne dans Moli au
   redémarrage, commandée en local (marche, arrêt), sans Home Assistant.
+- **Routines Smart Life (Tap-to-Run)** : avec le produit **IoT Core** autorisé dans le projet cloud
+  (chercher « IoT Core » dans la liste des produits, pas « scene » : c'est lui qui contient
+  les API `Scene Linkage Rules`). Ces API sont `GET /v2.0/cloud/scene/rule` et
+  `POST /v2.0/cloud/scene/rule/{rule_id}/actions/trigger` ; les anciennes API
+  `homes/…/scenes` sont dépréciées. `moli-os tuya scenes [--space ID]` liste les identifiants et
+  les noms (aucun secret, ni nom ni adresse de la maison), en parcourant tous les espaces du
+  projet ; `--home` reste un alias. `moli-os tuya import --cloud` range les scènes activées dans
+  `tuya.json` sous `scenes`, avec leur `space` (un fichier écrit avec `home` se lit encore).
+  Chaque scène devient un appareil du pilote avec un seul point `trigger` (binaire, écriture
+  seule, sens `Action`, affiché en bouton dans l'Atelier) : l'ordre passe par le hub, donc par la
+  garde et le journal, et un automatisme écrit
+  par un agent reste un brouillon jusqu'à validation humaine. Seul `trigger = true` est accepté,
+  et aucune autre URL n'est essayée après un premier envoi (une routine qui aurait démarré alors
+  que la réponse est perdue ne doit pas jouer deux fois). Le `room` attribué à la main est
+  conservé aux réimports ; si le produit n'est pas autorisé (code `28841105`), l'import des
+  appareils continue et les scènes déjà rangées restent. Une liste partielle ne supprime rien et
+  l'import affiche le motif d'une indisponibilité. **Vérifié en vrai** : avec IoT Core
+  activé, les routines ont été listées, importées, puis une routine de télécommande IR a été
+  déclenchée une seule fois depuis un ordre humain du tableau de bord ; un ordre envoyé par un
+  agent a été retenu par la garde, puis expiré sans effet.
 - Reste : la version 3.1 n'est pas gérée ; une sonde sur pile
   ne répond pas à la requête d'état : sa valeur arrive à son prochain envoi.
 - Limites des sous-appareils en local : la disponibilité est celle de la passerelle (un

@@ -23,8 +23,8 @@ after(async () => {
   if (storage) Object.defineProperty(globalThis, 'localStorage', storage);
 });
 
-function show(kind, write = true, online = true, value = 'Zone A') {
-  const point = { key: 'parameter', label: 'Parameter', semantic: 'other', kind, access: { read: true, write } };
+function show(kind, write = true, online = true, value = 'Zone A', semantic = 'other', label = 'Parameter') {
+  const point = { key: 'parameter', label, semantic, kind, access: { read: true, write } };
   const device = { id: 'fixture:zone', online, state: { parameter: { value } } };
   return render(Point, { props: { device, point } }).body;
 }
@@ -36,6 +36,19 @@ test('writable text has an explicit save form with an escaped current value', ()
   assert.match(html, /type="submit"/);
   assert.match(html, /Enregistrer/);
   assert.doesNotMatch(html, /<script>synthetic/);
+});
+
+test('a one-shot action is a button that sends the order, not a switch', () => {
+  const html = show({ type: 'binary' }, true, true, undefined, 'action', 'Déclencher');
+  assert.match(html, /class="[^"]*action-button/);
+  assert.match(html, />Déclencher<\/button>/);
+  assert.doesNotMatch(html, /role="switch"|aria-checked|class="value/);
+});
+
+test('a pending action cannot be sent twice', () => {
+  hub.pending = { 'fixture:zone/parameter': true };
+  const html = show({ type: 'binary' }, true, true, undefined, 'action');
+  assert.match(html, /class="[^"]*action-button[^"]*"[^>]*disabled/);
 });
 
 test('read-only and offline points render values without command controls', () => {

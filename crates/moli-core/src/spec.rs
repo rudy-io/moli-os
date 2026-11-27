@@ -179,6 +179,10 @@ pub enum Semantic {
     /// An order to a machine at work (pause or cancel a print): an agent
     /// asking gets a human's approval first.
     Control,
+    /// A one-shot action with no state to read (trigger a scene, run a
+    /// routine): writing it asks for the action, it does not switch a state.
+    /// A driver that knows the point declares it; never inferred from a name.
+    Action,
     /// A lock's state (true: locked).
     Lock,
     /// Something the house watches says it is not well (binary, true:
@@ -367,6 +371,16 @@ mod tests {
         );
         // No magic key: a point named so is not an alert until it says it is.
         assert_eq!(Semantic::infer("alert", None), Semantic::Other);
+    }
+
+    #[test]
+    fn action_is_declared_never_guessed() {
+        assert_eq!(
+            serde_json::to_string(&Semantic::Action).unwrap(),
+            "\"action\""
+        );
+        assert_eq!(Semantic::infer("action", None), Semantic::Other);
+        assert_eq!(Semantic::infer("trigger", None), Semantic::Other);
     }
 
     #[test]

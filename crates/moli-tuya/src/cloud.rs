@@ -1,14 +1,15 @@
 //! The Tuya cloud, for what never listens on the LAN: Wi-Fi battery sensors
 //! (doors, leaks) that wake, tell the cloud and sleep again, and devices
-//! behind a Tuya gateway. Read-only.
+//! behind a Tuya gateway. Read-only, except the Tap-to-Run scenes a person
+//! asks to trigger.
 //!
 //! The household's own cloud project (Access ID and Secret, from the vault
 //! through `/run/secrets/tuya-cloud`): states from the signed OpenAPI at
 //! start and every half hour, changes as they happen from the project's
-//! message service (Pulsar over a websocket). Nothing is sent to the cloud
-//! but these reads.
+//! message service (Pulsar over a websocket). The only write is a scene
+//! trigger, through the Scene Linkage Rules API.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,11 +22,11 @@ use moli_core::Value;
 use moli_net::ws::WebSocket;
 use ring::digest::{SHA256, digest};
 use serde_json::Value as Json;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::device::Up;
-use crate::model::TuyaDevice;
+use crate::model::{Scene, TuyaDevice};
 use crate::protocol::{ecb_decrypt, gcm_open, hmac_sha256, random};
 
 /// Categories that sleep on battery: the cloud is their only voice.
@@ -163,9 +164,36 @@ struct Api {
 }
 
 impl Api {
+    fn new(keys: Keys, region: Region) -> Self {
+        Self {
+            keys,
+            region,
+            token: None,
+        }
+    }
+
     async fn call(&mut self, path: &str) -> anyhow::Result<Json> {
         let token = self.token().await?;
-        self.request(path, Some(&token)).await
+        self.request(
+            Method::GET,
+            path,
+            b"",
+            Some(&token),
+            Duration::from_secs(10),
+        )
+        .await
+    }
+
+    /// A scene order has the hub's deadline: neither the token nor the POST
+    /// may outlive it, or a forgotten order could start a scene much later.
+    async fn post(&mut self, path: &str, deadline: Instant) -> anyhow::Result<Json> {
+        let token = self.token().await?;
+        ensure!(Instant::now() < deadline, "Tuya: scene order too late");
+        let budget = deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_secs(10));
+        self.request(Method::POST, path, b"", Some(&token), budget)
+            .await
     }
 
     async fn token(&mut self) -> anyhow::Result<String> {
@@ -174,21 +202,38 @@ impl Api {
         {
             return Ok(token.clone());
         }
-        let result = self.request("/v1.0/token?grant_type=1", None).await?;
+        let result = self
+            .request(
+                Method::GET,
+                "/v1.0/token?grant_type=1",
+                b"",
+                None,
+                Duration::from_secs(10),
+            )
+            .await?;
         let token = result["access_token"]
             .as_str()
             .context("no access token")?
             .to_owned();
-        // Renewed five minutes early (Tuya gives two hours).
+        // Renewed five minutes early (Tuya gives two hours). A silly value
+        // from the cloud must not overflow the timer nor spin every call.
         let life = result["expire_time"]
             .as_u64()
             .unwrap_or(7200)
-            .saturating_sub(300);
+            .saturating_sub(300)
+            .clamp(60, 24 * 3600);
         self.token = Some((token.clone(), Instant::now() + Duration::from_secs(life)));
         Ok(token)
     }
 
-    async fn request(&self, path: &str, token: Option<&str>) -> anyhow::Result<Json> {
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: &[u8],
+        token: Option<&str>,
+        budget: Duration,
+    ) -> anyhow::Result<Json> {
         let t = u64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -200,30 +245,27 @@ impl Api {
             token,
             t,
             &nonce,
-            &string_to_sign("GET", b"", path),
+            &string_to_sign(method.as_str(), body, path),
         );
+        let kind = method.to_string();
         let mut builder = Request::builder()
-            .method(Method::GET)
+            .method(method)
             .uri(path)
             .header("client_id", &self.keys.id)
             .header("sign", signature)
             .header("t", t.to_string())
             .header("nonce", nonce)
-            .header("sign_method", "HMAC-SHA256");
+            .header("sign_method", "HMAC-SHA256")
+            .header("content-type", "application/json");
         if let Some(token) = token {
             builder = builder.header("access_token", token);
         }
-        let request = builder.body(Full::new(moli_net::Body::new()))?;
-        let (_, body) = moli_net::web(
-            self.region.api,
-            443,
-            true,
-            request,
-            Duration::from_secs(10),
-            1 << 20,
-        )
-        .await?;
-        let answer: Json = serde_json::from_slice(&body).context("Tuya: not JSON")?;
+        let request = builder.body(Full::new(moli_net::Body::copy_from_slice(body)))?;
+        let (status, body) = moli_net::web(self.region.api, 443, true, request, budget, 1 << 20)
+            .await
+            .with_context(|| format!("Tuya HTTP request failed ({kind} {path})"))?;
+        let answer: Json = serde_json::from_slice(&body)
+            .with_context(|| format!("Tuya HTTP {status}: not JSON"))?;
         if answer["success"] != Json::Bool(true) {
             bail!(
                 "Tuya {}: {}",
@@ -233,6 +275,286 @@ impl Api {
         }
         Ok(answer["result"].clone())
     }
+}
+
+/// An order waiting for the cloud to trigger one Tap-to-Run scene.
+pub(crate) struct Trigger {
+    pub scene: Scene,
+    pub done: oneshot::Sender<Result<(), String>>,
+    /// When the caller stopped waiting: a forgotten cloud order must never
+    /// start a scene later (a TV turning on hours after a refused order).
+    pub deadline: Instant,
+}
+
+/// The Tap-to-Run rules of the cloud project, without any secret. `space`
+/// comes from `moli-os tuya scenes`; when absent, the spaces of the project
+/// are found from the space list. Every space and every page is visited, so
+/// a project with several homes does not silently leave one out.
+pub async fn scenes(
+    keys: Keys,
+    region: Region,
+    space: Option<String>,
+) -> anyhow::Result<Vec<Scene>> {
+    let mut api = Api::new(keys, region);
+    let spaces = match space {
+        Some(space) => {
+            valid_space(&space)?;
+            vec![space]
+        }
+        None => space_ids(&mut api).await?,
+    };
+    let mut scenes = Vec::new();
+    let mut seen = HashSet::new();
+    for space in spaces {
+        valid_space(&space)?;
+        // The rules are paged; a project cannot hold more than 100 scenes
+        // per space, but a page may be smaller than that.
+        for page in 1..=100 {
+            let path = scene_path(&space, page);
+            let answer = api
+                .call(&path)
+                .await
+                .with_context(|| format!("Tuya: scene rules, page {page}, space {space}"))?;
+            let more = scene_more(&answer)?;
+            scenes.extend(
+                scene_page(&answer, &space)
+                    .into_iter()
+                    .filter(|scene| seen.insert(scene.id.clone())),
+            );
+            if !more {
+                break;
+            }
+            ensure!(page < 100, "Tuya: more than 100 pages of scenes");
+        }
+    }
+    Ok(scenes)
+}
+
+/// A space id goes in a URL: numbers only, as Tuya documents them.
+fn valid_space(space: &str) -> anyhow::Result<()> {
+    ensure!(
+        !space.is_empty() && space.len() <= 32 && space.bytes().all(|b| b.is_ascii_digit()),
+        "Tuya: a space id is numeric"
+    );
+    Ok(())
+}
+
+/// A rule id goes in a signed URL path. Nothing from the cloud or from a
+/// hand-edited file may turn that path into a different API call.
+fn valid_rule(id: &str) -> anyhow::Result<()> {
+    ensure!(
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+        "Tuya: invalid scene id"
+    );
+    Ok(())
+}
+
+/// One page of rules, with the query sorted as Tuya signs it.
+fn scene_path(space: &str, page: u32) -> String {
+    format!("/v2.0/cloud/scene/rule?page_no={page}&page_size=100&space_id={space}&type=scene")
+}
+
+/// `Api::call` already returns Tuya's `result`: a malformed pagination flag
+/// must fail, not silently truncate the list.
+fn scene_more(result: &Json) -> anyhow::Result<bool> {
+    result["has_more"]
+        .as_bool()
+        .context("Tuya: scene list has no pagination flag")
+}
+
+/// The root spaces of the project. Tuya's example uses camelCase query keys
+/// while its table names them in snake_case: try the documented form first,
+/// then the example's, following the cursor until the list is exhausted.
+async fn space_ids(api: &mut Api) -> anyhow::Result<Vec<String>> {
+    let mut problem = None;
+    for key in ["page_size", "pageSize"] {
+        let mut ids = Vec::new();
+        let mut seen = HashSet::new();
+        let mut last = String::new();
+        let mut failure = None;
+        for _ in 0..100 {
+            let cursor = if key == "page_size" {
+                "last_row_key"
+            } else {
+                "lastRowKey"
+            };
+            let mut path = format!("/v2.0/cloud/space/child?{key}=100");
+            if !last.is_empty() {
+                let _ = write!(path, "&{cursor}={}", query_value(&last));
+            }
+            match api.call(&path).await {
+                Ok(answer) => {
+                    let (page, next) = space_page(&answer);
+                    let mut added = false;
+                    for id in page {
+                        if valid_space(&id).is_ok() && seen.insert(id.clone()) {
+                            ids.push(id);
+                            added = true;
+                        }
+                    }
+                    if next.is_empty() || next == last || !added {
+                        break;
+                    }
+                    last = next;
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, path, "tuya cloud: no space list");
+                    failure = Some(e.context(format!("Tuya: space list ({path})")));
+                    break;
+                }
+            }
+        }
+        if !ids.is_empty() {
+            return Ok(ids);
+        }
+        problem = failure.or(Some(anyhow::anyhow!(
+            "Tuya: no usable space in the project"
+        )));
+    }
+    Err(problem.unwrap_or_else(|| anyhow::anyhow!("Tuya: no space in the project")))
+}
+
+/// An opaque cursor from the cloud is encoded before entering the signed
+/// query: it must not be able to add a parameter or change the request.
+fn query_value(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+/// The ids in either shape the space list takes (`data` or `list`, numbers
+/// or strings), with the cursor for the next page.
+fn space_page(result: &Json) -> (Vec<String>, String) {
+    let list = result["data"]
+        .as_array()
+        .or_else(|| result["list"].as_array());
+    let mut out = Vec::new();
+    for item in list.into_iter().flatten() {
+        let id = item
+            .as_i64()
+            .map(|n| n.to_string())
+            .or_else(|| item.as_u64().map(|n| n.to_string()))
+            .or_else(|| item.as_str().map(str::to_owned))
+            .or_else(|| item["id"].as_i64().map(|n| n.to_string()))
+            .or_else(|| item["id"].as_str().map(str::to_owned))
+            .or_else(|| item["space_id"].as_i64().map(|n| n.to_string()))
+            .or_else(|| item["space_id"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if !id.is_empty() && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    let next = result["last_row_key"]
+        .as_i64()
+        .map(|n| n.to_string())
+        .or_else(|| result["last_row_key"].as_u64().map(|n| n.to_string()))
+        .or_else(|| result["last_row_key"].as_str().map(str::to_owned))
+        .unwrap_or_default();
+    (out, next)
+}
+
+/// Text from the cloud is display, not markup: no control characters, and
+/// bounded to one readable line (also used by the CLI).
+pub fn label(text: &str) -> String {
+    text.trim()
+        .chars()
+        .take(128)
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
+/// The Tap-to-Run rules one page lists: only enabled scenes, with a safe id
+/// and a name. Automations are not triggers a person taps.
+fn scene_page(result: &Json, space: &str) -> Vec<Scene> {
+    result["list"]
+        .as_array()
+        .or_else(|| result.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            if s["type"].as_str().is_some_and(|kind| kind != "scene") {
+                return None;
+            }
+            if s["status"]
+                .as_str()
+                .is_some_and(|status| status != "enable")
+            {
+                return None;
+            }
+            let id = s["id"].as_str().or_else(|| s["rule_id"].as_str())?.trim();
+            if valid_rule(id).is_err() {
+                return None;
+            }
+            let name = label(s["name"].as_str().unwrap_or(id));
+            if name.is_empty() {
+                return None;
+            }
+            let reported = s["space_id"].as_str().unwrap_or(space);
+            let owner = if valid_space(reported).is_ok() {
+                reported
+            } else {
+                space
+            };
+            Some(Scene {
+                id: id.to_owned(),
+                name,
+                space: owner.to_owned(),
+                room: None,
+            })
+        })
+        .collect()
+}
+
+/// Triggers one scene, through an `Api` that keeps its token between orders.
+pub(crate) async fn serve_triggers(
+    keys: Keys,
+    region: Region,
+    mut orders: mpsc::Receiver<Trigger>,
+) {
+    let mut api = Api::new(keys, region);
+    while let Some(order) = orders.recv().await {
+        let deadline = order.deadline;
+        let result = if Instant::now() >= deadline {
+            Err(moli_i18n::tr!("pilotes.tuya.scene_trop_tard"))
+        } else {
+            // The hub stops waiting after a few seconds. Cancel the whole
+            // exchange at that point: a POST still in flight may or may not
+            // have reached Tuya, but nothing may start after the deadline.
+            match tokio::time::timeout_at(deadline, trigger_with(&mut api, &order.scene, deadline))
+                .await
+            {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err(moli_i18n::tr!("pilotes.tuya.scene_trop_tard")),
+            }
+        };
+        if order.done.send(result).is_err() {
+            tracing::debug!("tuya: the caller left before the scene answer");
+        }
+    }
+}
+
+async fn trigger_with(api: &mut Api, scene: &Scene, deadline: Instant) -> anyhow::Result<()> {
+    valid_rule(&scene.id)?;
+    // Never try another path: a scene that really started but whose answer
+    // was lost must not be started twice (a TV routine may toggle).
+    let path = format!("/v2.0/cloud/scene/rule/{}/actions/trigger", scene.id);
+    let answer = api.post(&path, deadline).await?;
+    ensure!(
+        answer == Json::Bool(true),
+        "Tuya: unexpected trigger answer ({answer}) — the scene may have started; not retried"
+    );
+    Ok(())
 }
 
 /// One device's readings as Moli values (unknown codes skipped). Never a
@@ -342,11 +664,7 @@ const PAGE: usize = 50;
 /// local key and data points, as `moli-os tuya import` takes them: no Home
 /// Assistant needed. One list, then one data model per device.
 pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportFile> {
-    let mut api = Api {
-        keys,
-        region,
-        token: None,
-    };
+    let mut api = Api::new(keys.clone(), region);
     let mut raws: Vec<Json> = Vec::new();
     let mut last = String::new();
     loop {
@@ -387,16 +705,25 @@ pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportF
         };
         models.push(model);
     }
-    Ok(crate::import::from_cloud(&raws, &models))
+    let (scenes, scene_error) = match scenes(keys, region, None).await {
+        Ok(scenes) => (scenes, None),
+        Err(e) => {
+            // A project can read devices but not Tap-to-Run scenes: the
+            // device import still works, and filed scenes stay untouched.
+            let reason = format!("{e:#}");
+            tracing::warn!(error = %reason, "tuya cloud: no scenes listed (filed scenes kept)");
+            (Vec::new(), Some(reason))
+        }
+    };
+    let mut import = crate::import::from_cloud(&raws, &models);
+    import.scenes = scenes;
+    import.scene_error = scene_error;
+    Ok(import)
 }
 
 /// Reads the states, then follows the changes, for ever (reconnecting).
 pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
-    let mut api = Api {
-        keys,
-        region,
-        token: None,
-    };
+    let mut api = Api::new(keys, region);
     let mut pause = Duration::from_secs(30);
     loop {
         match follow(&mut api, &devices, &up).await {
@@ -645,6 +972,88 @@ mod tests {
                 .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
         );
         assert_ne!(a, b, "the token is part of a business request's signature");
+    }
+
+    #[test]
+    fn a_scene_trigger_is_signed_as_a_post() {
+        let path = "/v2.0/cloud/scene/rule/scene-1/actions/trigger";
+        let to_sign = string_to_sign("POST", b"", path);
+        assert!(to_sign.starts_with("POST\n"));
+        assert!(to_sign.ends_with(&format!("\n\n{path}")));
+        assert_ne!(to_sign, string_to_sign("GET", b"", path));
+    }
+
+    #[test]
+    fn a_scene_query_is_sorted_as_tuya_signs_it() {
+        assert_eq!(
+            scene_path("15000001", 2),
+            "/v2.0/cloud/scene/rule?page_no=2&page_size=100&space_id=15000001&type=scene"
+        );
+        assert!(valid_space("15000001").is_ok());
+        assert!(valid_space("?type=automation").is_err());
+    }
+
+    #[test]
+    fn scene_page_reads_tuya_rules() {
+        // `Api::call` gives the `result` object, not the whole envelope.
+        let result = serde_json::json!({
+            "list": [
+                { "type": "scene", "id": "scene-1", "name": "TV", "status": "enable", "space_id": "15000001" },
+                { "type": "automation", "id": "rule-1", "name": "At home", "status": "enable" },
+                { "type": "scene", "id": "scene-2", "name": "Off", "status": "disable" },
+                { "type": "scene", "id": "no id", "name": "Bad\nname", "status": "enable" },
+                { "type": "scene", "id": "?../other", "name": "Injected", "status": "enable" },
+                { "type": "scene", "name": "No id" }
+            ],
+            "has_more": false
+        });
+        let scenes = scene_page(&result, "15000001");
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].id, "scene-1");
+        assert_eq!(scenes[0].name, "TV");
+        assert_eq!(scenes[0].space, "15000001");
+        assert!(scene_more(&result).is_ok_and(|more| !more));
+        assert!(scene_more(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn a_rule_id_cannot_turn_a_signed_path_into_another_call() {
+        assert!(valid_rule("icITIJF32qeiohT7").is_ok());
+        for id in ["?", "a/b", "../x", "a b", &"x".repeat(129)] {
+            assert!(valid_rule(id).is_err(), "{id} was accepted");
+        }
+    }
+
+    #[test]
+    fn labels_are_one_bounded_line() {
+        assert_eq!(label("  TV\n\rOK\x1b[31m "), "TVOK[31m");
+        assert_eq!(label(&"x".repeat(200)).len(), 128);
+    }
+
+    #[test]
+    fn a_space_cursor_cannot_add_query_parameters() {
+        assert_eq!(query_value("a+b/c="), "a%2Bb%2Fc%3D");
+        assert_eq!(query_value("15_000-3.x~"), "15_000-3.x~");
+    }
+
+    #[test]
+    fn space_page_reads_the_ids_and_the_cursor() {
+        let result = serde_json::json!({
+            "data": [15_000_002, 15_000_003], "last_row_key": 15_000_003, "page_size": 100
+        });
+        assert_eq!(
+            space_page(&result),
+            (
+                vec!["15000002".into(), "15000003".into()],
+                "15000003".into()
+            )
+        );
+        let result =
+            serde_json::json!({ "list": [{ "id": "15000004" }, { "space_id": 15_000_005 }] });
+        let (ids, next) = space_page(&result);
+        assert_eq!(ids, ["15000004", "15000005"]);
+        assert!(next.is_empty());
+        assert!(space_page(&serde_json::json!({})).0.is_empty());
     }
 
     #[test]
