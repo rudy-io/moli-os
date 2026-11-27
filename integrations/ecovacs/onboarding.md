@@ -23,6 +23,9 @@ Ecovacs requests verification, enter the code received by email. The script rest
 Moli after successful pairing. Check the robot's battery and state on
 the dashboard. Repeat pairing if the session is revoked.
 
-To enable movement controls, set `writable = true` and restart Moli. Commands
-go through the hub's machine controls and guard. Test with the robot in a
-neutral area and someone present, then return the robot to its original state.
+To enable movement controls and settings, set `writable = true` and restart
+Moli. Use the robot card on the home page for suction, cleaning mode, and
+mop water flow. The `clean_water_empty` and `dirty_water_full` points can
+trigger automations. Commands go through the hub's machine controls and guard.
+Test with the robot in a neutral area and someone present, then return the
+robot to its original state.

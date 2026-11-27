@@ -735,6 +735,24 @@ test('a fault is told in words and an unknown state keeps its own', () => {
   assert.match(html, /code 27/);
 });
 
+test('a robot with Ecovacs settings shows the current mode and water alarms', () => {
+  const points = [
+    ...robot(),
+    point('water_level', number(0, 50, 1)),
+    point('work_mode', enumeration('vacuum', 'mop', 'vacuum_and_mop')),
+  ];
+  const values = {
+    water_level: 29, work_mode: 'vacuum_and_mop', mop_attached: true,
+    clean_water_empty: true, dirty_water_full: true,
+  };
+  const html = show('VacuumCard', points, values);
+  assert.match(html, /<select[\s>]/);
+  assert.match(inputs(html)[0], /min="0" max="50" step="1" value="29"/);
+  assert.match(html, /Réservoir d’eau propre vide|Clean water tank empty/);
+  assert.match(html, /Réservoir d’eau sale plein|Dirty water tank full/);
+  assert.doesNotMatch(show('VacuumCard', points, values, { online: false }), /<select[\s>]|type="range"/);
+});
+
 const valvePoints = (setpointWrite = true, modeWrite = true) => [
   point('occupied_heating_setpoint', { ...number(4, 35, 0.5) }, setpointWrite, 'temperature'),
   point('local_temperature', { type: 'numeric' }, false, 'temperature'),

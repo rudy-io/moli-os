@@ -1,0 +1,6 @@
+{
+  "getSpeed": { "data": { "speed": 1 } },
+  "getWaterInfo": { "data": { "customAmount": 29, "enable": 1, "sweepType": 1 } },
+  "getWorkMode": { "data": { "mode": 0 } },
+  "getError": { "data": { "code": [] } }
+}

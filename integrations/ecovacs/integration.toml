@@ -20,3 +20,6 @@ options = ["writable", "poll_seconds"]
 [origin]
 reused = "Protocol reference: DeebotUniverse/client.py and Home Assistant issue #194725. Independent Rust implementation."
 author = "agent"
+
+[[fixture]]
+file = "fixtures/x8-settings.json"

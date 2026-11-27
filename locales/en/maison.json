@@ -270,6 +270,7 @@
   "maison.robot.aspiration.strong": "Strong",
   "maison.robot.aspiration.auto": "Auto",
   "maison.robot.aspiration.max": "Max",
+  "maison.robot.aspiration.max_plus": "Max+",
   "maison.robot.surface": "{area} m²",
   "maison.robot.duree": "{minutes} min",
   "maison.robot.probleme": "Problem: {detail}",

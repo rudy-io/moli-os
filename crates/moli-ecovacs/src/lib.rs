@@ -1,6 +1,7 @@
 //! Deebot X8 PRO OMNI over the Ecovacs Italy cloud.
 
 mod cloud;
+mod settings;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Read as _, Write as _};
@@ -78,7 +79,7 @@ impl Ecovacs {
                         next_scan = Instant::now() + Duration::from_secs(900);
                     }
                     for (id, robot) in &mut robots {
-                        poll(ctx, &account, &session, id, robot).await;
+                        Box::pin(poll(ctx, &account, &session, id, robot)).await;
                     }
                 }
             }
@@ -237,6 +238,7 @@ fn points(writable: bool) -> Vec<PointSpec> {
     if writable {
         points.push(control("dock", tr!("ecovacs.dock"), false));
     }
+    points.extend(settings::points(writable));
     points
 }
 
@@ -256,10 +258,14 @@ async fn poll(
             Duration::from_secs(4),
         )
     };
-    let (battery, work, charge) = tokio::join!(
+    let (battery, work, charge, speed, mode, water, errors) = tokio::join!(
         request("getBattery"),
         request("getWorkState"),
-        request("getChargeState")
+        request("getChargeState"),
+        request("getSpeed"),
+        request("getWorkMode"),
+        request("getWaterInfo"),
+        request("getError")
     );
     let battery = body(battery);
     let work = body(work);
@@ -281,6 +287,14 @@ async fn poll(
         );
         ctx.set_state(id, "pause", Value::Bool(value == "paused"));
     }
+    settings::publish(
+        ctx,
+        id,
+        body(speed).as_ref(),
+        body(mode).as_ref(),
+        body(water).as_ref(),
+        body(errors).as_ref(),
+    );
 }
 
 fn body(result: anyhow::Result<CommandResult>) -> Option<Json> {
@@ -323,7 +337,7 @@ fn order_payload(key: &str, value: &Value) -> Option<(&'static str, Json)> {
         ("pause", Value::Bool(true)) => ("pause", json!({"type":""})),
         ("pause", Value::Bool(false)) => ("resume", json!({})),
         ("dock", Value::Bool(true)) => return Some(("charge", json!({"act":"go"}))),
-        _ => return None,
+        _ => return settings::order(key, value),
     };
     Some(("clean_V2", json!({"act":action, "content":content})))
 }
