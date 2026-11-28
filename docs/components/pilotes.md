@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, proxmox, helpers, profile
+kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, proxmox, helpers, calendar, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -1873,6 +1873,39 @@ Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et
 - **Rythme** : calendrier toutes les 6 h, jours recomptés toutes les 15 min.
 - **Tests** : `src/model.rs` (adresse, prochaine collecte par type, collecte remplacée, type
   inconnu, nom manquant dans la langue), `src/lib.rs` (adresse vérifiée, requêtes encodées).
+
+## `calendar` : les jours et les calendriers de la maison (`crates/moli-calendar`)
+
+- **Couvre** : le genre du jour (week-end, jours fériés français) et des calendriers iCalendar
+  déposés dans le dossier `data`, pour les automatismes qui ne tournent pas pareil un jour calme
+  (annonces plus tard le matin, programme de chauffage…). Rien ne sort de la maison.
+- **Jours fériés** (`src/holidays.rs`) : calculés sur place. Les 11 jours fériés nationaux, dont
+  le lundi de Pâques, l'Ascension et le lundi de Pentecôte (Pâques par l'algorithme anonyme
+  grégorien de Meeus) ; avec `alsace_moselle`, le Vendredi saint et la Saint-Étienne.
+- **Calendriers** (`src/ics.rs`) : un fichier `.ics` par calendrier (RFC 5545), lu à la journée.
+  `VEVENT` seulement (`VTIMEZONE`, `VALARM`… sautés) ; `SUMMARY`, `DTSTART` (date, heure UTC,
+  `TZID` ou flottante, lue dans `timezone`), `DTEND` ou `DURATION`, `STATUS:CANCELLED` écarté ;
+  lignes repliées recollées, texte déséchappé. Un événement compte pour chaque jour local qu'il
+  touche (fin exclue ; un événement qui finit à minuit ne déborde pas sur le lendemain ; une fin
+  égale au début compte pour ce jour, comme le pont de l'Ascension 2027 du calendrier scolaire).
+  Répétition : `RRULE:FREQ=YEARLY` (`INTERVAL`, `COUNT`, `UNTIL`) ; toute autre règle n'est pas
+  suivie (l'événement compte une fois, compté dans le journal `calendar read … unrepeated`).
+- **Configuration** : `alsace_moselle` (`false`), `timezone` (`Europe/Paris`), et des
+  `[[driver.options.calendar]]` : `id` (minuscules, chiffres, `_`, `-` ; pas `days`), `name`,
+  `file` (chemin relatif au dossier `data`, sans `..` : un fichier hors du dossier est refusé
+  avec les options), `quiet` (`false`).
+- **Points** (lecture seule). Appareil `<instance>:days` (« Jours ») : `weekend`, `holiday`,
+  `holiday_name` (traduit, vide sinon), `workday` (ni week-end ni férié), `quiet_day` (week-end,
+  férié, ou un événement aujourd'hui dans un calendrier `quiet` ; `null` un jour ouvré tant
+  qu'un calendrier `quiet` n'a jamais été lu). Un appareil `<instance>:<id>` par calendrier :
+  `on`, `event` (noms du jour), `next` (`AAAA-MM-JJ`), `next_event`, `next_days`.
+- **Rythme** : points recalculés chaque minute (ils changent à minuit) ; chaque fichier relu
+  quand sa date ou sa taille change. Absent ou illisible : avertissement du pilote ; un
+  calendrier jamais lu est hors ligne, un calendrier déjà lu garde ses événements.
+- **Tests** : `src/holidays.rs` (Pâques, jours de l'année, Alsace-Moselle), `src/ics.rs`
+  (calendrier scolaire réel, heures et fuseaux, durées, répétition annuelle, règle non suivie,
+  événement annulé, alarme imbriquée, ligne repliée, fichier quelconque), `src/lib.rs` (options,
+  chemins hors du dossier `data`, genre du jour, jour calme).
 
 ## `engie` : compte ENGIE Belgique (`crates/moli-engie`)
 

@@ -1,0 +1,27 @@
+[integration]
+id = "calendar"
+name = "Calendrier (jours fériés, calendriers .ics)"
+# Nothing on the network: the public holidays are worked out locally, the
+# calendars are iCalendar files put in the data folder by hand.
+brands = []
+models = []
+transport = "native"
+driver = "calendar"
+crate = "moli-calendar"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["calendar", "alsace_moselle", "timezone"]
+
+[origin]
+reused = "aucun code repris : jours fériés calculés (algorithme de Pâques de Meeus), lecture iCalendar (RFC 5545) écrite pour Moli, vérifiée sur le calendrier scolaire publié par l'Éducation nationale"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/zone-a.ics"

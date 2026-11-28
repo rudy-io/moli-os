@@ -1426,6 +1426,7 @@ const KINDS: &[&str] = &[
     "melcloud",
     "kasa",
     "recycleapp",
+    "calendar",
     "engie",
     "tapo",
     "lifx",
@@ -1784,6 +1785,10 @@ fn build_driver(
         "pushover" => configured_driver(config, moli_pushover::Pushover::new)?,
         "kasa" => configured_driver(config, moli_kasa::Kasa::new)?,
         "recycleapp" => configured_driver(config, moli_recycleapp::RecycleApp::new)?,
+        "calendar" => Arc::new(moli_calendar::Calendar::new(
+            config.options.clone().try_into().with_context(context)?,
+            data_dir,
+        )?),
         "engie" => configured_driver(config, moli_engie::Engie::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
         "alarm" => configured_driver(config, moli_alarm::AlarmDriver::new)?,
